@@ -32,9 +32,20 @@ function NetServiceLogo({ className }: { className?: string }) {
   );
 }
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type Field =
+  | { key: string; label: string; type: 'select';   options: string[]; fromConv?: string }
+  | { key: string; label: string; type: 'textarea'; fromConv?: string }
+  | { key: string; label: string; type: 'text' | 'email' | 'date'; fromConv?: string };
+
 // ─── Actions config ───────────────────────────────────────────────────────────
 
-const ACTIONS = [
+const ACTIONS: Array<{
+  id: string; label: string; desc: string;
+  icon: React.ElementType; color: string; bg: string; prefix: string;
+  fields: Field[];
+}> = [
   {
     id: 'ticket',
     label: 'Crear ticket',
