@@ -1,0 +1,92 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  html, body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    background-color: #F5F6FA;
+    color: #1A1D23;
+  }
+
+  :root {
+    --green:         #25D366;
+    --green-dark:    #128C7E;
+    --green-light:   #E8FBF0;
+    --green-bubble:  #DCF8C6;
+    --sidebar-bg:    #0D1117;
+    --sidebar-hover: #161B22;
+    --sidebar-active:#1C2128;
+    --sidebar-border:#21262D;
+    --surface:       #FFFFFF;
+    --surface-muted: #F5F6FA;
+    --ink:           #1A1D23;
+    --ink-muted:     #6B7280;
+    --ink-subtle:    #9CA3AF;
+    --border:        #E8EAED;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 bg-green-500 hover:bg-green-600
+           active:bg-green-700 text-white font-medium rounded-xl px-4 py-2.5 text-sm
+           transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500 focus-visible:ring-offset-2;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 bg-white hover:bg-surface-muted
+           border border-border text-ink font-medium rounded-xl px-4 py-2.5 text-sm
+           transition-all duration-150 disabled:opacity-50
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500 focus-visible:ring-offset-2;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 text-ink-muted hover:text-ink hover:bg-surface-subtle
+           rounded-lg px-2.5 py-2 text-sm transition-all duration-150
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500;
+  }
+
+  .input {
+    @apply w-full px-3.5 py-2.5 bg-white border border-border rounded-xl text-sm text-ink
+           placeholder-ink-subtle shadow-inner-sm
+           transition-all duration-150
+           focus:outline-none focus:border-green-500 focus:ring-2 focus:ring-green-500/10;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium;
+  }
+
+  .card {
+    @apply bg-white rounded-2xl border border-border shadow-card;
+  }
+
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: #D1D5DB transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: #D1D5DB;
+    border-radius: 9999px;
+  }
+}
