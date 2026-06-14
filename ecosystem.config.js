@@ -17,9 +17,9 @@ module.exports = {
     {
       name: 'netservice-frontend',
       cwd: './apps/frontend',
-      script: 'node_modules/.bin/next',
+      script: 'node_modules/next/dist/bin/next',
       args: 'start -p 3000',
-      interpreter: 'none',
+      interpreter: 'node',
       env: {
         NODE_ENV: 'production',
         PORT: 3000,
