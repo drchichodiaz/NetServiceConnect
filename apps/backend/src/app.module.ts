@@ -18,6 +18,7 @@ import { AuditModule } from './audit/audit.module';
 import { StatsModule } from './stats/stats.module';
 import { QuickRepliesModule } from './quick-replies/quick-replies.module';
 import { SettingsModule } from './settings/settings.module';
+import { SystemConfigModule } from './system-config/system-config.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { SettingsModule } from './settings/settings.module';
     StatsModule,
     QuickRepliesModule,
     SettingsModule,
+    SystemConfigModule,
   ],
 })
 export class AppModule {}

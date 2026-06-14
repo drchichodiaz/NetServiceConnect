@@ -1,39 +1,33 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
+import { SystemConfigService } from '../system-config/system-config.service';
 import { EmbeddedSignupDto } from './dto/embedded-signup.dto';
 import { randomUUID } from 'crypto';
 
 @Injectable()
 export class EmbeddedSignupService {
   private readonly logger = new Logger(EmbeddedSignupService.name);
-  private readonly apiVersion: string;
-  private readonly appId: string;
-  private readonly appSecret: string;
 
   constructor(
-    private config: ConfigService,
     private prisma: PrismaService,
-  ) {
-    this.apiVersion = config.get('META_API_VERSION') || 'v19.0';
-    this.appId = config.get('META_APP_ID') || '';
-    this.appSecret = config.get('META_APP_SECRET') || '';
-  }
+    private systemConfig: SystemConfigService,
+  ) {}
 
-  private get base() {
-    return `https://graph.facebook.com/${this.apiVersion}`;
+  private base(apiVersion: string) {
+    return `https://graph.facebook.com/${apiVersion}`;
   }
 
   // ─── Flujo principal: código OAuth → cuenta guardada ──────────────────────
 
   async processSignup(tenantId: string, dto: EmbeddedSignupDto) {
     const { code, wabaId: sessionWabaId, phoneNumberId: sessionPhoneId } = dto;
+    const cfg = await this.systemConfig.get();
 
     // 1. Intercambiar código por token de corta duración
-    const shortToken = await this.exchangeCode(code);
+    const shortToken = await this.exchangeCode(code, cfg);
 
     // 2. Extender a token de larga duración (~60 días)
-    const longToken = await this.extendToken(shortToken);
+    const longToken = await this.extendToken(shortToken, cfg);
 
     // 3. Resolver wabaId y phoneNumberId
     //    Si el frontend los envió desde el postMessage, los usamos directamente.
@@ -43,17 +37,16 @@ export class EmbeddedSignupService {
     let displayPhone = '';
 
     if (!wabaId || !phoneId) {
-      const resolved = await this.resolveWabaAndPhone(longToken);
+      const resolved = await this.resolveWabaAndPhone(longToken, cfg.metaApiVersion);
       wabaId = wabaId ?? resolved.wabaId;
       phoneId = phoneId ?? resolved.phoneId;
       displayPhone = resolved.displayPhone;
     } else {
-      // Tenemos session info — obtener displayPhone pero no fallar si no se puede
-      displayPhone = await this.fetchDisplayPhone(phoneId, longToken);
+      displayPhone = await this.fetchDisplayPhone(phoneId, longToken, cfg.metaApiVersion);
     }
 
     // 4. Suscribir webhook al WABA
-    await this.subscribeWebhook(wabaId, longToken);
+    await this.subscribeWebhook(wabaId, longToken, cfg.metaApiVersion);
 
     // 5. Guardar configuración ANTES de registrar (para no perder el token si falla)
     const account = await this.upsertAccount({
@@ -65,7 +58,7 @@ export class EmbeddedSignupService {
     });
 
     // 6. Registrar el número en la Cloud API (Pending → activo)
-    const registerResult = await this.registerPhone(phoneId, longToken);
+    const registerResult = await this.registerPhone(phoneId, longToken, cfg.metaApiVersion);
 
     if (!registerResult.ok && !registerResult.alreadyRegistered) {
       this.logger.warn(
@@ -93,17 +86,16 @@ export class EmbeddedSignupService {
   // ─── Conexión directa con token (para desarrollo con número de prueba de Meta) ─
 
   async connectDirect(tenantId: string, accessToken: string, phoneNumberId: string, wabaId?: string) {
-    // Validar el token consultando la info del número
-    const displayPhone = await this.fetchDisplayPhone(phoneNumberId, accessToken);
+    const cfg = await this.systemConfig.get();
+    const displayPhone = await this.fetchDisplayPhone(phoneNumberId, accessToken, cfg.metaApiVersion);
 
-    // Si no se proporcionó wabaId, resolverlo desde los granular_scopes del token
     let resolvedWabaId = wabaId;
     if (!resolvedWabaId) {
-      const resolved = await this.resolveWabaAndPhone(accessToken);
+      const resolved = await this.resolveWabaAndPhone(accessToken, cfg.metaApiVersion);
       resolvedWabaId = resolved.wabaId;
     }
 
-    await this.subscribeWebhook(resolvedWabaId, accessToken);
+    await this.subscribeWebhook(resolvedWabaId, accessToken, cfg.metaApiVersion);
 
     const account = await this.upsertAccount({
       tenantId,
@@ -127,8 +119,9 @@ export class EmbeddedSignupService {
   async registerPhoneWithPin(tenantId: string, pin: string) {
     const account = await this.prisma.whatsAppAccount.findUnique({ where: { tenantId } });
     if (!account) throw new BadRequestException('No hay configuración de WhatsApp para este tenant');
+    const cfg = await this.systemConfig.get();
 
-    const url = `${this.base}/${account.phoneNumberId}/register`;
+    const url = `${this.base(cfg.metaApiVersion)}/${account.phoneNumberId}/register`;
     const res = await fetch(url, {
       method: 'POST',
       headers: {
@@ -175,8 +168,8 @@ export class EmbeddedSignupService {
 
   // ─── Helpers privados ─────────────────────────────────────────────────────
 
-  private async exchangeCode(code: string): Promise<string> {
-    const url = `https://graph.facebook.com/oauth/access_token?client_id=${this.appId}&client_secret=${this.appSecret}&code=${code}`;
+  private async exchangeCode(code: string, cfg: { metaAppId: string; metaAppSecret: string }): Promise<string> {
+    const url = `https://graph.facebook.com/oauth/access_token?client_id=${cfg.metaAppId}&client_secret=${cfg.metaAppSecret}&code=${code}`;
     const res = await fetch(url);
     const data = (await res.json()) as { access_token?: string; error?: { message: string } };
 
@@ -187,21 +180,19 @@ export class EmbeddedSignupService {
     return data.access_token;
   }
 
-  private async extendToken(shortToken: string): Promise<string> {
-    const url = `https://graph.facebook.com/oauth/access_token?grant_type=fb_exchange_token&client_id=${this.appId}&client_secret=${this.appSecret}&fb_exchange_token=${shortToken}`;
+  private async extendToken(shortToken: string, cfg: { metaAppId: string; metaAppSecret: string }): Promise<string> {
+    const url = `https://graph.facebook.com/oauth/access_token?grant_type=fb_exchange_token&client_id=${cfg.metaAppId}&client_secret=${cfg.metaAppSecret}&fb_exchange_token=${shortToken}`;
     const res = await fetch(url);
     const data = (await res.json()) as { access_token?: string };
-    // Si falla la extensión, usar el token corto (mejor que nada)
     return data.access_token ?? shortToken;
   }
 
-  private async resolveWabaAndPhone(token: string): Promise<{
+  private async resolveWabaAndPhone(token: string, apiVersion: string): Promise<{
     wabaId: string;
     phoneId: string;
     displayPhone: string;
   }> {
-    // Obtener WABA ID desde granular_scopes
-    const scopesRes = await fetch(`${this.base}/me?fields=granular_scopes&access_token=${token}`);
+    const scopesRes = await fetch(`${this.base(apiVersion)}/me?fields=granular_scopes&access_token=${token}`);
     const scopesData = (await scopesRes.json()) as {
       granular_scopes?: Array<{ scope: string; target_ids: string[] }>;
     };
@@ -217,7 +208,7 @@ export class EmbeddedSignupService {
     }
 
     // Obtener números del WABA
-    const phonesRes = await fetch(`${this.base}/${wabaId}/phone_numbers?access_token=${token}`);
+    const phonesRes = await fetch(`${this.base(apiVersion)}/${wabaId}/phone_numbers?access_token=${token}`);
     const phonesData = (await phonesRes.json()) as {
       data?: Array<{ id: string; display_phone_number: string }>;
     };
@@ -236,10 +227,10 @@ export class EmbeddedSignupService {
     };
   }
 
-  private async fetchDisplayPhone(phoneId: string, token: string): Promise<string> {
+  private async fetchDisplayPhone(phoneId: string, token: string, apiVersion: string): Promise<string> {
     try {
       const res = await fetch(
-        `${this.base}/${phoneId}?fields=display_phone_number,verified_name&access_token=${token}`,
+        `${this.base(apiVersion)}/${phoneId}?fields=display_phone_number,verified_name&access_token=${token}`,
       );
       const data = (await res.json()) as {
         display_phone_number?: string;
@@ -251,9 +242,9 @@ export class EmbeddedSignupService {
     }
   }
 
-  private async subscribeWebhook(wabaId: string, token: string) {
+  private async subscribeWebhook(wabaId: string, token: string, apiVersion: string) {
     try {
-      await fetch(`${this.base}/${wabaId}/subscribed_apps`, {
+      await fetch(`${this.base(apiVersion)}/${wabaId}/subscribed_apps`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -266,9 +257,10 @@ export class EmbeddedSignupService {
   private async registerPhone(
     phoneId: string,
     token: string,
+    apiVersion: string,
   ): Promise<{ ok: boolean; alreadyRegistered?: boolean; needsPin?: boolean; error?: string }> {
     try {
-      const res = await fetch(`${this.base}/${phoneId}/register`, {
+      const res = await fetch(`${this.base(apiVersion)}/${phoneId}/register`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ messaging_product: 'whatsapp' }),

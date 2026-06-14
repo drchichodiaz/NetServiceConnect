@@ -111,6 +111,18 @@ export const statsApi = {
     api.get('/stats', { params: { period } }).then((r) => r.data),
 };
 
+// ─── System Config ────────────────────────────────────────────────────────────
+
+export const systemConfigApi = {
+  get: () => api.get('/system-config').then((r) => r.data),
+  update: (data: {
+    metaAppId?: string;
+    metaAppSecret?: string;
+    metaVerifyToken?: string;
+    metaApiVersion?: string;
+  }) => api.patch('/system-config', data).then((r) => r.data),
+};
+
 // ─── Contacts ─────────────────────────────────────────────────────────────────
 
 export const contactsApi = {

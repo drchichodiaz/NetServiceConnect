@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { MessageSquare, Users, Tag, Settings, LogOut, LayoutDashboard, Zap, Sparkles, BookUser } from 'lucide-react';
+import { MessageSquare, Users, Tag, Settings, LogOut, LayoutDashboard, Zap, Sparkles, BookUser, ShieldCheck } from 'lucide-react';
 import { useAuthStore } from '@/store/auth.store';
 import { User } from '@/types';
 import clsx from 'clsx';
@@ -16,7 +16,8 @@ const navItems = [
   { href: '/settings/tags',      icon: Tag,             label: 'Etiquetas' },
   { href: '/settings/quick-replies', icon: Zap,       label: 'Respuestas rápidas' },
   { href: '/settings/ai',            icon: Sparkles,  label: 'Configuración IA' },
-  { href: '/settings/whatsapp',      icon: Settings,  label: 'WhatsApp' },
+  { href: '/settings/whatsapp',      icon: Settings,     label: 'WhatsApp' },
+  { href: '/settings/system',        icon: ShieldCheck,  label: 'Sistema' },
 ];
 
 export default function Sidebar({ user }: Props) {

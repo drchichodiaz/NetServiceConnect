@@ -254,6 +254,17 @@ model QuickReply {
   @@index([tenantId])
 }
 
+// ─── System Config (global, singleton) ───────────────────────────────────────
+
+model SystemConfig {
+  id              String   @id @default("1")
+  metaAppId       String?
+  metaAppSecret   String?
+  metaVerifyToken String?
+  metaApiVersion  String   @default("v19.0")
+  updatedAt       DateTime @updatedAt
+}
+
 // ─── Audit Log ────────────────────────────────────────────────────────────────
 
 model AuditLog {

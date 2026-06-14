@@ -13,10 +13,10 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Response } from 'express';
-import { ConfigService } from '@nestjs/config';
 import { WhatsAppService } from './whatsapp.service';
 import { EmbeddedSignupService } from './embedded-signup.service';
 import { WebhookService } from './webhook.service';
+import { SystemConfigService } from '../system-config/system-config.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { SendMessageDto } from './dto/send-message.dto';
@@ -27,23 +27,23 @@ export class WhatsAppController {
   private readonly logger = new Logger(WhatsAppController.name);
 
   constructor(
-    private config: ConfigService,
     private waService: WhatsAppService,
     private signupService: EmbeddedSignupService,
     private webhookService: WebhookService,
+    private systemConfig: SystemConfigService,
   ) {}
 
   // ─── Webhook Verification ──────────────────────────────────────────────────
 
   @Get('webhook')
-  verifyWebhook(@Query() query: any, @Res() res: Response) {
+  async verifyWebhook(@Query() query: any, @Res() res: Response) {
     const mode = query['hub.mode'];
     const token = query['hub.verify_token'];
     const challenge = query['hub.challenge'];
 
-    const verifyToken = this.config.get('META_VERIFY_TOKEN');
+    const cfg = await this.systemConfig.get();
 
-    if (mode === 'subscribe' && token === verifyToken) {
+    if (mode === 'subscribe' && token === cfg.metaVerifyToken) {
       this.logger.log('Webhook verificado por Meta');
       return res.status(200).send(challenge);
     }
