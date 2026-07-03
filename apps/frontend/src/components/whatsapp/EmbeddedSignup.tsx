@@ -113,7 +113,7 @@ export default function EmbeddedSignup({ onConnected }: Props) {
     setStep('waiting_fb');
 
     window.FB.login(
-      async (response: any) => {
+      (response: any) => {
         if (!response.authResponse) {
           setStep('idle');
           toast('Inicio de sesión cancelado', { icon: '⚠️' });
@@ -128,7 +128,7 @@ export default function EmbeddedSignup({ onConnected }: Props) {
           return;
         }
 
-        await processSignup(code);
+        processSignup(code);
       },
       {
         config_id: META_CONFIG_ID,
