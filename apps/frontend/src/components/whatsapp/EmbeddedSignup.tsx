@@ -5,149 +5,136 @@ import { WhatsAppAccount } from '@/types';
 import { MessageSquare, Loader2, AlertCircle, ArrowRight, KeyRound } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-declare global {
-  interface Window {
-    FB: any;
-    fbAsyncInit: () => void;
-  }
-}
-
 interface Props {
   onConnected: (account: WhatsAppAccount) => void;
 }
 
 type Step = 'idle' | 'waiting_fb' | 'saving' | 'needs_pin' | 'error';
 
-// session info capturado del postMessage de Meta (sessionInfoVersion 3)
 interface SessionInfo {
   wabaId?: string;
   phoneNumberId?: string;
 }
 
 export default function EmbeddedSignup({ onConnected }: Props) {
-  const [step, setStep] = useState<Step>('idle');
+  const [step, setStep]         = useState<Step>('idle');
   const [errorMsg, setErrorMsg] = useState('');
-  const [fbLoaded, setFbLoaded] = useState(false);
-  const [pin, setPin] = useState('');
+  const [pin, setPin]           = useState('');
   const [isSavingPin, setIsSavingPin] = useState(false);
 
-  const META_APP_ID   = process.env.NEXT_PUBLIC_META_APP_ID || '';
-  // Configuration ID del Embedded Signup (distinto del App ID).
-  // Si no lo tienes aún, usa el App ID como fallback (funciona en apps recientes).
+  const META_APP_ID    = process.env.NEXT_PUBLIC_META_APP_ID || '';
   const META_CONFIG_ID = process.env.NEXT_PUBLIC_META_CONFIG_ID || META_APP_ID;
 
-  // Ref para guardar session info que llega del postMessage mientras FB.login está abierto
   const sessionInfoRef = useRef<SessionInfo>({});
+  const popupRef       = useRef<Window | null>(null);
+  const pollRef        = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stepRef        = useRef<Step>('idle');
 
-  // ─── Cargar Facebook SDK ─────────────────────────────────────────────────
+  // Keep stepRef in sync so interval callbacks read current value
+  useEffect(() => { stepRef.current = step; }, [step]);
 
-  useEffect(() => {
-    if (window.FB) {
-      setFbLoaded(true);
+  // ─── postMessage handler ─────────────────────────────────────────────────
+  // Receives two kinds of messages:
+  //  1. From facebook.com  → WA_EMBEDDED_SIGNUP (session info: waba_id, phone_number_id)
+  //  2. From same origin   → WA_OAUTH_CODE (authorization code from our callback page)
+
+  const handleMessage = useCallback((event: MessageEvent) => {
+    // Session info from Meta popup
+    if (event.origin.includes('facebook.com') || event.origin.includes('business.facebook.com')) {
+      try {
+        const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+        if (data?.type === 'WA_EMBEDDED_SIGNUP') {
+          if (data.event === 'FINISH') {
+            const { phone_number_id, waba_id } = data.data ?? {};
+            if (waba_id)          sessionInfoRef.current.wabaId         = waba_id;
+            if (phone_number_id)  sessionInfoRef.current.phoneNumberId  = phone_number_id;
+          } else if (data.event === 'CANCEL') {
+            cleanup();
+            setStep('idle');
+            toast('Proceso cancelado', { icon: '⚠️' });
+          } else if (data.event === 'ERROR') {
+            cleanup();
+            setStep('error');
+            setErrorMsg(data.data?.error_message || 'Error en el proceso de Meta');
+          }
+        }
+      } catch { /* non-JSON, ignore */ }
       return;
     }
 
-    window.fbAsyncInit = () => {
-      window.FB.init({
-        appId: META_APP_ID,
-        cookie: true,
-        xfbml: true,
-        version: 'v19.0',
-      });
-      setFbLoaded(true);
-    };
-
-    if (!document.getElementById('facebook-sdk')) {
-      const script = document.createElement('script');
-      script.id = 'facebook-sdk';
-      script.src = 'https://connect.facebook.net/es_LA/sdk.js';
-      script.async = true;
-      script.defer = true;
-      document.body.appendChild(script);
-    }
-  }, [META_APP_ID]);
-
-  // ─── Capturar session info del postMessage de Meta ───────────────────────
-  // Meta envía wabaId y phoneNumberId en un mensaje desde el popup antes de cerrarlo.
-  // Lo guardamos en un ref para usarlo justo después del FB.login callback.
-
-  const handleMessage = useCallback((event: MessageEvent) => {
-    if (!event.origin.includes('facebook.com')) return;
-
-    try {
-      const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-
-      if (data?.type === 'WA_EMBEDDED_SIGNUP') {
-        if (data.event === 'FINISH') {
-          const { phone_number_id, waba_id } = data.data ?? {};
-          if (waba_id) sessionInfoRef.current.wabaId = waba_id;
-          if (phone_number_id) sessionInfoRef.current.phoneNumberId = phone_number_id;
-        } else if (data.event === 'CANCEL') {
-          setStep('idle');
-          toast('Proceso cancelado', { icon: '⚠️' });
-        } else if (data.event === 'ERROR') {
-          setStep('error');
-          setErrorMsg(data.data?.error_message || 'Error en el proceso de Meta');
-        }
+    // OAuth code relayed from our /whatsapp/oauth/callback page
+    if (event.origin === window.location.origin && event.data?.type === 'WA_OAUTH_CODE') {
+      cleanup();
+      const { code, error } = event.data;
+      if (code) {
+        processSignup(code);
+      } else {
+        setStep('idle');
+        toast(error ? `Error: ${error}` : 'Proceso cancelado', { icon: '⚠️' });
       }
-    } catch {
-      // Mensaje no JSON — ignorar
     }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
   }, [handleMessage]);
 
-  // ─── Lanzar Embedded Signup ───────────────────────────────────────────────
+  function cleanup() {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
+    popupRef.current = null;
+  }
+
+  // ─── Launch ───────────────────────────────────────────────────────────────
 
   function launchEmbeddedSignup() {
-    if (!fbLoaded || !window.FB) {
-      toast.error('El SDK de Facebook aún no está listo. Espera un momento.');
+    if (!META_APP_ID) {
+      toast.error('Configura NEXT_PUBLIC_META_APP_ID en las variables de entorno');
       return;
     }
 
-    // Limpiar session info anterior
     sessionInfoRef.current = {};
     setStep('waiting_fb');
 
-    window.FB.login(
-      (response: any) => {
-        if (!response.authResponse) {
+    const redirectUri = `${window.location.origin}/whatsapp/oauth/callback`;
+    const extras      = encodeURIComponent(JSON.stringify({ sessionInfoVersion: '3', version: 'v4' }));
+
+    const url =
+      `https://business.facebook.com/messaging/whatsapp/onboard/` +
+      `?app_id=${META_APP_ID}` +
+      `&config_id=${META_CONFIG_ID}` +
+      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+      `&extras=${extras}`;
+
+    const popup = window.open(url, 'wa_embedded_signup', 'width=640,height=720,scrollbars=yes,resizable=yes');
+    popupRef.current = popup;
+
+    if (!popup) {
+      setStep('error');
+      setErrorMsg('El navegador bloqueó el popup. Permite popups para este sitio e intenta de nuevo.');
+      return;
+    }
+
+    // Detect if user closes popup manually without completing
+    pollRef.current = setInterval(() => {
+      if (popup.closed) {
+        cleanup();
+        if (stepRef.current === 'waiting_fb') {
           setStep('idle');
-          toast('Inicio de sesión cancelado', { icon: '⚠️' });
-          return;
+          toast('Ventana cerrada antes de completar el proceso', { icon: '⚠️' });
         }
-
-        // El code viene en authResponse cuando response_type: 'code'
-        const code = response.authResponse.code;
-        if (!code) {
-          setStep('error');
-          setErrorMsg('No se recibió el código de autorización de Facebook');
-          return;
-        }
-
-        processSignup(code);
-      },
-      {
-        config_id: META_CONFIG_ID,
-        response_type: 'code',
-        override_default_response_type: true,
-        extras: {
-          setup: {},
-          featureType: '',
-          sessionInfoVersion: '3',
-        },
-      },
-    );
+      }
+    }, 800);
   }
+
+  // ─── Process OAuth code ───────────────────────────────────────────────────
 
   async function processSignup(code: string) {
     setStep('saving');
 
-    // Pequeña espera para asegurar que el postMessage llegó antes que el callback
-    await new Promise((r) => setTimeout(r, 500));
+    // Brief wait so any FINISH postMessage arrives before we read sessionInfoRef
+    await new Promise((r) => setTimeout(r, 400));
 
     const { wabaId, phoneNumberId } = sessionInfoRef.current;
 
@@ -169,19 +156,17 @@ export default function EmbeddedSignup({ onConnected }: Props) {
     }
   }
 
+  // ─── PIN 2FA ──────────────────────────────────────────────────────────────
+
   async function handlePinSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (pin.length !== 6) {
-      toast.error('El PIN debe tener 6 dígitos');
-      return;
-    }
+    if (pin.length !== 6) { toast.error('El PIN debe tener 6 dígitos'); return; }
 
     setIsSavingPin(true);
     try {
       await whatsappApi.registerPhoneWithPin(pin);
       toast.success('Número registrado correctamente');
       setStep('idle');
-      // Recargar la cuenta desde el servidor
       const account = await import('@/lib/api').then((m) => m.whatsappApi.getAccount());
       onConnected(account as WhatsAppAccount);
     } catch (err: any) {
@@ -205,7 +190,7 @@ export default function EmbeddedSignup({ onConnected }: Props) {
         </p>
       </div>
 
-      {/* Pasos */}
+      {/* Steps */}
       <div className="flex gap-4 mb-8">
         {[
           { n: 1, label: 'Conectar Facebook Business' },
@@ -266,43 +251,34 @@ export default function EmbeddedSignup({ onConnected }: Props) {
         </div>
       )}
 
-      {/* Estados de carga */}
+      {/* Loading */}
       {(step === 'waiting_fb' || step === 'saving') && (
         <div className="flex items-center justify-center gap-3 py-8 text-gray-500">
           <Loader2 className="w-5 h-5 animate-spin text-green-500" />
           <span className="text-sm">
             {step === 'waiting_fb'
-              ? 'Esperando autorización en Facebook...'
+              ? 'Esperando autorización en Meta...'
               : 'Guardando configuración de WhatsApp...'}
           </span>
         </div>
       )}
 
-      {/* Botón principal */}
+      {/* Main button */}
       {(step === 'idle' || step === 'error') && (
         <button
           onClick={launchEmbeddedSignup}
-          disabled={!fbLoaded}
+          disabled={!META_APP_ID}
           className="w-full flex items-center justify-center gap-3 bg-green-500 hover:bg-green-600 disabled:opacity-50 text-white font-semibold py-3 px-6 rounded-xl transition-colors"
         >
-          {!fbLoaded ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Cargando SDK...
-            </>
-          ) : (
-            <>
-              <MessageSquare className="w-5 h-5" />
-              {step === 'error' ? 'Reintentar conexión' : 'Conectar con WhatsApp Business'}
-              <ArrowRight className="w-4 h-4" />
-            </>
-          )}
+          <MessageSquare className="w-5 h-5" />
+          {step === 'error' ? 'Reintentar conexión' : 'Conectar con WhatsApp Business'}
+          <ArrowRight className="w-4 h-4" />
         </button>
       )}
 
       {!META_APP_ID && (
         <p className="text-xs text-red-500 text-center mt-3">
-          ⚠️ Configura NEXT_PUBLIC_META_APP_ID en tu archivo .env.local
+          ⚠️ Configura NEXT_PUBLIC_META_APP_ID en las variables de entorno
         </p>
       )}
 
