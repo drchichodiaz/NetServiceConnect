@@ -1,9 +1,11 @@
 'use client';
-import { useEffect } from 'react';
+import { useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 
-export default function WhatsAppOAuthCallback() {
+export const dynamic = 'force-dynamic';
+
+function CallbackInner() {
   const searchParams = useSearchParams();
 
   useEffect(() => {
@@ -17,7 +19,6 @@ export default function WhatsAppOAuthCallback() {
       );
       window.close();
     } else {
-      // Opened directly (not as popup) — redirect to WhatsApp settings
       window.location.href = '/settings/whatsapp';
     }
   }, [searchParams]);
@@ -27,5 +28,20 @@ export default function WhatsAppOAuthCallback() {
       <Loader2 className="w-6 h-6 animate-spin text-green-500" />
       <p className="text-sm">Completando la conexión con Meta...</p>
     </div>
+  );
+}
+
+export default function WhatsAppOAuthCallback() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex flex-col items-center justify-center h-screen gap-3 text-gray-500">
+          <Loader2 className="w-6 h-6 animate-spin text-green-500" />
+          <p className="text-sm">Cargando...</p>
+        </div>
+      }
+    >
+      <CallbackInner />
+    </Suspense>
   );
 }
