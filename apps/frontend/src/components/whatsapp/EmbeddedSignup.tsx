@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { whatsappApi } from '@/lib/api';
+import { whatsappApi, systemConfigApi } from '@/lib/api';
 import { WhatsAppAccount } from '@/types';
 import { MessageSquare, Loader2, AlertCircle, ArrowRight, KeyRound } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -21,9 +21,17 @@ export default function EmbeddedSignup({ onConnected }: Props) {
   const [errorMsg, setErrorMsg] = useState('');
   const [pin, setPin]           = useState('');
   const [isSavingPin, setIsSavingPin] = useState(false);
+  const [metaAppId,    setMetaAppId]    = useState('');
+  const [metaConfigId, setMetaConfigId] = useState('');
+  const [configLoaded, setConfigLoaded] = useState(false);
 
-  const META_APP_ID    = process.env.NEXT_PUBLIC_META_APP_ID || '';
-  const META_CONFIG_ID = process.env.NEXT_PUBLIC_META_CONFIG_ID || META_APP_ID;
+  useEffect(() => {
+    systemConfigApi.get().then((cfg: any) => {
+      setMetaAppId(cfg.metaAppId || '');
+      setMetaConfigId(cfg.metaConfigId || cfg.metaAppId || '');
+      setConfigLoaded(true);
+    }).catch(() => setConfigLoaded(true));
+  }, []);
 
   const sessionInfoRef = useRef<SessionInfo>({});
   const popupRef       = useRef<Window | null>(null);
@@ -89,8 +97,8 @@ export default function EmbeddedSignup({ onConnected }: Props) {
   // ─── Launch ───────────────────────────────────────────────────────────────
 
   function launchEmbeddedSignup() {
-    if (!META_APP_ID) {
-      toast.error('Configura NEXT_PUBLIC_META_APP_ID en las variables de entorno');
+    if (!metaAppId) {
+      toast.error('Configura el Meta App ID en Configuración del sistema');
       return;
     }
 
@@ -102,8 +110,8 @@ export default function EmbeddedSignup({ onConnected }: Props) {
 
     const url =
       `https://business.facebook.com/messaging/whatsapp/onboard/` +
-      `?app_id=${META_APP_ID}` +
-      `&config_id=${META_CONFIG_ID}` +
+      `?app_id=${metaAppId}` +
+      `&config_id=${metaConfigId}` +
       `&redirect_uri=${encodeURIComponent(redirectUri)}` +
       `&extras=${extras}`;
 
@@ -267,18 +275,19 @@ export default function EmbeddedSignup({ onConnected }: Props) {
       {(step === 'idle' || step === 'error') && (
         <button
           onClick={launchEmbeddedSignup}
-          disabled={!META_APP_ID}
+          disabled={!configLoaded || !metaAppId}
           className="w-full flex items-center justify-center gap-3 bg-green-500 hover:bg-green-600 disabled:opacity-50 text-white font-semibold py-3 px-6 rounded-xl transition-colors"
         >
-          <MessageSquare className="w-5 h-5" />
-          {step === 'error' ? 'Reintentar conexión' : 'Conectar con WhatsApp Business'}
-          <ArrowRight className="w-4 h-4" />
+          {!configLoaded
+            ? <><Loader2 className="w-4 h-4 animate-spin" />Cargando...</>
+            : <><MessageSquare className="w-5 h-5" />{step === 'error' ? 'Reintentar conexión' : 'Conectar con WhatsApp Business'}<ArrowRight className="w-4 h-4" /></>
+          }
         </button>
       )}
 
-      {!META_APP_ID && (
+      {configLoaded && !metaAppId && (
         <p className="text-xs text-red-500 text-center mt-3">
-          ⚠️ Configura NEXT_PUBLIC_META_APP_ID en las variables de entorno
+          ⚠️ Configura el Meta App ID en <strong>Configuración del sistema</strong>
         </p>
       )}
 

@@ -259,6 +259,7 @@ model QuickReply {
 model SystemConfig {
   id              String   @id @default("1")
   metaAppId       String?
+  metaConfigId    String?
   metaAppSecret   String?
   metaVerifyToken String?
   metaApiVersion  String   @default("v19.0")

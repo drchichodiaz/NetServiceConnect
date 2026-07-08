@@ -32,22 +32,22 @@ export class SystemConfigService {
     const cfg = await this.get();
     const fromDb = !!record?.metaAppId;
     return {
-      metaAppId:          cfg.metaAppId,
-      hasMetaAppSecret:   !!cfg.metaAppSecret,
+      metaAppId:            cfg.metaAppId,
+      metaConfigId:         record?.metaConfigId || '',
+      hasMetaAppSecret:     !!cfg.metaAppSecret,
       metaAppSecretPreview: cfg.metaAppSecret ? `...${cfg.metaAppSecret.slice(-4)}` : null,
-      metaVerifyToken:    cfg.metaVerifyToken,
-      metaApiVersion:     cfg.metaApiVersion,
+      metaVerifyToken:      cfg.metaVerifyToken,
+      metaApiVersion:       cfg.metaApiVersion,
       source: fromDb ? 'db' : 'env',
     };
   }
 
   async update(data: UpdateSystemConfigDto) {
-    // No guardar string vacío — solo actualizar campos que vienen con valor
     const payload: any = {};
     if (data.metaAppId       !== undefined && data.metaAppId       !== '') payload.metaAppId       = data.metaAppId;
+    if (data.metaConfigId    !== undefined && data.metaConfigId    !== '') payload.metaConfigId    = data.metaConfigId;
     if (data.metaVerifyToken !== undefined && data.metaVerifyToken !== '') payload.metaVerifyToken = data.metaVerifyToken;
     if (data.metaApiVersion  !== undefined && data.metaApiVersion  !== '') payload.metaApiVersion  = data.metaApiVersion;
-    // Secret: solo actualizar si viene un valor real (no preview con "...")
     if (data.metaAppSecret && !data.metaAppSecret.startsWith('...')) payload.metaAppSecret = data.metaAppSecret;
 
     return this.prisma.systemConfig.upsert({

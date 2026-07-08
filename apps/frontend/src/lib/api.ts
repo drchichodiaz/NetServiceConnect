@@ -117,6 +117,7 @@ export const systemConfigApi = {
   get: () => api.get('/system-config').then((r) => r.data),
   update: (data: {
     metaAppId?: string;
+    metaConfigId?: string;
     metaAppSecret?: string;
     metaVerifyToken?: string;
     metaApiVersion?: string;

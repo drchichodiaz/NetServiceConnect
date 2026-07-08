@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 
 interface Config {
   metaAppId: string;
+  metaConfigId: string;
   hasMetaAppSecret: boolean;
   metaAppSecretPreview: string | null;
   metaVerifyToken: string;
@@ -19,6 +20,7 @@ export default function SystemConfigPage() {
   const [saving,   setSaving]   = useState(false);
 
   const [appId,       setAppId]       = useState('');
+  const [configId,    setConfigId]    = useState('');
   const [appSecret,   setAppSecret]   = useState('');
   const [verifyToken, setVerifyToken] = useState('');
   const [apiVersion,  setApiVersion]  = useState('v19.0');
@@ -30,6 +32,7 @@ export default function SystemConfigPage() {
       const data = await systemConfigApi.get();
       setConfig(data);
       setAppId(data.metaAppId || '');
+      setConfigId(data.metaConfigId || '');
       setVerifyToken(data.metaVerifyToken || '');
       setApiVersion(data.metaApiVersion || 'v19.0');
       setAppSecret('');
@@ -45,6 +48,7 @@ export default function SystemConfigPage() {
     try {
       const payload: Record<string, string> = {};
       if (appId)       payload.metaAppId       = appId;
+      if (configId)    payload.metaConfigId    = configId;
       if (appSecret)   payload.metaAppSecret   = appSecret;
       if (verifyToken) payload.metaVerifyToken = verifyToken;
       if (apiVersion)  payload.metaApiVersion  = apiVersion;
@@ -122,9 +126,24 @@ export default function SystemConfigPage() {
             type="text"
             value={appId}
             onChange={(e) => setAppId(e.target.value)}
-            placeholder={config?.metaAppId || 'Ej: 1171560555110366'}
+            placeholder={config?.metaAppId || 'Ej: 870754879435592'}
             className="input w-full text-sm font-mono"
           />
+        </div>
+
+        {/* Embedded Signup Config ID */}
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-ink">Embedded Signup Config ID</label>
+          <input
+            type="text"
+            value={configId}
+            onChange={(e) => setConfigId(e.target.value)}
+            placeholder={config?.metaConfigId || 'Ej: 1344309674334074'}
+            className="input w-full text-sm font-mono"
+          />
+          <p className="text-[11px] text-ink-subtle">
+            Facebook Login for Business → Configuraciones → Identificador de configuración
+          </p>
         </div>
 
         {/* Meta App Secret */}
