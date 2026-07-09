@@ -17,11 +17,18 @@ Invoke-Step "git pull" { git pull origin main }
 
 Invoke-Step "instalando dependencias (raiz, workspaces)" { npm install }
 
+# En Windows, prisma generate falla con EPERM si el backend esta corriendo,
+# porque pm2 tiene cargada en memoria la DLL del query engine. Hay que
+# frenarlo antes de regenerar y prenderlo de nuevo despues del build.
+Write-Host "==> backend: stop (pm2) para liberar el query engine de Prisma"
+pm2 stop netservice-api
+Start-Sleep -Seconds 2
+
 Set-Location "$PSScriptRoot\apps\backend"
 Invoke-Step "backend: prisma generate" { npx prisma generate }
 Invoke-Step "backend: prisma migrate deploy" { npx prisma migrate deploy }
 Invoke-Step "backend: build" { npm run build }
-Invoke-Step "backend: restart (pm2)" { pm2 restart netservice-api }
+Invoke-Step "backend: start/restart (pm2)" { pm2 restart netservice-api }
 
 Set-Location "$PSScriptRoot\apps\frontend"
 Invoke-Step "frontend: build" { npm run build }
