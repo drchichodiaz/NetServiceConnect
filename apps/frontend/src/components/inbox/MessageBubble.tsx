@@ -21,6 +21,7 @@ function MediaBadge({ type }: { type: string }) {
     AUDIO:    { icon: Mic,      label: 'Audio' },
     DOCUMENT: { icon: FileText, label: 'Documento' },
     VIDEO:    { icon: Image,    label: 'Video' },
+    STICKER:  { icon: Image,    label: 'Sticker' },
   };
   const item = map[type];
   if (!item) return null;
@@ -33,7 +34,7 @@ function MediaBadge({ type }: { type: string }) {
   );
 }
 
-const MEDIA_TYPES = ['IMAGE', 'AUDIO', 'DOCUMENT', 'VIDEO'];
+const MEDIA_TYPES = ['IMAGE', 'AUDIO', 'DOCUMENT', 'VIDEO', 'STICKER'];
 
 function MediaContent({ message }: { message: Message }) {
   const hasMedia = MEDIA_TYPES.includes(message.type);
@@ -64,6 +65,10 @@ function MediaContent({ message }: { message: Message }) {
         <img src={url} alt="Imagen" className="rounded-lg max-w-full max-h-72 object-cover" />
       </a>
     );
+  }
+
+  if (message.type === 'STICKER') {
+    return <img src={url} alt="Sticker" className="w-32 h-32 object-contain mb-1" />;
   }
 
   if (message.type === 'VIDEO') {

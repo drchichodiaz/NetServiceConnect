@@ -182,6 +182,7 @@ enum MessageType {
   AUDIO
   DOCUMENT
   VIDEO
+  STICKER
   TEMPLATE
 }
 

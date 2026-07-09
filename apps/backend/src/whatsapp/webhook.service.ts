@@ -242,6 +242,7 @@ export class WebhookService {
       case 'audio':     return '[audio]';
       case 'document':  return msg.document?.filename || '[documento]';
       case 'video':     return msg.video?.caption || '[video]';
+      case 'sticker':   return '[sticker]';
       case 'interactive': {
         const reply = msg.interactive?.button_reply ?? msg.interactive?.list_reply;
         return reply?.title || '[interactivo]';
@@ -256,6 +257,7 @@ export class WebhookService {
       msg.audio?.id ||
       msg.document?.id ||
       msg.video?.id ||
+      msg.sticker?.id ||
       undefined
     );
   }
@@ -267,6 +269,7 @@ export class WebhookService {
       audio:       'AUDIO',
       document:    'DOCUMENT',
       video:       'VIDEO',
+      sticker:     'STICKER',
       interactive: 'TEXT',
     };
     return map[type] || 'TEXT';

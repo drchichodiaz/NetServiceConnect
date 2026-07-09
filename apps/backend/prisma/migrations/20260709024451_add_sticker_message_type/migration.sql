@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "MessageType" ADD VALUE IF NOT EXISTS 'STICKER';
