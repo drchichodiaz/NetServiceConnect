@@ -6,7 +6,10 @@ import { MediaService } from '../media/media.service';
 import { SendMessageDto } from './dto/send-message.dto';
 import { SendMediaDto } from './dto/send-media.dto';
 import axios from 'axios';
-import FormData from 'form-data';
+// form-data es un modulo CommonJS puro (module.exports = FormData) y este proyecto
+// no tiene esModuleInterop activado, asi que un default-import ("import FormData from...")
+// compila mal (form_data_1.default is undefined). El import de namespace si funciona.
+import * as FormData from 'form-data';
 
 @Injectable()
 export class WhatsAppService {
