@@ -36,6 +36,13 @@ function MediaBadge({ type }: { type: string }) {
 
 const MEDIA_TYPES = ['IMAGE', 'AUDIO', 'DOCUMENT', 'VIDEO', 'STICKER'];
 
+// El backend guarda un placeholder tipo "[imagen]"/"[audio]"/etc. como body cuando el
+// mensaje no trae una leyenda real (sirve para la vista previa de la lista de chats,
+// pero es redundante mostrarlo en la burbuja arriba de la miniatura real).
+function isPlaceholderBody(body: string): boolean {
+  return /^\[.+\]$/.test(body.trim());
+}
+
 function MediaContent({ message }: { message: Message }) {
   const hasMedia = MEDIA_TYPES.includes(message.type);
   const mediaEndpoint = hasMedia
@@ -122,7 +129,7 @@ export default function MessageBubble({ message }: Props) {
 
         {message.type !== 'TEXT' && <MediaContent message={message} />}
 
-        {message.body && (
+        {message.body && !isPlaceholderBody(message.body) && (
           <p className="whitespace-pre-wrap break-words">{message.body}</p>
         )}
 
