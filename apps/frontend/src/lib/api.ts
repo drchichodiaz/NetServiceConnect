@@ -58,6 +58,15 @@ export const messagesApi = {
 export const whatsappApi = {
   send: (data: { conversationId: string; to: string; type: string; body?: string; mediaUrl?: string }) =>
     api.post('/whatsapp/send', data).then((r) => r.data),
+  sendMedia: (data: { conversationId: string; to: string; type: string; caption?: string; file: File }) => {
+    const form = new FormData();
+    form.append('conversationId', data.conversationId);
+    form.append('to', data.to);
+    form.append('type', data.type);
+    if (data.caption) form.append('caption', data.caption);
+    form.append('file', data.file);
+    return api.post('/whatsapp/send-media', form, { headers: { 'Content-Type': 'multipart/form-data' } }).then((r) => r.data);
+  },
   getAccount: () => api.get('/whatsapp/account').then((r) => r.data),
   // Embedded Signup: envía el code OAuth + session info — el backend hace el intercambio
   embeddedSignup: (data: { code: string; wabaId?: string; phoneNumberId?: string }) =>
@@ -121,6 +130,7 @@ export const systemConfigApi = {
     metaAppSecret?: string;
     metaVerifyToken?: string;
     metaApiVersion?: string;
+    mediaStoragePath?: string;
   }) => api.patch('/system-config', data).then((r) => r.data),
 };
 

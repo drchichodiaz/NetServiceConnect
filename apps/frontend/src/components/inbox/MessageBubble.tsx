@@ -1,7 +1,8 @@
 'use client';
 import { format } from 'date-fns';
-import { Check, CheckCheck, Clock, AlertCircle, Image, Mic, FileText } from 'lucide-react';
+import { Check, CheckCheck, Clock, AlertCircle, Image, Mic, FileText, Loader2, Download } from 'lucide-react';
 import { Message } from '@/types';
+import { useAuthedMedia } from '@/hooks/useAuthedMedia';
 import clsx from 'clsx';
 
 interface Props { message: Message; }
@@ -32,6 +33,65 @@ function MediaBadge({ type }: { type: string }) {
   );
 }
 
+const MEDIA_TYPES = ['IMAGE', 'AUDIO', 'DOCUMENT', 'VIDEO'];
+
+function MediaContent({ message }: { message: Message }) {
+  const hasMedia = MEDIA_TYPES.includes(message.type);
+  const mediaEndpoint = hasMedia
+    ? `/conversations/${message.conversationId}/messages/${message.id}/media`
+    : null;
+  const { url, isLoading, error } = useAuthedMedia(mediaEndpoint);
+
+  if (!hasMedia) return null;
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-1.5 mb-1 opacity-70">
+        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        <span className="text-xs">Cargando...</span>
+      </div>
+    );
+  }
+
+  // Sin archivo descargado (fallo la descarga o es un mensaje anterior a esta funcion): fallback al badge
+  if (error || !url) {
+    return <MediaBadge type={message.type} />;
+  }
+
+  if (message.type === 'IMAGE') {
+    return (
+      <a href={url} target="_blank" rel="noreferrer" className="block mb-1">
+        <img src={url} alt="Imagen" className="rounded-lg max-w-full max-h-72 object-cover" />
+      </a>
+    );
+  }
+
+  if (message.type === 'VIDEO') {
+    return (
+      <video controls src={url} className="rounded-lg max-w-full max-h-72 mb-1" />
+    );
+  }
+
+  if (message.type === 'AUDIO') {
+    return <audio controls src={url} className="max-w-full mb-1" />;
+  }
+
+  // DOCUMENT
+  return (
+    <a
+      href={url}
+      download
+      target="_blank"
+      rel="noreferrer"
+      className="flex items-center gap-1.5 mb-1 underline decoration-dotted"
+    >
+      <FileText className="w-3.5 h-3.5 shrink-0" />
+      <span className="text-xs">Descargar documento</span>
+      <Download className="w-3 h-3 shrink-0" />
+    </a>
+  );
+}
+
 export default function MessageBubble({ message }: Props) {
   const isOut = message.direction === 'OUTBOUND';
 
@@ -55,7 +115,7 @@ export default function MessageBubble({ message }: Props) {
           </p>
         )}
 
-        {message.type !== 'TEXT' && <MediaBadge type={message.type} />}
+        {message.type !== 'TEXT' && <MediaContent message={message} />}
 
         {message.body && (
           <p className="whitespace-pre-wrap break-words">{message.body}</p>

@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { systemConfigApi } from '@/lib/api';
-import { Shield, Eye, EyeOff, Save, RefreshCw, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { Shield, Eye, EyeOff, Save, RefreshCw, CheckCircle, AlertCircle, Loader2, FolderCog } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface Config {
@@ -11,6 +11,8 @@ interface Config {
   metaAppSecretPreview: string | null;
   metaVerifyToken: string;
   metaApiVersion: string;
+  mediaStoragePath: string;
+  mediaStoragePathDefault: string;
   source: 'db' | 'env';
 }
 
@@ -25,6 +27,7 @@ export default function SystemConfigPage() {
   const [verifyToken, setVerifyToken] = useState('');
   const [apiVersion,  setApiVersion]  = useState('v19.0');
   const [showSecret,  setShowSecret]  = useState(false);
+  const [mediaPath,   setMediaPath]   = useState('');
 
   async function load() {
     setLoading(true);
@@ -35,6 +38,7 @@ export default function SystemConfigPage() {
       setConfigId(data.metaConfigId || '');
       setVerifyToken(data.metaVerifyToken || '');
       setApiVersion(data.metaApiVersion || 'v19.0');
+      setMediaPath(data.mediaStoragePath || '');
       setAppSecret('');
     } catch { toast.error('Error al cargar configuración'); }
     finally { setLoading(false); }
@@ -52,6 +56,9 @@ export default function SystemConfigPage() {
       if (appSecret)   payload.metaAppSecret   = appSecret;
       if (verifyToken) payload.metaVerifyToken = verifyToken;
       if (apiVersion)  payload.metaApiVersion  = apiVersion;
+      // A diferencia de los campos de arriba, este SI se manda vacio a proposito:
+      // vacio = volver a usar la ruta por defecto (ver placeholder abajo).
+      payload.mediaStoragePath = mediaPath;
 
       await systemConfigApi.update(payload);
       toast.success('Configuración guardada');
@@ -200,6 +207,30 @@ export default function SystemConfigPage() {
             <option value="v19.0">v19.0</option>
             <option value="v18.0">v18.0</option>
           </select>
+        </div>
+
+        <div className="flex items-center gap-2 pb-2 pt-2" style={{ borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
+          <FolderCog className="w-4 h-4 text-ink-muted" />
+          <p className="text-xs font-semibold text-ink-muted uppercase tracking-wider">
+            Almacenamiento de multimedia
+          </p>
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-ink">Ruta en disco del servidor</label>
+          <input
+            type="text"
+            value={mediaPath}
+            onChange={(e) => setMediaPath(e.target.value)}
+            placeholder={config?.mediaStoragePathDefault || './media'}
+            className="input w-full text-sm font-mono"
+          />
+          <p className="text-[11px] text-ink-subtle">
+            Carpeta donde se guardan las fotos/audios/videos/documentos de WhatsApp (separados
+            por sub-carpeta de empresa adentro). Dejar vacío usa la ruta por defecto de arriba.
+            Si migrás a otro servidor, solo hay que poner acá la ruta nueva — no requiere
+            reiniciar ni tocar variables de entorno.
+          </p>
         </div>
 
         <button

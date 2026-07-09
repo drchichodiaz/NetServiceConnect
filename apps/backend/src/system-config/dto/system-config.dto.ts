@@ -6,4 +6,5 @@ export class UpdateSystemConfigDto {
   @IsOptional() @IsString() metaAppSecret?: string;
   @IsOptional() @IsString() metaVerifyToken?: string;
   @IsOptional() @IsString() metaApiVersion?: string;
+  @IsOptional() @IsString() mediaStoragePath?: string;
 }

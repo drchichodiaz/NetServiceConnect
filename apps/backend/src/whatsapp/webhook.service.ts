@@ -1,15 +1,22 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventBusService } from '../events/event-bus.service';
+import { MediaService } from '../media/media.service';
 
 @Injectable()
 export class WebhookService {
   private readonly logger = new Logger(WebhookService.name);
+  private readonly apiVersion: string;
 
   constructor(
     private prisma: PrismaService,
     private eventBus: EventBusService,
-  ) {}
+    private mediaService: MediaService,
+    config: ConfigService,
+  ) {
+    this.apiVersion = config.get('META_API_VERSION') || 'v19.0';
+  }
 
   async processWebhookPayload(payload: any) {
     if (payload?.object !== 'whatsapp_business_account') return;
@@ -31,16 +38,16 @@ export class WebhookService {
           continue;
         }
 
-        await this.processMessages(account.tenantId, value);
+        await this.processMessages(account.tenantId, account.accessToken, value);
         await this.processStatuses(account.tenantId, value);
       }
     }
   }
 
-  private async processMessages(tenantId: string, value: any) {
+  private async processMessages(tenantId: string, accessToken: string, value: any) {
     for (const msg of value.messages ?? []) {
       try {
-        await this.handleInboundMessage(tenantId, msg, value.contacts?.[0]);
+        await this.handleInboundMessage(tenantId, accessToken, msg, value.contacts?.[0]);
       } catch (err) {
         this.logger.error(`Error procesando mensaje ${msg.id}`, err);
       }
@@ -72,12 +79,28 @@ export class WebhookService {
     }
   }
 
-  private async handleInboundMessage(tenantId: string, msg: any, contactInfo: any) {
+  private async handleInboundMessage(tenantId: string, accessToken: string, msg: any, contactInfo: any) {
     // Extraer texto del mensaje según su tipo
     const body = this.extractBody(msg);
     const type = this.mapType(msg.type);
     const phone = msg.from;
     const contactName = contactInfo?.profile?.name;
+
+    // Descargar y guardar el media (si lo hay) separado por tenant, antes de crear el mensaje.
+    // Si falla la descarga no bloqueamos el procesamiento del mensaje: queda sin media
+    // adjunto pero el texto/etiqueta del mensaje se guarda igual.
+    const mediaId = this.extractMediaId(msg);
+    let mediaUrl: string | undefined;
+    let mediaMimeType: string | undefined;
+    if (mediaId) {
+      try {
+        const downloaded = await this.mediaService.downloadInboundMedia(tenantId, mediaId, accessToken, this.apiVersion);
+        mediaUrl = downloaded.relativePath;
+        mediaMimeType = downloaded.mimeType;
+      } catch (err) {
+        this.logger.error(`Error descargando media ${mediaId}`, err?.response?.data || err?.message || err);
+      }
+    }
 
     // Upsert de contacto
     const contact = await this.prisma.contact.upsert({
@@ -150,7 +173,8 @@ export class WebhookService {
         direction: 'INBOUND',
         type: type as any,
         body,
-        mediaUrl: this.extractMediaId(msg),
+        mediaUrl,
+        mediaMimeType,
         mediaType: msg.type !== 'text' ? msg.type : undefined,
         status: 'DELIVERED',
         externalId: msg.id,

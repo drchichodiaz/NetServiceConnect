@@ -8,10 +8,15 @@ import {
   Param,
   Res,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
+  ParseFilePipeBuilder,
   HttpCode,
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { Response } from 'express';
 import { WhatsAppService } from './whatsapp.service';
 import { EmbeddedSignupService } from './embedded-signup.service';
@@ -20,7 +25,10 @@ import { SystemConfigService } from '../system-config/system-config.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { SendMessageDto } from './dto/send-message.dto';
+import { SendMediaDto } from './dto/send-media.dto';
 import { EmbeddedSignupDto, RegisterPhoneWithPinDto, ConnectDirectDto } from './dto/embedded-signup.dto';
+
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024; // 25MB, generoso para imagen/audio/doc corto de WhatsApp
 
 @Controller('whatsapp')
 export class WhatsAppController {
@@ -112,5 +120,19 @@ export class WhatsAppController {
   @Post('send')
   sendMessage(@CurrentUser() user: any, @Body() dto: SendMessageDto) {
     return this.waService.sendMessage(user.tenantId, user.id, dto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('send-media')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: MAX_UPLOAD_BYTES } }))
+  sendMedia(
+    @CurrentUser() user: any,
+    @Body() dto: SendMediaDto,
+    @UploadedFile(
+      new ParseFilePipeBuilder().build({ fileIsRequired: true }),
+    )
+    file: Express.Multer.File,
+  ) {
+    return this.waService.sendMediaMessage(user.tenantId, user.id, dto, file);
   }
 }

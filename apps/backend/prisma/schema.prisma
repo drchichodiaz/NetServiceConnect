@@ -155,6 +155,7 @@ model Message {
   body           String?
   mediaUrl       String?
   mediaType      String?
+  mediaMimeType  String?
   status         MessageStatus    @default(SENT)
   externalId     String?
   rawPayload     Json?
@@ -263,6 +264,7 @@ model SystemConfig {
   metaAppSecret   String?
   metaVerifyToken String?
   metaApiVersion  String   @default("v19.0")
+  mediaStoragePath String?
   updatedAt       DateTime @updatedAt
 }
 

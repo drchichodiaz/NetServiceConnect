@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import * as path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateSystemConfigDto } from './dto/system-config.dto';
 
@@ -12,6 +13,9 @@ export interface ResolvedConfig {
 
 @Injectable()
 export class SystemConfigService {
+  // Default si nunca se configuro nada (ni en DB ni en .env): carpeta "media" junto al backend.
+  private readonly defaultMediaStoragePath = path.join(process.cwd(), 'media');
+
   constructor(
     private prisma: PrismaService,
     private config: ConfigService,
@@ -27,6 +31,21 @@ export class SystemConfigService {
     };
   }
 
+  /**
+   * Ruta absoluta donde se guardan los archivos multimedia de WhatsApp (separados por
+   * subcarpeta de tenant dentro). Configurable desde Settings > Sistema para que al migrar
+   * a otro server alcance con cambiar este valor, sin tocar variables de entorno ni redeploy.
+   * Prioridad: DB > MEDIA_STORAGE_PATH (.env) > default (./media junto al backend).
+   */
+  async getMediaStoragePath(): Promise<string> {
+    const record = await this.prisma.systemConfig.findUnique({ where: { id: '1' } });
+    return (
+      record?.mediaStoragePath ||
+      this.config.get('MEDIA_STORAGE_PATH') ||
+      this.defaultMediaStoragePath
+    );
+  }
+
   async getForFrontend() {
     const record = await this.prisma.systemConfig.findUnique({ where: { id: '1' } });
     const cfg = await this.get();
@@ -38,6 +57,8 @@ export class SystemConfigService {
       metaAppSecretPreview: cfg.metaAppSecret ? `...${cfg.metaAppSecret.slice(-4)}` : null,
       metaVerifyToken:      cfg.metaVerifyToken,
       metaApiVersion:       cfg.metaApiVersion,
+      mediaStoragePath:        record?.mediaStoragePath || '',
+      mediaStoragePathDefault: this.config.get('MEDIA_STORAGE_PATH') || this.defaultMediaStoragePath,
       source: fromDb ? 'db' : 'env',
     };
   }
@@ -49,6 +70,7 @@ export class SystemConfigService {
     if (data.metaVerifyToken !== undefined && data.metaVerifyToken !== '') payload.metaVerifyToken = data.metaVerifyToken;
     if (data.metaApiVersion  !== undefined && data.metaApiVersion  !== '') payload.metaApiVersion  = data.metaApiVersion;
     if (data.metaAppSecret && !data.metaAppSecret.startsWith('...')) payload.metaAppSecret = data.metaAppSecret;
+    if (data.mediaStoragePath !== undefined) payload.mediaStoragePath = data.mediaStoragePath || null;
 
     return this.prisma.systemConfig.upsert({
       where:  { id: '1' },

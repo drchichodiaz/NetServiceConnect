@@ -1,6 +1,6 @@
 'use client';
 import { useState, useRef, useEffect, KeyboardEvent } from 'react';
-import { Send, Sparkles, Loader2, Zap } from 'lucide-react';
+import { Send, Sparkles, Loader2, Zap, Paperclip, X, FileText } from 'lucide-react';
 import { whatsappApi, aiApi, quickRepliesApi } from '@/lib/api';
 import { useInboxStore } from '@/store/inbox.store';
 import { Contact, Message } from '@/types';
@@ -20,10 +20,26 @@ interface QuickReply {
   body: string;
 }
 
+const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024; // debe coincidir con el limite del backend
+
+function whatsappTypeFor(file: File): string {
+  if (file.type.startsWith('image/')) return 'image';
+  if (file.type.startsWith('audio/')) return 'audio';
+  if (file.type.startsWith('video/')) return 'video';
+  return 'document';
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export default function ReplyBox({ conversationId, contact }: Props) {
   const [text,         setText]         = useState('');
   const [isSending,    setIsSending]    = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
 
   // Quick replies state
   const [allReplies,   setAllReplies]   = useState<QuickReply[]>([]);
@@ -32,6 +48,7 @@ export default function ReplyBox({ conversationId, contact }: Props) {
   const [qrIndex,      setQrIndex]      = useState(0);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { addMessage } = useInboxStore();
 
   // Cargar quick replies al montar
@@ -47,7 +64,10 @@ export default function ReplyBox({ conversationId, contact }: Props) {
 
   // ── Send ────────────────────────────────────────────────────────────────────
   async function handleSend() {
-    if (!text.trim() || isSending) return;
+    if (isSending) return;
+    if (attachedFile) return handleSendMedia();
+    if (!text.trim()) return;
+
     const body = text.trim();
     setText('');
     setQrOpen(false);
@@ -62,6 +82,44 @@ export default function ReplyBox({ conversationId, contact }: Props) {
     } finally {
       setIsSending(false);
     }
+  }
+
+  async function handleSendMedia() {
+    if (!attachedFile || isSending) return;
+    const file = attachedFile;
+    const caption = text.trim();
+    setText('');
+    setAttachedFile(null);
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
+    setIsSending(true);
+    try {
+      const message = await whatsappApi.sendMedia({
+        conversationId,
+        to: contact.phone,
+        type: whatsappTypeFor(file),
+        caption: caption || undefined,
+        file,
+      });
+      addMessage(message as Message);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Error al enviar el archivo');
+      setAttachedFile(file);
+      setText(caption);
+    } finally {
+      setIsSending(false);
+    }
+  }
+
+  // ── Attach ──────────────────────────────────────────────────────────────────
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // permite re-seleccionar el mismo archivo despues
+    if (!file) return;
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      toast.error('El archivo supera el límite de 25MB');
+      return;
+    }
+    setAttachedFile(file);
   }
 
   // ── AI suggest ──────────────────────────────────────────────────────────────
@@ -162,13 +220,40 @@ export default function ReplyBox({ conversationId, contact }: Props) {
     }
   }
 
-  const canSend = text.trim().length > 0 && !isSending;
+  const canSend = (text.trim().length > 0 || !!attachedFile) && !isSending;
 
   return (
     <div
       className="bg-white px-4 py-3 shrink-0"
       style={{ borderTop: '1px solid var(--border)' }}
     >
+      <input
+        ref={fileInputRef}
+        type="file"
+        onChange={handleFileSelect}
+        className="hidden"
+      />
+
+      {/* ── Attached file preview ── */}
+      {attachedFile && (
+        <div
+          className="flex items-center gap-2 mb-2 px-3 py-2 rounded-xl animate-fade-in"
+          style={{ background: '#E8FBF0', border: '1px solid #C8F0D8' }}
+        >
+          <FileText className="w-4 h-4 shrink-0" style={{ color: '#128C7E' }} />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-medium text-ink truncate">{attachedFile.name}</p>
+            <p className="text-[11px] text-ink-subtle">{formatSize(attachedFile.size)}</p>
+          </div>
+          <button
+            onClick={() => setAttachedFile(null)}
+            className="w-6 h-6 rounded-lg flex items-center justify-center text-ink-subtle hover:text-ink hover:bg-black/5 shrink-0"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* ── AI loading hint ── */}
       {isGenerating && (
         <div className="flex items-center gap-2 mb-2 px-1">
@@ -241,7 +326,7 @@ export default function ReplyBox({ conversationId, contact }: Props) {
             onChange={handleChange}
             onKeyDown={handleKeyDown}
             onInput={autoResize}
-            placeholder="Escribe un mensaje o / para respuestas rápidas..."
+            placeholder={attachedFile ? 'Agregar un texto (opcional)...' : 'Escribe un mensaje o / para respuestas rápidas...'}
             rows={1}
             className={clsx(
               'w-full resize-none text-sm text-ink rounded-xl px-3.5 py-2.5 transition-all duration-150',
@@ -256,6 +341,16 @@ export default function ReplyBox({ conversationId, contact }: Props) {
 
         {/* Buttons */}
         <div className="flex items-center gap-1.5 pb-0.5">
+          {/* Attach */}
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isSending}
+            title="Adjuntar archivo"
+            className="w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-150 border border-border bg-white text-ink-muted hover:text-green-600 hover:border-green-200 hover:bg-green-50 disabled:opacity-50"
+          >
+            <Paperclip className="w-4 h-4" />
+          </button>
+
           {/* Emoji */}
           <EmojiPickerButton onEmojiSelect={insertEmoji} dropUp />
 

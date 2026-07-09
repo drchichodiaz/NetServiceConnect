@@ -18,6 +18,9 @@ build/
 .next/
 out/
 
+# ── Media de clientes (WhatsApp) ────────────────────────────────────────────────
+apps/backend/media/
+
 # ── Prisma ────────────────────────────────────────────────────────────────────
 apps/backend/prisma/migrations/dev.db
 apps/backend/prisma/*.db
