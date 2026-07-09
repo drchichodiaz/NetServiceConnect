@@ -17,21 +17,21 @@ export class ConversationsController {
     @Query('search') search?: string,
     @Query('contactId') contactId?: string,
   ) {
-    return this.service.findAll(user.tenantId, status, assignedUserId, search, contactId);
+    return this.service.findAll(user.tenantId, user, status, assignedUserId, search, contactId);
   }
 
   @Get(':id')
   findOne(@CurrentUser() user: any, @Param('id') id: string) {
-    return this.service.findOne(user.tenantId, id);
+    return this.service.findOne(user.tenantId, id, user);
   }
 
   @Patch(':id')
   update(@CurrentUser() user: any, @Param('id') id: string, @Body() dto: UpdateConversationDto) {
-    return this.service.update(user.tenantId, id, user.id, dto);
+    return this.service.update(user.tenantId, id, user.id, dto, user);
   }
 
   @Post(':id/read')
   markRead(@CurrentUser() user: any, @Param('id') id: string) {
-    return this.service.markRead(user.tenantId, id);
+    return this.service.markRead(user.tenantId, id, user);
   }
 }

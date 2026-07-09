@@ -6,12 +6,16 @@ import { UpdateConversationDto } from './dto/update-conversation.dto';
 export class ConversationsService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll(tenantId: string, status?: string, assignedUserId?: string, search?: string, contactId?: string) {
+  async findAll(tenantId: string, requester: any, status?: string, assignedUserId?: string, search?: string, contactId?: string) {
+    // Un AGENTE solo puede ver sus propias conversaciones asignadas, sin importar
+    // qué assignedUserId pida por query — ADMIN/SUPERVISOR ven todo el tenant.
+    const effectiveAssignedUserId = requester?.role === 'AGENT' ? requester.id : assignedUserId;
+
     return this.prisma.conversation.findMany({
       where: {
         tenantId,
         ...(status && { status: status as any }),
-        ...(assignedUserId && { assignedUserId }),
+        ...(effectiveAssignedUserId && { assignedUserId: effectiveAssignedUserId }),
         ...(contactId && { contactId }),
         ...(search && {
           contact: {
@@ -32,7 +36,7 @@ export class ConversationsService {
     });
   }
 
-  async findOne(tenantId: string, id: string) {
+  async findOne(tenantId: string, id: string, requester?: any) {
     const conv = await this.prisma.conversation.findFirst({
       where: { id, tenantId },
       include: {
@@ -43,11 +47,14 @@ export class ConversationsService {
       },
     });
     if (!conv) throw new NotFoundException('Conversation not found');
+    if (requester?.role === 'AGENT' && conv.assignedUserId !== requester.id) {
+      throw new NotFoundException('Conversation not found');
+    }
     return conv;
   }
 
-  async update(tenantId: string, id: string, actorId: string, dto: UpdateConversationDto) {
-    const conv = await this.findOne(tenantId, id);
+  async update(tenantId: string, id: string, actorId: string, dto: UpdateConversationDto, requester?: any) {
+    const conv = await this.findOne(tenantId, id, requester);
     const updates: any = {};
 
     if (dto.status !== undefined) updates.status = dto.status;
@@ -96,9 +103,13 @@ export class ConversationsService {
     return this.findOne(tenantId, id);
   }
 
-  async markRead(tenantId: string, id: string) {
-    return this.prisma.conversation.update({
-      where: { id },
+  async markRead(tenantId: string, id: string, requester?: any) {
+    return this.prisma.conversation.updateMany({
+      where: {
+        id,
+        tenantId,
+        ...(requester?.role === 'AGENT' && { assignedUserId: requester.id }),
+      },
       data: { unreadCount: 0 },
     });
   }
