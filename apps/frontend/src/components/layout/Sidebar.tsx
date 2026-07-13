@@ -15,17 +15,21 @@ const navItems = [
   { href: '/settings/team',      icon: Users,           label: 'Equipo' },
   { href: '/settings/tags',      icon: Tag,             label: 'Etiquetas' },
   { href: '/settings/quick-replies', icon: Zap,       label: 'Respuestas rápidas' },
-  { href: '/settings/ai',            icon: Sparkles,  label: 'Configuración IA' },
-  { href: '/settings/whatsapp',      icon: Settings,     label: 'WhatsApp' },
-  { href: '/settings/system',        icon: ShieldCheck,  label: 'Sistema' },
-  { href: '/settings/tenants',       icon: Building2,    label: 'Empresas', adminOnly: true },
+  { href: '/settings/ai',            icon: Sparkles,  label: 'Configuración IA', roles: ['ADMIN', 'SUPERVISOR'] },
+  { href: '/settings/whatsapp',      icon: Settings,     label: 'WhatsApp',      roles: ['ADMIN', 'SUPERVISOR'] },
+  { href: '/settings/system',        icon: ShieldCheck,  label: 'Sistema',       superAdminOnly: true },
+  { href: '/settings/tenants',       icon: Building2,    label: 'Empresas',      superAdminOnly: true },
 ];
 
 export default function Sidebar({ user }: Props) {
   const pathname = usePathname();
   const router   = useRouter();
   const logout   = useAuthStore((s) => s.logout);
-  const visibleItems = navItems.filter((item) => !item.adminOnly || user?.role === 'ADMIN');
+  const visibleItems = navItems.filter((item) => {
+    if (item.superAdminOnly) return !!user?.isSuperAdmin;
+    if (item.roles) return !!user?.role && (item.roles as string[]).includes(user.role);
+    return true;
+  });
 
   function handleLogout() {
     logout();

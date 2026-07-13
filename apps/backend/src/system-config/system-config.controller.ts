@@ -2,12 +2,10 @@ import { Controller, Get, Patch, Body, UseGuards } from '@nestjs/common';
 import { SystemConfigService } from './system-config.service';
 import { UpdateSystemConfigDto } from './dto/system-config.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
-import { RolesGuard } from '../common/guards/roles.guard';
-import { Roles } from '../common/decorators/roles.decorator';
+import { SuperAdminGuard } from '../common/guards/super-admin.guard';
 
 @Controller('system-config')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN')
+@UseGuards(JwtAuthGuard, SuperAdminGuard)
 export class SystemConfigController {
   constructor(private service: SystemConfigService) {}
 

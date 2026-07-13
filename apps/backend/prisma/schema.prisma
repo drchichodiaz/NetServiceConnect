@@ -41,6 +41,9 @@ model User {
   name      String
   role      UserRole @default(AGENT)
   isActive  Boolean  @default(true)
+  // Operador de la plataforma (no es "admin de una empresa") — puede ver/editar
+  // config global (System) y crear empresas nuevas. No tiene relacion con `role`.
+  isSuperAdmin Boolean @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

@@ -23,6 +23,8 @@ import { EmbeddedSignupService } from './embedded-signup.service';
 import { WebhookService } from './webhook.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { SendMessageDto } from './dto/send-message.dto';
 import { SendMediaDto } from './dto/send-media.dto';
@@ -77,21 +79,24 @@ export class WhatsAppController {
   // Recibe el `code` OAuth + session info del postMessage de Meta.
   // El backend hace el intercambio de código → token de larga duración.
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN' as any, 'SUPERVISOR' as any)
   @Post('embedded-signup')
   embeddedSignup(@CurrentUser() user: any, @Body() dto: EmbeddedSignupDto) {
     return this.signupService.processSignup(user.tenantId, dto);
   }
 
   // Registrar número con PIN de 2FA (si el signup lo requirió)
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN' as any, 'SUPERVISOR' as any)
   @Post('register-phone')
   registerPhone(@CurrentUser() user: any, @Body() dto: RegisterPhoneWithPinDto) {
     return this.signupService.registerPhoneWithPin(user.tenantId, dto.pin);
   }
 
   // Conexión manual con token temporal (API Setup de Meta — para desarrollo)
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN' as any, 'SUPERVISOR' as any)
   @Post('connect-direct')
   connectDirect(@CurrentUser() user: any, @Body() dto: ConnectDirectDto) {
     return this.signupService.connectDirect(
@@ -102,13 +107,15 @@ export class WhatsAppController {
     );
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN' as any, 'SUPERVISOR' as any)
   @Get('account')
   getAccount(@CurrentUser() user: any) {
     return this.signupService.getAccount(user.tenantId);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN' as any, 'SUPERVISOR' as any)
   @Delete('account')
   disconnect(@CurrentUser() user: any) {
     return this.signupService.disconnect(user.tenantId);
