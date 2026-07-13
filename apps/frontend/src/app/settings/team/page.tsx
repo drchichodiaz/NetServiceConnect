@@ -192,32 +192,34 @@ export default function TeamPage() {
                     )}
                   </div>
                   {editId === u.id && (
-                    <div className="px-5 pb-3.5 flex gap-2 animate-fade-in">
+                    <div className="px-5 pb-3.5 space-y-2 animate-fade-in">
                       <input
                         autoFocus
                         type="email"
                         placeholder="Email"
                         value={editEmail}
                         onChange={(e) => setEditEmail(e.target.value)}
-                        className="input flex-1"
+                        className="input w-full"
                       />
-                      <select
-                        value={editRole}
-                        onChange={(e) => setEditRole(e.target.value)}
-                        className="input"
-                      >
-                        <option value="AGENT">Agente</option>
-                        <option value="SUPERVISOR">Supervisor</option>
-                        {me?.role === 'ADMIN' && <option value="ADMIN">Admin</option>}
-                      </select>
-                      <button
-                        onClick={() => handleSaveEdit(u.id)}
-                        disabled={editSaving}
-                        className="btn-primary"
-                      >
-                        {editSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                        Guardar
-                      </button>
+                      <div className="flex gap-2">
+                        <select
+                          value={editRole}
+                          onChange={(e) => setEditRole(e.target.value)}
+                          className="input flex-1"
+                        >
+                          <option value="AGENT">Agente</option>
+                          <option value="SUPERVISOR">Supervisor</option>
+                          {me?.role === 'ADMIN' && <option value="ADMIN">Admin</option>}
+                        </select>
+                        <button
+                          onClick={() => handleSaveEdit(u.id)}
+                          disabled={editSaving}
+                          className="btn-primary shrink-0"
+                        >
+                          {editSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                          Guardar
+                        </button>
+                      </div>
                     </div>
                   )}
                   {pwEditId === u.id && (
