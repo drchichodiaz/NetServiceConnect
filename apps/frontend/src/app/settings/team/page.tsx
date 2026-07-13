@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { usersApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
-import { UserPlus, Loader2, X, KeyRound } from 'lucide-react';
+import { UserPlus, Loader2, X, KeyRound, Pencil } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface TeamUser { id: string; name: string; email: string; role: string; isActive: boolean; }
@@ -23,6 +23,10 @@ export default function TeamPage() {
   const [pwEditId,  setPwEditId]  = useState<string | null>(null);
   const [pwValue,   setPwValue]   = useState('');
   const [pwSaving,  setPwSaving]  = useState(false);
+  const [editId,    setEditId]    = useState<string | null>(null);
+  const [editEmail, setEditEmail] = useState('');
+  const [editRole,  setEditRole]  = useState('AGENT');
+  const [editSaving, setEditSaving] = useState(false);
 
   useEffect(() => {
     usersApi.list().then(setUsers).finally(() => setIsLoading(false));
@@ -47,8 +51,30 @@ export default function TeamPage() {
   const canManage = me?.role === 'ADMIN' || me?.role === 'SUPERVISOR';
 
   function startPasswordEdit(id: string) {
+    setEditId(null);
     setPwEditId(id);
     setPwValue('');
+  }
+
+  function startEdit(u: TeamUser) {
+    setPwEditId(null);
+    setEditId(u.id);
+    setEditEmail(u.email);
+    setEditRole(u.role);
+  }
+
+  async function handleSaveEdit(id: string) {
+    setEditSaving(true);
+    try {
+      const updated = await usersApi.update(id, { email: editEmail, role: editRole });
+      setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, ...updated } : u)));
+      toast.success('Usuario actualizado');
+      setEditId(null);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Error al actualizar usuario');
+    } finally {
+      setEditSaving(false);
+    }
   }
 
   async function handleChangePassword(id: string) {
@@ -148,6 +174,15 @@ export default function TeamPage() {
                     </span>
                     {canManage && (
                       <button
+                        onClick={() => (editId === u.id ? setEditId(null) : startEdit(u))}
+                        title="Editar email/rol"
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-ink-subtle hover:text-ink hover:bg-black/5 shrink-0"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                    )}
+                    {canManage && (
+                      <button
                         onClick={() => (pwEditId === u.id ? setPwEditId(null) : startPasswordEdit(u.id))}
                         title="Cambiar contrasena"
                         className="w-8 h-8 rounded-lg flex items-center justify-center text-ink-subtle hover:text-ink hover:bg-black/5 shrink-0"
@@ -156,6 +191,35 @@ export default function TeamPage() {
                       </button>
                     )}
                   </div>
+                  {editId === u.id && (
+                    <div className="px-5 pb-3.5 flex gap-2 animate-fade-in">
+                      <input
+                        autoFocus
+                        type="email"
+                        placeholder="Email"
+                        value={editEmail}
+                        onChange={(e) => setEditEmail(e.target.value)}
+                        className="input flex-1"
+                      />
+                      <select
+                        value={editRole}
+                        onChange={(e) => setEditRole(e.target.value)}
+                        className="input"
+                      >
+                        <option value="AGENT">Agente</option>
+                        <option value="SUPERVISOR">Supervisor</option>
+                        {me?.role === 'ADMIN' && <option value="ADMIN">Admin</option>}
+                      </select>
+                      <button
+                        onClick={() => handleSaveEdit(u.id)}
+                        disabled={editSaving}
+                        className="btn-primary"
+                      >
+                        {editSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                        Guardar
+                      </button>
+                    </div>
+                  )}
                   {pwEditId === u.id && (
                     <div className="px-5 pb-3.5 flex gap-2 animate-fade-in">
                       <input

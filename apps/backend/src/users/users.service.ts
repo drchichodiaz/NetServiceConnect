@@ -48,6 +48,13 @@ export class UsersService {
   async update(tenantId: string, id: string, dto: UpdateUserDto) {
     await this.findOne(tenantId, id);
 
+    if (dto.email) {
+      const existing = await this.prisma.user.findUnique({
+        where: { tenantId_email: { tenantId, email: dto.email } },
+      });
+      if (existing && existing.id !== id) throw new ConflictException('Email already registered');
+    }
+
     const { password, ...rest } = dto;
     const data: any = { ...rest };
     if (password) {
