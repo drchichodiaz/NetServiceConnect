@@ -134,6 +134,20 @@ export const systemConfigApi = {
   }) => api.patch('/system-config', data).then((r) => r.data),
 };
 
+// ─── Tenants (alta de empresas — solo operador de la plataforma) ──────────────
+
+export const tenantsApi = {
+  list: () => api.get('/tenants').then((r) => r.data),
+  create: (data: {
+    name: string;
+    slug: string;
+    plan?: string;
+    adminName: string;
+    adminEmail: string;
+    adminPassword: string;
+  }) => api.post('/tenants', data).then((r) => r.data),
+};
+
 // ─── Contacts ─────────────────────────────────────────────────────────────────
 
 export const contactsApi = {

@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { MessageSquare, Users, Tag, Settings, LogOut, LayoutDashboard, Zap, Sparkles, BookUser, ShieldCheck } from 'lucide-react';
+import { MessageSquare, Users, Tag, Settings, LogOut, LayoutDashboard, Zap, Sparkles, BookUser, ShieldCheck, Building2 } from 'lucide-react';
 import { useAuthStore } from '@/store/auth.store';
 import { User } from '@/types';
 import clsx from 'clsx';
@@ -18,12 +18,14 @@ const navItems = [
   { href: '/settings/ai',            icon: Sparkles,  label: 'Configuración IA' },
   { href: '/settings/whatsapp',      icon: Settings,     label: 'WhatsApp' },
   { href: '/settings/system',        icon: ShieldCheck,  label: 'Sistema' },
+  { href: '/settings/tenants',       icon: Building2,    label: 'Empresas', adminOnly: true },
 ];
 
 export default function Sidebar({ user }: Props) {
   const pathname = usePathname();
   const router   = useRouter();
   const logout   = useAuthStore((s) => s.logout);
+  const visibleItems = navItems.filter((item) => !item.adminOnly || user?.role === 'ADMIN');
 
   function handleLogout() {
     logout();
@@ -54,7 +56,7 @@ export default function Sidebar({ user }: Props) {
 
       {/* Nav */}
       <nav className="flex-1 flex flex-col gap-1 w-full px-2">
-        {navItems.map(({ href, icon: Icon, label }) => {
+        {visibleItems.map(({ href, icon: Icon, label }) => {
           const active = pathname.startsWith(href);
           return (
             <div key={href} className="relative group">
