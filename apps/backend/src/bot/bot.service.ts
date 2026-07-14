@@ -31,6 +31,10 @@ const MENU_OPTIONS: { id: string; title: string }[] = [
 const DEFAULT_CONFIG_TEXT = 'Todavía no cargamos esta información. Ya te paso con un agente para ayudarte.';
 const MAX_LIST_ROWS = 10;
 const HUMAN_ESCAPE_RE = /\b(agente|humano)\b/i;
+// Cuántas respuestas no reconocidas seguidas tolera el bot en un mismo prompt
+// (menú, sucursal, follow-up, confirmación) antes de derivar a un humano en vez
+// de seguir reenviando lo mismo indefinidamente.
+const MAX_UNKNOWN_RETRIES = 3;
 
 @Injectable()
 export class BotService {
@@ -100,16 +104,20 @@ export class BotService {
     switch (optionId) {
       case 'horarios':
       case 'servicios':
+        await this.resetRetryCount(conversationId);
         return this.replyWithConfigText(tenantId, conversationId, phone, optionId, account);
       case 'sucursales':
+        await this.resetRetryCount(conversationId);
         return this.startBranchLookup(tenantId, conversationId, phone, account);
       case 'consultar_orden':
+        await this.resetRetryCount(conversationId);
         return this.askOrderNumber(tenantId, conversationId, phone, account);
       case 'agente':
+        await this.resetRetryCount(conversationId);
         await this.sendText(tenantId, conversationId, phone, account, 'Perfecto, ya te conecto con un agente.');
         return this.handoffToHuman(tenantId, conversationId, 'menu_selection');
       default:
-        return this.resendMenuWithHint(tenantId, conversationId, phone, account);
+        return this.resendMenuWithHint(tenantId, conversationId, phone, account, msg);
     }
   }
 
@@ -194,12 +202,14 @@ export class BotService {
     await this.prisma.conversation.update({ where: { id: conversationId }, data: { botState: 'BRANCH_MENU' } });
   }
 
-  private async resendBranchMenuWithHint(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds) {
-    const sent = await this.sendText(tenantId, conversationId, phone, account, 'No identifiqué esa opción. Elegí una sucursal de la lista:');
-    if (!sent) {
-      return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
-    }
-    return this.startBranchLookup(tenantId, conversationId, phone, account);
+  private async resendBranchMenuWithHint(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, msg: any) {
+    return this.trackUnrecognizedReply(tenantId, conversationId, phone, account, msg, async () => {
+      const sent = await this.sendText(tenantId, conversationId, phone, account, 'No identifiqué esa opción. Elegí una sucursal de la lista:');
+      if (!sent) {
+        return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
+      }
+      return this.startBranchLookup(tenantId, conversationId, phone, account);
+    });
   }
 
   private async handleBranchMenuReply(tenantId: string, conversationId: string, phone: string, msg: any, account: WhatsAppAccountCreds) {
@@ -209,8 +219,9 @@ export class BotService {
       : null;
 
     if (!branch) {
-      return this.resendBranchMenuWithHint(tenantId, conversationId, phone, account);
+      return this.resendBranchMenuWithHint(tenantId, conversationId, phone, account, msg);
     }
+    await this.resetRetryCount(conversationId);
     return this.showBranchDetails(tenantId, conversationId, phone, account, branch);
   }
 
@@ -300,13 +311,17 @@ export class BotService {
     const optionId = this.extractReplyId(msg);
     switch (optionId) {
       case 'branch_other':
+        await this.resetRetryCount(conversationId);
         return this.startBranchLookup(tenantId, conversationId, phone, account);
       case 'branch_menu':
+        await this.resetRetryCount(conversationId);
         return this.sendMenu(tenantId, conversationId, phone);
       case 'branch_agent':
         return this.handoffToHuman(tenantId, conversationId, 'branch_followup');
       default:
-        return this.sendBranchFollowup(tenantId, conversationId, phone, account);
+        return this.trackUnrecognizedReply(tenantId, conversationId, phone, account, msg, () =>
+          this.sendBranchFollowup(tenantId, conversationId, phone, account),
+        );
     }
   }
 
@@ -330,11 +345,14 @@ export class BotService {
       case 'yes':
         return this.closeAsBotResolved(tenantId, conversationId, phone, account);
       case 'menu':
+        await this.resetRetryCount(conversationId);
         return this.sendMenu(tenantId, conversationId, phone);
       case 'agent':
         return this.handoffToHuman(tenantId, conversationId, 'resolution_confirmation');
       default:
-        return this.sendResolutionConfirmation(tenantId, conversationId, phone, account);
+        return this.trackUnrecognizedReply(tenantId, conversationId, phone, account, msg, () =>
+          this.sendResolutionConfirmation(tenantId, conversationId, phone, account),
+        );
     }
   }
 
@@ -406,13 +424,15 @@ export class BotService {
 
   // ─── Menú principal: reenvío ante texto no reconocido ──────────────────────
 
-  private async resendMenuWithHint(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds) {
-    const sent = await this.sendText(tenantId, conversationId, phone, account, 'No entendí tu respuesta. Elegí una opción de la lista:');
-    if (!sent) {
-      return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
-    }
-    // sendMenu ya se auto-deriva a un humano si el reenvío del menú también falla.
-    await this.sendMenu(tenantId, conversationId, phone);
+  private async resendMenuWithHint(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, msg: any) {
+    return this.trackUnrecognizedReply(tenantId, conversationId, phone, account, msg, async () => {
+      const sent = await this.sendText(tenantId, conversationId, phone, account, 'No entendí tu respuesta. Elegí una opción de la lista:');
+      if (!sent) {
+        return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
+      }
+      // sendMenu ya se auto-deriva a un humano si el reenvío del menú también falla.
+      await this.sendMenu(tenantId, conversationId, phone);
+    });
   }
 
   // ─── Handoff a humano (idempotente) ────────────────────────────────────────
@@ -443,6 +463,51 @@ export class BotService {
     }
 
     this.eventBus.publish({ type: 'conversation_updated', tenantId, payload: { conversationId } });
+  }
+
+  // ─── Contador de respuestas no reconocidas ─────────────────────────────────
+
+  /**
+   * Se llama desde cada prompt del bot (menú, sucursal, follow-up, confirmación)
+   * cuando la respuesta del cliente no matchea ninguna opción esperada. Reenvía
+   * el mismo prompt hasta MAX_UNKNOWN_RETRIES veces seguidas; a partir de ahí
+   * deriva a un humano en vez de seguir dando vueltas indefinidamente si el
+   * cliente nunca toca una opción válida.
+   */
+  private async trackUnrecognizedReply(
+    tenantId: string,
+    conversationId: string,
+    phone: string,
+    account: WhatsAppAccountCreds,
+    msg: any,
+    resend: () => Promise<any>,
+  ) {
+    const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId }, select: { botContext: true } });
+    const retryCount = ((conv?.botContext as any)?.retryCount ?? 0) + 1;
+    const rawReply = msg.text?.body || msg.interactive?.list_reply?.title || msg.interactive?.button_reply?.title || `[${msg.type}]`;
+
+    await this.prisma.auditLog.create({
+      data: { tenantId, conversationId, action: 'bot.unknown_message', metadata: { retryCount, rawReply } },
+    });
+
+    if (retryCount >= MAX_UNKNOWN_RETRIES) {
+      await this.prisma.auditLog.create({ data: { tenantId, conversationId, action: 'bot.max_retries_reached' } });
+      await this.sendText(
+        tenantId,
+        conversationId,
+        phone,
+        account,
+        'Parece que necesitás una atención más específica. Ya te comunico con uno de nuestros asesores.',
+      );
+      return this.handoffToHuman(tenantId, conversationId, 'max_retries_reached');
+    }
+
+    await this.prisma.conversation.update({ where: { id: conversationId }, data: { botContext: { retryCount } } });
+    return resend();
+  }
+
+  private async resetRetryCount(conversationId: string) {
+    await this.prisma.conversation.update({ where: { id: conversationId }, data: { botContext: { retryCount: 0 } } });
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────────────
