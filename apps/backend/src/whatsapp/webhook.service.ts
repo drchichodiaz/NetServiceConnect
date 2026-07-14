@@ -141,6 +141,9 @@ export class WebhookService {
       await this.prisma.auditLog.create({
         data: { tenantId, conversationId: conversation.id, action: 'conversation.created' },
       });
+      await this.prisma.auditLog.create({
+        data: { tenantId, conversationId: conversation.id, action: 'bot.started' },
+      });
     } else {
       await this.prisma.conversation.update({
         where: { id: conversation.id },

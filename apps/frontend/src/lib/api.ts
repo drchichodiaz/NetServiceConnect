@@ -128,6 +128,28 @@ export const botConfigApi = {
     api.patch('/bot-config', data).then((r) => r.data),
 };
 
+export interface BranchInput {
+  name: string;
+  address: string;
+  scheduleText?: string;
+  phone?: string;
+  mapsUrl?: string;
+  servicesText?: string;
+  active?: boolean;
+  sortOrder?: number;
+}
+
+export const branchesApi = {
+  list: () => api.get('/bot-config/branches').then((r) => r.data),
+  create: (data: BranchInput) => api.post('/bot-config/branches', data).then((r) => r.data),
+  update: (id: string, data: Partial<BranchInput>) => api.patch(`/bot-config/branches/${id}`, data).then((r) => r.data),
+  remove: (id: string) => api.delete(`/bot-config/branches/${id}`).then((r) => r.data),
+};
+
+export const botStatsApi = {
+  get: (range: 'today' | '7d' | '30d') => api.get('/bot-config/stats', { params: { range } }).then((r) => r.data),
+};
+
 // ─── Stats ────────────────────────────────────────────────────────────────────
 
 export const statsApi = {

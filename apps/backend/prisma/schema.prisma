@@ -31,6 +31,7 @@ model Tenant {
   quickReplies     QuickReply[]
   messageTemplates MessageTemplate[]
   botConfig        TenantBotConfig?
+  branches         TenantBranch[]
 }
 
 // ─── User ─────────────────────────────────────────────────────────────────────
@@ -128,6 +129,10 @@ model Conversation {
   // bot no debe tocarlas; solo el webhook crea conversaciones nuevas en modo BOT.
   mode            ConversationMode   @default(AGENT)
   botState        ConversationBotState?
+  // Contexto liviano del bot que necesita sobrevivir entre turnos (ej: coincidencias
+  // pendientes de una busqueda de sucursal). No confundir con AuditLog, que es historico.
+  botContext      Json?
+  closedReason    String?
   lastMessageAt   DateTime?
   lastMessageText String?
   lastInboundAt   DateTime?
@@ -161,6 +166,10 @@ enum ConversationMode {
 enum ConversationBotState {
   MENU
   AWAITING_ORDER_NUMBER
+  BRANCH_MENU
+  AWAITING_BRANCH_QUERY
+  AWAITING_BRANCH_FOLLOWUP
+  AWAITING_RESOLUTION_CONFIRMATION
 }
 
 // ─── Message ──────────────────────────────────────────────────────────────────
@@ -311,6 +320,27 @@ model TenantBotConfig {
   updatedAt         DateTime @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+// ─── Tenant Branch (sucursales administrables para el submenu del bot) ────────
+
+model TenantBranch {
+  id           String   @id @default(cuid())
+  tenantId     String
+  name         String
+  address      String
+  scheduleText String?
+  phone        String?
+  mapsUrl      String?
+  servicesText String?
+  active       Boolean  @default(true)
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
 }
 
 // ─── System Config (global, singleton) ───────────────────────────────────────
