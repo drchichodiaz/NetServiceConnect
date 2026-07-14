@@ -3,8 +3,10 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventBusService } from '../events/event-bus.service';
 import { MediaService } from '../media/media.service';
+import { TemplatesService } from '../templates/templates.service';
 import { SendMessageDto } from './dto/send-message.dto';
 import { SendMediaDto } from './dto/send-media.dto';
+import { StartConversationDto } from './dto/start-conversation.dto';
 import axios from 'axios';
 // form-data es un modulo CommonJS puro (module.exports = FormData) y este proyecto
 // no tiene esModuleInterop activado, asi que un default-import ("import FormData from...")
@@ -21,6 +23,7 @@ export class WhatsAppService {
     private prisma: PrismaService,
     private eventBus: EventBusService,
     private mediaService: MediaService,
+    private templatesService: TemplatesService,
   ) {
     this.apiVersion = config.get('META_API_VERSION') || 'v19.0';
   }
@@ -187,6 +190,124 @@ export class WhatsAppService {
     });
 
     return message;
+  }
+
+  /**
+   * Inicia una conversacion con un contacto nuevo o existente usando una plantilla
+   * aprobada — necesario porque WhatsApp no permite texto libre fuera de la ventana
+   * de 24hs de servicio al cliente. Quien la inicia queda asignado como agente.
+   */
+  async startConversation(tenantId: string, senderId: string, dto: StartConversationDto) {
+    const account = await this.prisma.whatsAppAccount.findUnique({ where: { tenantId } });
+    if (!account || !account.isActive) {
+      throw new BadRequestException('No active WhatsApp account found for this tenant');
+    }
+
+    const template = await this.templatesService.findApprovedOrThrow(tenantId, dto.templateId);
+
+    let contact: { id: string; name: string | null; phone: string };
+    if (dto.contactId) {
+      const found = await this.prisma.contact.findFirst({ where: { id: dto.contactId, tenantId } });
+      if (!found) throw new NotFoundException('Contact not found');
+      contact = found;
+    } else {
+      if (!dto.phone) throw new BadRequestException('phone is required to create a new contact');
+      contact = await this.prisma.contact.upsert({
+        where: { tenantId_phone: { tenantId, phone: dto.phone } },
+        update: dto.name ? { name: dto.name } : {},
+        create: { tenantId, phone: dto.phone, name: dto.name },
+      });
+    }
+
+    let conversation = await this.prisma.conversation.findFirst({
+      where: { tenantId, contactId: contact.id, status: { not: 'CLOSED' } },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const now = new Date();
+    const variables = dto.variables ?? [];
+    const renderedBody = this.renderTemplateBody(template.bodyText, variables);
+
+    if (!conversation) {
+      conversation = await this.prisma.conversation.create({
+        data: {
+          tenantId,
+          contactId: contact.id,
+          status: 'OPEN',
+          assignedUserId: senderId,
+          lastMessageAt: now,
+          lastMessageText: renderedBody,
+          unreadCount: 0,
+        },
+      });
+
+      await this.prisma.auditLog.create({
+        data: { tenantId, userId: senderId, conversationId: conversation.id, action: 'conversation.started' },
+      });
+    }
+
+    const payload = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: contact.phone,
+      type: 'template',
+      template: {
+        name: template.name,
+        language: { code: template.language },
+        ...(variables.length > 0 && {
+          components: [{ type: 'body', parameters: variables.map((v) => ({ type: 'text', text: v })) }],
+        }),
+      },
+    };
+
+    let externalId: string | undefined;
+    try {
+      const url = `https://graph.facebook.com/${this.apiVersion}/${account.phoneNumberId}/messages`;
+      const { data } = await axios.post(url, payload, {
+        headers: { Authorization: `Bearer ${account.accessToken}`, 'Content-Type': 'application/json' },
+      });
+      externalId = data?.messages?.[0]?.id;
+    } catch (err) {
+      this.logger.error('Failed to send template message', err?.response?.data);
+      throw new BadRequestException(err?.response?.data?.error?.message || 'Failed to send template message');
+    }
+
+    const [message] = await Promise.all([
+      this.prisma.message.create({
+        data: {
+          tenantId,
+          conversationId: conversation.id,
+          senderId,
+          direction: 'OUTBOUND',
+          type: 'TEMPLATE',
+          body: renderedBody,
+          status: externalId ? 'SENT' : 'FAILED',
+          externalId,
+        },
+      }),
+      this.prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { lastMessageAt: now, lastMessageText: renderedBody, unreadCount: 0 },
+      }),
+    ]);
+
+    this.eventBus.publish({
+      type: 'new_message',
+      tenantId,
+      payload: {
+        message,
+        conversationId: conversation.id,
+        contact: { id: contact.id, name: contact.name, phone: contact.phone },
+        lastMessageText: renderedBody,
+        lastMessageAt: now.toISOString(),
+      },
+    });
+
+    return { conversation, message };
+  }
+
+  private renderTemplateBody(bodyText: string, variables: string[]): string {
+    return bodyText.replace(/\{\{(\d+)\}\}/g, (_, idx) => variables[Number(idx) - 1] ?? `{{${idx}}}`);
   }
 
   private async uploadMediaToMeta(phoneNumberId: string, accessToken: string, file: Express.Multer.File): Promise<string> {

@@ -29,6 +29,7 @@ model Tenant {
   auditLogs        AuditLog[]
   internalNotes    InternalNote[]
   quickReplies     QuickReply[]
+  messageTemplates MessageTemplate[]
 }
 
 // ─── User ─────────────────────────────────────────────────────────────────────
@@ -256,6 +257,28 @@ model QuickReply {
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, shortcut])
+  @@index([tenantId])
+}
+
+// ─── Message Template (plantillas de WhatsApp, aprobadas por Meta) ────────────
+
+model MessageTemplate {
+  id             String   @id @default(cuid())
+  tenantId       String
+  name           String
+  language       String   @default("es")
+  category       String   // MARKETING | UTILITY | AUTHENTICATION
+  bodyText       String
+  variableCount  Int      @default(0)
+  status         String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  metaTemplateId String?
+  rejectReason   String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, name, language])
   @@index([tenantId])
 }
 

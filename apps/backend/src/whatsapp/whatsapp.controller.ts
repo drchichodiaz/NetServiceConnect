@@ -28,6 +28,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { SendMessageDto } from './dto/send-message.dto';
 import { SendMediaDto } from './dto/send-media.dto';
+import { StartConversationDto } from './dto/start-conversation.dto';
 import { EmbeddedSignupDto, RegisterPhoneWithPinDto, ConnectDirectDto } from './dto/embedded-signup.dto';
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024; // 25MB, generoso para imagen/audio/doc corto de WhatsApp
@@ -127,6 +128,12 @@ export class WhatsAppController {
   @Post('send')
   sendMessage(@CurrentUser() user: any, @Body() dto: SendMessageDto) {
     return this.waService.sendMessage(user.tenantId, user.id, dto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('start-conversation')
+  startConversation(@CurrentUser() user: any, @Body() dto: StartConversationDto) {
+    return this.waService.startConversation(user.tenantId, user.id, dto);
   }
 
   @UseGuards(JwtAuthGuard)

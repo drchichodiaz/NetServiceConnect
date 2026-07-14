@@ -1,15 +1,27 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
-import { contactsApi, conversationsApi } from '@/lib/api';
+import { useRouter } from 'next/navigation';
+import { contactsApi, conversationsApi, templatesApi, whatsappApi } from '@/lib/api';
+import { useInboxStore } from '@/store/inbox.store';
 import { Contact, Conversation } from '@/types';
 import {
   Search, Phone, Mail, Building2, MessageSquare,
-  Pencil, Check, X, ChevronRight, Users,
+  Pencil, Check, X, ChevronRight, Users, MessageCirclePlus, Loader2,
 } from 'lucide-react';
 import { formatDistanceToNow, format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
+
+interface Template {
+  id: string;
+  name: string;
+  language: string;
+  category: string;
+  bodyText: string;
+  variableCount: number;
+  status: string;
+}
 
 const STATUS_CONFIG = {
   OPEN:    { label: 'Abierto',   color: '#25D366', bg: '#E8FBF0' },
@@ -40,6 +52,7 @@ function Avatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' | 'lg'
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ContactsPage() {
+  const router = useRouter();
   const [contacts,  setContacts]  = useState<Contact[]>([]);
   const [loading,   setLoading]   = useState(true);
   const [search,    setSearch]    = useState('');
@@ -51,6 +64,10 @@ export default function ContactsPage() {
   const [editing,   setEditing]   = useState(false);
   const [editForm,  setEditForm]  = useState({ name: '', email: '', company: '' });
   const [saving,    setSaving]    = useState(false);
+
+  // Nueva conversación
+  const [showNewConv, setShowNewConv] = useState(false);
+  const [newConvContact, setNewConvContact] = useState<Contact | null>(null);
 
   const load = useCallback(async (q?: string) => {
     setLoading(true);
@@ -105,6 +122,14 @@ export default function ContactsPage() {
     }
   }
 
+  async function handleConversationStarted(conversationId: string) {
+    setShowNewConv(false);
+    setNewConvContact(null);
+    await useInboxStore.getState().loadConversations();
+    useInboxStore.getState().selectConversation(conversationId);
+    router.push('/inbox');
+  }
+
   const displayName = selected ? (selected.name || selected.phone) : '';
 
   return (
@@ -121,9 +146,18 @@ export default function ContactsPage() {
             <h1 className="text-base font-bold text-ink" style={{ letterSpacing: '-0.02em' }}>
               Contactos
             </h1>
-            <span className="text-xs text-ink-muted bg-surface-muted rounded-full px-2 py-0.5 font-medium">
-              {contacts.length}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-ink-muted bg-surface-muted rounded-full px-2 py-0.5 font-medium">
+                {contacts.length}
+              </span>
+              <button
+                onClick={() => { setNewConvContact(null); setShowNewConv(true); }}
+                title="Nueva conversación con un contacto nuevo"
+                className="w-7 h-7 rounded-lg flex items-center justify-center text-ink-subtle hover:text-ink hover:bg-black/5"
+              >
+                <MessageCirclePlus className="w-4 h-4" />
+              </button>
+            </div>
           </div>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-muted" />
@@ -222,10 +256,19 @@ export default function ContactsPage() {
                   </div>
                 </div>
                 {!editing && (
-                  <button onClick={startEdit} className="btn-ghost flex items-center gap-1.5 text-xs">
-                    <Pencil className="w-3.5 h-3.5" />
-                    Editar
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => { setNewConvContact(selected); setShowNewConv(true); }}
+                      className="btn-ghost flex items-center gap-1.5 text-xs"
+                    >
+                      <MessageCirclePlus className="w-3.5 h-3.5" />
+                      Nueva conversación
+                    </button>
+                    <button onClick={startEdit} className="btn-ghost flex items-center gap-1.5 text-xs">
+                      <Pencil className="w-3.5 h-3.5" />
+                      Editar
+                    </button>
+                  </div>
                 )}
               </div>
 
@@ -323,6 +366,14 @@ export default function ContactsPage() {
           </div>
         </div>
       )}
+
+      {showNewConv && (
+        <NewConversationModal
+          contact={newConvContact}
+          onClose={() => { setShowNewConv(false); setNewConvContact(null); }}
+          onSent={handleConversationStarted}
+        />
+      )}
     </div>
   );
 }
@@ -354,6 +405,128 @@ function EditField({ label, value, onChange, placeholder, type = 'text' }: {
         placeholder={placeholder}
         className="input w-full text-sm"
       />
+    </div>
+  );
+}
+
+function NewConversationModal({ contact, onClose, onSent }: {
+  contact: Contact | null;
+  onClose: () => void;
+  onSent: (conversationId: string) => void;
+}) {
+  const [phone, setPhone] = useState(contact?.phone ?? '');
+  const [name,  setName]  = useState(contact?.name ?? '');
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [loadingTemplates, setLoadingTemplates] = useState(true);
+  const [templateId, setTemplateId] = useState('');
+  const [variables, setVariables] = useState<string[]>([]);
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    templatesApi.list()
+      .then((all: Template[]) => setTemplates(all.filter((t) => t.status === 'APPROVED')))
+      .catch(() => toast.error('Error al cargar plantillas'))
+      .finally(() => setLoadingTemplates(false));
+  }, []);
+
+  const selectedTemplate = templates.find((t) => t.id === templateId) || null;
+
+  function handleSelectTemplate(id: string) {
+    setTemplateId(id);
+    const t = templates.find((tpl) => tpl.id === id);
+    setVariables(t ? Array(t.variableCount).fill('') : []);
+  }
+
+  async function handleSend() {
+    if (!templateId) { toast.error('Elegí una plantilla'); return; }
+    if (!contact && !phone.trim()) { toast.error('Ingresá el teléfono del contacto'); return; }
+
+    setSending(true);
+    try {
+      const result = await whatsappApi.startConversation({
+        contactId: contact?.id,
+        phone: contact ? undefined : phone.trim(),
+        name: contact ? undefined : (name.trim() || undefined),
+        templateId,
+        variables,
+      });
+      toast.success('Conversación iniciada');
+      onSent(result.conversation.id);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Error al iniciar la conversación');
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+      <div className="card w-full max-w-md p-5 animate-pop">
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-sm font-semibold text-ink">
+            {contact ? `Nueva conversación con ${contact.name || contact.phone}` : 'Nueva conversación'}
+          </p>
+          <button onClick={onClose} className="w-7 h-7 rounded-lg flex items-center justify-center text-ink-subtle hover:bg-black/5">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          {!contact && (
+            <>
+              <input
+                required placeholder="Teléfono (con código de país)" value={phone}
+                onChange={(e) => setPhone(e.target.value)} className="input w-full"
+              />
+              <input
+                placeholder="Nombre (opcional)" value={name}
+                onChange={(e) => setName(e.target.value)} className="input w-full"
+              />
+            </>
+          )}
+
+          {loadingTemplates ? (
+            <div className="flex items-center gap-2 text-sm text-ink-muted py-2">
+              <Loader2 className="w-4 h-4 animate-spin" /> Cargando plantillas...
+            </div>
+          ) : templates.length === 0 ? (
+            <p className="text-sm text-ink-muted py-2">
+              No tenés plantillas aprobadas todavía. Creá una en Settings → Plantillas y esperá su aprobación de Meta.
+            </p>
+          ) : (
+            <select value={templateId} onChange={(e) => handleSelectTemplate(e.target.value)} className="input w-full">
+              <option value="">Elegí una plantilla...</option>
+              {templates.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          )}
+
+          {selectedTemplate && (
+            <div className="rounded-lg p-3 text-xs text-ink-muted" style={{ background: 'var(--surface-muted)' }}>
+              {selectedTemplate.bodyText}
+            </div>
+          )}
+
+          {variables.map((v, i) => (
+            <input
+              key={i}
+              placeholder={`Variable {{${i + 1}}}`}
+              value={v}
+              onChange={(e) => setVariables((prev) => prev.map((val, idx) => (idx === i ? e.target.value : val)))}
+              className="input w-full"
+            />
+          ))}
+        </div>
+
+        <div className="flex gap-2 mt-5">
+          <button onClick={onClose} className="btn-secondary flex-1">Cancelar</button>
+          <button onClick={handleSend} disabled={sending || !templateId} className="btn-primary flex-1">
+            {sending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+            Enviar
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

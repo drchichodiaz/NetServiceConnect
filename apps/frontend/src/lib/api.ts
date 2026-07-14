@@ -67,6 +67,13 @@ export const whatsappApi = {
     form.append('file', data.file);
     return api.post('/whatsapp/send-media', form, { headers: { 'Content-Type': 'multipart/form-data' } }).then((r) => r.data);
   },
+  startConversation: (data: {
+    contactId?: string;
+    phone?: string;
+    name?: string;
+    templateId: string;
+    variables?: string[];
+  }) => api.post('/whatsapp/start-conversation', data).then((r) => r.data),
   getAccount: () => api.get('/whatsapp/account').then((r) => r.data),
   // Embedded Signup: envía el code OAuth + session info — el backend hace el intercambio
   embeddedSignup: (data: { code: string; wabaId?: string; phoneNumberId?: string }) =>
@@ -146,6 +153,16 @@ export const tenantsApi = {
     adminEmail: string;
     adminPassword: string;
   }) => api.post('/tenants', data).then((r) => r.data),
+};
+
+// ─── Message Templates ─────────────────────────────────────────────────────────
+
+export const templatesApi = {
+  list: () => api.get('/whatsapp/templates').then((r) => r.data),
+  create: (data: { name: string; language: string; category: string; bodyText: string }) =>
+    api.post('/whatsapp/templates', data).then((r) => r.data),
+  refresh: (id: string) => api.patch(`/whatsapp/templates/${id}/refresh`).then((r) => r.data),
+  remove: (id: string) => api.delete(`/whatsapp/templates/${id}`).then((r) => r.data),
 };
 
 // ─── Contacts ─────────────────────────────────────────────────────────────────

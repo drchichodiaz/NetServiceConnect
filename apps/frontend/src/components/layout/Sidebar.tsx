@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { MessageSquare, Users, Tag, Settings, LogOut, LayoutDashboard, Zap, Sparkles, BookUser, ShieldCheck, Building2 } from 'lucide-react';
+import { MessageSquare, Users, Tag, Settings, LogOut, LayoutDashboard, Zap, Sparkles, BookUser, ShieldCheck, Building2, FileText } from 'lucide-react';
 import { useAuthStore } from '@/store/auth.store';
 import { User } from '@/types';
 import clsx from 'clsx';
@@ -17,6 +17,7 @@ const navItems = [
   { href: '/settings/quick-replies', icon: Zap,       label: 'Respuestas rápidas' },
   { href: '/settings/ai',            icon: Sparkles,  label: 'Configuración IA', roles: ['ADMIN', 'SUPERVISOR'] },
   { href: '/settings/whatsapp',      icon: Settings,     label: 'WhatsApp',      roles: ['ADMIN', 'SUPERVISOR'] },
+  { href: '/settings/templates',     icon: FileText,     label: 'Plantillas',    roles: ['ADMIN', 'SUPERVISOR'] },
   { href: '/settings/system',        icon: ShieldCheck,  label: 'Sistema',       superAdminOnly: true },
   { href: '/settings/tenants',       icon: Building2,    label: 'Empresas',      superAdminOnly: true },
 ];
