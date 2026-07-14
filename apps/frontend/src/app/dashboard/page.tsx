@@ -5,11 +5,11 @@ import {
   Tooltip, ResponsiveContainer,
 } from 'recharts';
 import {
-  MessageSquare, Clock, Tag, Users,
+  MessageSquare, Clock, Tag, Users, Bot,
   TrendingUp, TrendingDown, ChevronDown, RefreshCw,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/auth.store';
-import { statsApi } from '@/lib/api';
+import { statsApi, botStatsApi } from '@/lib/api';
 import clsx from 'clsx';
 
 type Period = 'today' | 'week' | 'month';
@@ -86,6 +86,7 @@ export default function DashboardPage() {
   const [period,     setPeriod]     = useState<Period>('week');
   const [periodOpen, setPeriodOpen] = useState(false);
   const [stats,      setStats]      = useState<any>(null);
+  const [botStats,   setBotStats]   = useState<any>(null);
   const [loading,    setLoading]    = useState(true);
 
   const firstName = user?.name?.split(' ')[0] ?? 'Admin';
@@ -93,8 +94,9 @@ export default function DashboardPage() {
   const fetchStats = useCallback(async (p: Period) => {
     setLoading(true);
     try {
-      const data = await statsApi.get(p);
+      const [data, botData] = await Promise.all([statsApi.get(p), botStatsApi.get(p)]);
       setStats(data);
+      setBotStats(botData);
     } catch {
       // silencioso — mantiene datos anteriores
     } finally {
@@ -213,6 +215,44 @@ export default function DashboardPage() {
               <MetricCard {...card} loading={loading} />
             </div>
           ))}
+        </div>
+
+        {/* ── Bot de WhatsApp ──────────────────────────────────────────────── */}
+        <div className="card p-5 animate-fade-in" style={{ animationDelay: '80ms' }}>
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: '#E8FBF0' }}>
+              <Bot className="w-3.5 h-3.5" style={{ color: '#128C7E' }} />
+            </div>
+            <div>
+              <h2 className="font-semibold text-ink text-sm">Bot de WhatsApp</h2>
+              <p className="text-xs text-ink-muted">{periodLabel} · configurable en Settings → Menú de WhatsApp</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {loading ? (
+              [1, 2, 3, 4].map((i) => <div key={i} className="h-14 rounded-lg bg-surface-muted animate-pulse" />)
+            ) : (
+              <>
+                <div>
+                  <p className="text-2xl font-bold text-ink" style={{ letterSpacing: '-0.03em' }}>{botStats?.started ?? 0}</p>
+                  <p className="text-xs text-ink-muted mt-0.5">Conversaciones iniciadas</p>
+                </div>
+                <div>
+                  <p className="text-2xl font-bold" style={{ letterSpacing: '-0.03em', color: '#128C7E' }}>{botStats?.resolutionRate ?? 0}%</p>
+                  <p className="text-xs text-ink-muted mt-0.5">Resueltas sin agente</p>
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-ink" style={{ letterSpacing: '-0.03em' }}>{botStats?.handedOff ?? 0}</p>
+                  <p className="text-xs text-ink-muted mt-0.5">Derivadas a un agente</p>
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-ink" style={{ letterSpacing: '-0.03em' }}>{botStats?.orderLookups ?? 0}</p>
+                  <p className="text-xs text-ink-muted mt-0.5">Consultas de pedido</p>
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         {/* ── Chart ────────────────────────────────────────────────────────── */}

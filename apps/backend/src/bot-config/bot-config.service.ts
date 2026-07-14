@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { getPeriodStart, StatsPeriod } from '../common/period-range';
 
 export interface BranchDto {
   name: string;
@@ -18,12 +19,6 @@ const STATS_ACTIONS = [
   'conversation.bot_handoff',
   'conversation.order_lookup_requested',
 ] as const;
-
-const RANGE_TO_MS: Record<string, number> = {
-  today: 24 * 60 * 60 * 1000,
-  '7d': 7 * 24 * 60 * 60 * 1000,
-  '30d': 30 * 24 * 60 * 60 * 1000,
-};
 
 @Injectable()
 export class BotConfigService {
@@ -111,9 +106,8 @@ export class BotConfigService {
 
   // ─── Métricas básicas del bot ──────────────────────────────────────────────
 
-  async getStats(tenantId: string, range: string) {
-    const windowMs = RANGE_TO_MS[range] ?? RANGE_TO_MS['today'];
-    const since = new Date(Date.now() - windowMs);
+  async getStats(tenantId: string, period: StatsPeriod) {
+    const since = getPeriodStart(period);
 
     const counts = await this.prisma.auditLog.groupBy({
       by: ['action'],
@@ -128,7 +122,7 @@ export class BotConfigService {
     const orderLookups = byAction.get('conversation.order_lookup_requested') ?? 0;
 
     return {
-      range,
+      period,
       started,
       resolvedByBot,
       handedOff,

@@ -147,7 +147,8 @@ export const branchesApi = {
 };
 
 export const botStatsApi = {
-  get: (range: 'today' | '7d' | '30d') => api.get('/bot-config/stats', { params: { range } }).then((r) => r.data),
+  get: (period: 'today' | 'week' | 'month' = 'week') =>
+    api.get('/bot-config/stats', { params: { period } }).then((r) => r.data),
 };
 
 // ─── Stats ────────────────────────────────────────────────────────────────────

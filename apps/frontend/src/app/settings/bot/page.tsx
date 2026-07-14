@@ -1,19 +1,14 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { botConfigApi, branchesApi, botStatsApi, BranchInput } from '@/lib/api';
-import { Bot, Check, Loader2, Plus, Pencil, Trash2, X, MapPin } from 'lucide-react';
+import Link from 'next/link';
+import { botConfigApi, branchesApi, BranchInput } from '@/lib/api';
+import { Bot, Check, Loader2, Plus, Pencil, Trash2, X, MapPin, LayoutDashboard, ArrowRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
 
 interface Branch extends BranchInput {
   id: string;
 }
-
-const RANGES: { id: 'today' | '7d' | '30d'; label: string }[] = [
-  { id: 'today', label: 'Hoy' },
-  { id: '7d', label: '7 días' },
-  { id: '30d', label: '30 días' },
-];
 
 const EMPTY_BRANCH: BranchInput = { name: '', address: '', scheduleText: '', phone: '', mapsUrl: '', servicesText: '' };
 
@@ -28,10 +23,6 @@ export default function BotSettingsPage() {
     orderStatusApiUrl: '',
   });
 
-  // ── Métricas ──
-  const [range, setRange] = useState<'today' | '7d' | '30d'>('today');
-  const [stats, setStats] = useState<{ started: number; resolvedByBot: number; handedOff: number; orderLookups: number; resolutionRate: number } | null>(null);
-
   // ── Sucursales ──
   const [branches, setBranches] = useState<Branch[]>([]);
   const [showBranchForm, setShowBranchForm] = useState(false);
@@ -40,7 +31,6 @@ export default function BotSettingsPage() {
   const [savingBranch, setSavingBranch] = useState(false);
 
   useEffect(() => { load(); }, []);
-  useEffect(() => { loadStats(range); }, [range]);
 
   async function load() {
     setLoading(true);
@@ -57,14 +47,6 @@ export default function BotSettingsPage() {
       toast.error('Error al cargar la configuración del bot');
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function loadStats(r: 'today' | '7d' | '30d') {
-    try {
-      setStats(await botStatsApi.get(r));
-    } catch {
-      toast.error('Error al cargar métricas del bot');
     }
   }
 
@@ -175,46 +157,20 @@ export default function BotSettingsPage() {
         </p>
       </div>
 
-      {/* Métricas */}
-      <div className="card p-5">
-        <div className="flex items-center justify-between mb-4">
-          <p className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Qué está resolviendo el bot</p>
-          <div className="flex gap-1 rounded-lg p-0.5" style={{ background: 'var(--surface-muted)' }}>
-            {RANGES.map((r) => (
-              <button
-                key={r.id}
-                onClick={() => setRange(r.id)}
-                className={clsx(
-                  'text-[11px] font-medium px-2.5 py-1 rounded-md transition-colors',
-                  range === r.id ? 'bg-white shadow-sm text-ink' : 'text-ink-subtle',
-                )}
-              >
-                {r.label}
-              </button>
-            ))}
-          </div>
+      {/* Métricas: viven en el Dashboard general, no acá */}
+      <Link
+        href="/dashboard"
+        className="card p-4 flex items-center gap-3 hover:shadow-card-md transition-shadow group"
+      >
+        <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: '#E8FBF0' }}>
+          <LayoutDashboard className="w-4 h-4" style={{ color: '#128C7E' }} />
         </div>
-        {stats && (
-          <div className="grid grid-cols-4 gap-3">
-            <div>
-              <p className="text-2xl font-bold text-ink">{stats.started}</p>
-              <p className="text-[11px] text-ink-subtle">Conversaciones iniciadas</p>
-            </div>
-            <div>
-              <p className="text-2xl font-bold" style={{ color: '#128C7E' }}>{stats.resolutionRate}%</p>
-              <p className="text-[11px] text-ink-subtle">Resueltas sin agente</p>
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-ink">{stats.handedOff}</p>
-              <p className="text-[11px] text-ink-subtle">Derivadas a un agente</p>
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-ink">{stats.orderLookups}</p>
-              <p className="text-[11px] text-ink-subtle">Consultas de pedido</p>
-            </div>
-          </div>
-        )}
-      </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-ink">Ver métricas del bot</p>
+          <p className="text-xs text-ink-muted">Conversaciones resueltas, derivadas y consultas de pedido — en el Dashboard general</p>
+        </div>
+        <ArrowRight className="w-4 h-4 text-ink-subtle shrink-0 group-hover:translate-x-0.5 transition-transform" />
+      </Link>
 
       {/* Textos configurables */}
       <form onSubmit={handleSave} className="card p-5 space-y-4">

@@ -1,14 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-
-type Period = 'today' | 'week' | 'month';
+import { getPeriodStart, StatsPeriod } from '../common/period-range';
 
 @Injectable()
 export class StatsService {
   constructor(private prisma: PrismaService) {}
 
-  async getStats(tenantId: string, period: Period) {
-    const since = this.periodStart(period);
+  async getStats(tenantId: string, period: StatsPeriod) {
+    const since = getPeriodStart(period);
 
     const [conversations, messages, chartMessages, agentData, tagData, users] =
       await Promise.all([
@@ -26,7 +25,7 @@ export class StatsService {
 
         // Messages for chart (always last 7 days)
         this.prisma.message.findMany({
-          where: { tenantId, createdAt: { gte: this.periodStart('week') } },
+          where: { tenantId, createdAt: { gte: getPeriodStart('week') } },
           select: { direction: true, createdAt: true },
         }),
 
@@ -136,19 +135,5 @@ export class StatsService {
       agents,
       tags,
     };
-  }
-
-  private periodStart(period: Period): Date {
-    const d = new Date();
-    if (period === 'today') {
-      d.setHours(0, 0, 0, 0);
-    } else if (period === 'week') {
-      d.setDate(d.getDate() - 6);
-      d.setHours(0, 0, 0, 0);
-    } else {
-      d.setDate(d.getDate() - 29);
-      d.setHours(0, 0, 0, 0);
-    }
-    return d;
   }
 }
