@@ -120,6 +120,14 @@ export const settingsApi = {
     api.patch('/settings', data).then((r) => r.data),
 };
 
+// ─── Bot config (Fase D: menú de WhatsApp) ─────────────────────────────────────
+
+export const botConfigApi = {
+  get: () => api.get('/bot-config').then((r) => r.data),
+  update: (data: { horariosText?: string; sucursalesText?: string; serviciosText?: string; orderStatusApiUrl?: string }) =>
+    api.patch('/bot-config', data).then((r) => r.data),
+};
+
 // ─── Stats ────────────────────────────────────────────────────────────────────
 
 export const statsApi = {

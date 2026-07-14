@@ -30,6 +30,7 @@ model Tenant {
   internalNotes    InternalNote[]
   quickReplies     QuickReply[]
   messageTemplates MessageTemplate[]
+  botConfig        TenantBotConfig?
 }
 
 // ─── User ─────────────────────────────────────────────────────────────────────
@@ -122,6 +123,11 @@ model Conversation {
   contactId       String
   assignedUserId  String?
   status          ConversationStatus @default(OPEN)
+  // Modo del bot de menu (Fase D). Default AGENT a proposito: las conversaciones
+  // que ya existian antes de esta migracion viven con un humano asignado y el
+  // bot no debe tocarlas; solo el webhook crea conversaciones nuevas en modo BOT.
+  mode            ConversationMode   @default(AGENT)
+  botState        ConversationBotState?
   lastMessageAt   DateTime?
   lastMessageText String?
   lastInboundAt   DateTime?
@@ -145,6 +151,16 @@ enum ConversationStatus {
   OPEN
   PENDING
   CLOSED
+}
+
+enum ConversationMode {
+  BOT
+  AGENT
+}
+
+enum ConversationBotState {
+  MENU
+  AWAITING_ORDER_NUMBER
 }
 
 // ─── Message ──────────────────────────────────────────────────────────────────
@@ -280,6 +296,21 @@ model MessageTemplate {
 
   @@unique([tenantId, name, language])
   @@index([tenantId])
+}
+
+// ─── Tenant Bot Config (Fase D: textos del menu de WhatsApp por empresa) ──────
+
+model TenantBotConfig {
+  id                String   @id @default(cuid())
+  tenantId          String   @unique
+  horariosText      String?
+  sucursalesText    String?
+  serviciosText     String?
+  // Reservado para conectar una API de pedidos por tenant mas adelante; sin usar por ahora.
+  orderStatusApiUrl String?
+  updatedAt         DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 }
 
 // ─── System Config (global, singleton) ───────────────────────────────────────

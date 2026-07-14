@@ -42,6 +42,7 @@ export class WhatsAppService {
     });
 
     if (!conversation) throw new NotFoundException('Conversation not found');
+    await this.takeOverFromBot(tenantId, conversation, senderId);
 
     const payload = this.buildPayload(dto.to, dto);
     let externalId: string | undefined;
@@ -115,6 +116,7 @@ export class WhatsAppService {
       where: { id: dto.conversationId, tenantId },
     });
     if (!conversation) throw new NotFoundException('Conversation not found');
+    await this.takeOverFromBot(tenantId, conversation, senderId);
 
     // 1. Subir el archivo a Meta para obtener un media id reutilizable en el mensaje
     const metaMediaId = await this.uploadMediaToMeta(account.phoneNumberId, account.accessToken, file);
@@ -304,6 +306,34 @@ export class WhatsAppService {
     });
 
     return { conversation, message };
+  }
+
+  /**
+   * Si un agente escribe a mano en una conversación que todavía está en modo BOT
+   * (ej: un admin ve el hilo y contesta directo sin pasar por "Contactar a un agente"),
+   * la sacamos del bot para que no le siga respondiendo por arriba del humano.
+   */
+  private async takeOverFromBot(tenantId: string, conversation: { id: string; mode: string; assignedUserId: string | null }, senderId: string) {
+    if (conversation.mode !== 'BOT') return;
+
+    await this.prisma.conversation.update({
+      where: { id: conversation.id },
+      data: {
+        mode: 'AGENT',
+        botState: null,
+        assignedUserId: conversation.assignedUserId ?? senderId,
+      },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        tenantId,
+        userId: senderId,
+        conversationId: conversation.id,
+        action: 'conversation.bot_handoff',
+        metadata: { reason: 'manual_takeover' },
+      },
+    });
   }
 
   private renderTemplateBody(bodyText: string, variables: string[]): string {

@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventBusService } from '../events/event-bus.service';
 import { MediaService } from '../media/media.service';
+import { BotService } from '../bot/bot.service';
 
 @Injectable()
 export class WebhookService {
@@ -13,6 +14,7 @@ export class WebhookService {
     private prisma: PrismaService,
     private eventBus: EventBusService,
     private mediaService: MediaService,
+    private botService: BotService,
     config: ConfigService,
   ) {
     this.apiVersion = config.get('META_API_VERSION') || 'v19.0';
@@ -116,16 +118,19 @@ export class WebhookService {
     });
 
     const now = new Date();
+    const isNewConversation = !conversation;
 
     if (!conversation) {
-      const assignedUserId = await this.findLeastBusyAgent(tenantId);
-
+      // Fase D: las conversaciones nuevas arrancan en modo BOT (menú interactivo) y
+      // sin asignar — la asignación por carga se dispara recién cuando el bot deriva
+      // a un humano (opción "Contactar a un agente" o fallback de "Consultar orden").
       conversation = await this.prisma.conversation.create({
         data: {
           tenantId,
           contactId: contact.id,
           status: 'OPEN',
-          assignedUserId,
+          mode: 'BOT',
+          botState: 'MENU',
           lastMessageAt: now,
           lastMessageText: body,
           lastInboundAt: now,
@@ -136,17 +141,6 @@ export class WebhookService {
       await this.prisma.auditLog.create({
         data: { tenantId, conversationId: conversation.id, action: 'conversation.created' },
       });
-
-      if (assignedUserId) {
-        await this.prisma.auditLog.create({
-          data: {
-            tenantId,
-            conversationId: conversation.id,
-            action: 'conversation.auto_assigned',
-            metadata: { assignedUserId },
-          },
-        });
-      }
     } else {
       await this.prisma.conversation.update({
         where: { id: conversation.id },
@@ -194,45 +188,15 @@ export class WebhookService {
         lastMessageAt: now.toISOString(),
       },
     });
-  }
 
-  /**
-   * Asigna al agente activo con menor cantidad de conversaciones abiertas/pendientes
-   * en el tenant. Empate se resuelve por orden de creación del usuario (más antiguo primero).
-   */
-  private async findLeastBusyAgent(tenantId: string): Promise<string | null> {
-    const agents = await this.prisma.user.findMany({
-      where: { tenantId, role: 'AGENT', isActive: true },
-      select: { id: true },
-      orderBy: { createdAt: 'asc' },
-    });
-    if (agents.length === 0) return null;
-
-    const workload = await this.prisma.conversation.groupBy({
-      by: ['assignedUserId'],
-      where: {
-        tenantId,
-        assignedUserId: { in: agents.map((a) => a.id) },
-        status: { in: ['OPEN', 'PENDING'] },
-      },
-      _count: { _all: true },
-    });
-
-    const loadByAgent = new Map(agents.map((a) => [a.id, 0]));
-    for (const row of workload) {
-      if (row.assignedUserId) loadByAgent.set(row.assignedUserId, row._count._all);
+    // Fase D: el bot responde recién después de que el mensaje del cliente ya quedó
+    // guardado y visible en el historial (así el humano que eventualmente tome la
+    // conversación ve todo el intercambio, incluido lo que pasó con el bot).
+    if (isNewConversation) {
+      await this.botService.sendMenu(tenantId, conversation.id, phone);
+    } else if (conversation.mode === 'BOT') {
+      await this.botService.handleBotReply(tenantId, conversation.id, conversation.botState, phone, msg);
     }
-
-    let bestAgentId = agents[0].id;
-    let bestLoad = loadByAgent.get(bestAgentId) ?? 0;
-    for (const agent of agents) {
-      const load = loadByAgent.get(agent.id) ?? 0;
-      if (load < bestLoad) {
-        bestLoad = load;
-        bestAgentId = agent.id;
-      }
-    }
-    return bestAgentId;
   }
 
   private extractBody(msg: any): string {

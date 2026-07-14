@@ -6,9 +6,10 @@ import { WebhookService } from './webhook.service';
 import { SystemConfigModule } from '../system-config/system-config.module';
 import { MediaModule } from '../media/media.module';
 import { TemplatesModule } from '../templates/templates.module';
+import { BotModule } from '../bot/bot.module';
 
 @Module({
-  imports: [SystemConfigModule, MediaModule, TemplatesModule],
+  imports: [SystemConfigModule, MediaModule, TemplatesModule, BotModule],
   controllers: [WhatsAppController],
   providers: [WhatsAppService, EmbeddedSignupService, WebhookService],
   exports: [WhatsAppService],
