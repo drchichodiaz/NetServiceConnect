@@ -34,6 +34,17 @@ export class TemplatesService {
 
     const variableCount = this.countVariables(dto.bodyText);
 
+    if (variableCount > 0 && dto.exampleValues?.length !== variableCount) {
+      throw new BadRequestException(
+        `Esta plantilla tiene ${variableCount} variable(s) — necesitás dar un valor de ejemplo para cada una (Meta lo exige para poder aprobarla).`,
+      );
+    }
+
+    const bodyComponent: any = { type: 'BODY', text: dto.bodyText };
+    if (variableCount > 0) {
+      bodyComponent.example = { body_text: [dto.exampleValues] };
+    }
+
     let metaTemplateId: string | undefined;
     let status = 'PENDING';
     try {
@@ -44,7 +55,7 @@ export class TemplatesService {
           name: dto.name,
           language: dto.language,
           category: dto.category,
-          components: [{ type: 'BODY', text: dto.bodyText }],
+          components: [bodyComponent],
         },
         { headers: { Authorization: `Bearer ${account.accessToken}`, 'Content-Type': 'application/json' } },
       );

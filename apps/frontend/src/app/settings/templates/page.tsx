@@ -36,6 +36,19 @@ export default function TemplatesPage() {
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
 
   const [form, setForm] = useState({ name: '', language: 'es', category: 'UTILITY', bodyText: '' });
+  const [exampleValues, setExampleValues] = useState<string[]>([]);
+
+  const variableCount = new Set(form.bodyText.match(/\{\{\d+\}\}/g) ?? []).size;
+
+  function handleBodyChange(bodyText: string) {
+    const count = new Set(bodyText.match(/\{\{\d+\}\}/g) ?? []).size;
+    setForm((f) => ({ ...f, bodyText }));
+    setExampleValues((prev) => {
+      const next = prev.slice(0, count);
+      while (next.length < count) next.push('');
+      return next;
+    });
+  }
 
   function load() {
     setIsLoading(true);
@@ -46,11 +59,16 @@ export default function TemplatesPage() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
+    if (variableCount > 0 && exampleValues.some((v) => !v.trim())) {
+      toast.error('Completá un valor de ejemplo para cada variable');
+      return;
+    }
     setIsSaving(true);
     try {
-      const t = await templatesApi.create(form);
+      const t = await templatesApi.create({ ...form, exampleValues: variableCount > 0 ? exampleValues : undefined });
       setTemplates((prev) => [t, ...prev]);
       setForm({ name: '', language: 'es', category: 'UTILITY', bodyText: '' });
+      setExampleValues([]);
       setShowForm(false);
       toast.success('Plantilla enviada a Meta para aprobación');
     } catch (err: any) {
@@ -121,13 +139,31 @@ export default function TemplatesPage() {
             <div>
               <textarea
                 required placeholder="Hola {{1}}, tu pedido {{2}} está en camino." value={form.bodyText}
-                onChange={(e) => setForm((f) => ({ ...f, bodyText: e.target.value }))}
+                onChange={(e) => handleBodyChange(e.target.value)}
                 className="input w-full" rows={3}
               />
               <p className="text-[11px] text-ink-subtle mt-1">
                 Usá <code>{'{{1}}'}</code>, <code>{'{{2}}'}</code>, etc. para las partes que van a variar en cada envío.
               </p>
             </div>
+
+            {variableCount > 0 && (
+              <div className="space-y-2 p-3 rounded-lg" style={{ background: 'var(--surface-muted)' }}>
+                <p className="text-[11px] text-ink-subtle">
+                  Meta exige un valor de ejemplo por cada variable para poder aprobar la plantilla:
+                </p>
+                {exampleValues.map((v, i) => (
+                  <input
+                    key={i}
+                    required
+                    placeholder={`Ejemplo para {{${i + 1}}}`}
+                    value={v}
+                    onChange={(e) => setExampleValues((prev) => prev.map((val, idx) => (idx === i ? e.target.value : val)))}
+                    className="input w-full text-sm"
+                  />
+                ))}
+              </div>
+            )}
           </div>
           <div className="flex gap-2 mt-4">
             <button type="button" onClick={() => setShowForm(false)} className="btn-secondary flex-1">Cancelar</button>

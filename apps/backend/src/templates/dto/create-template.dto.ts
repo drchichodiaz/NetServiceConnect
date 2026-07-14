@@ -1,4 +1,4 @@
-import { IsString, IsIn, MinLength, Matches } from 'class-validator';
+import { IsString, IsIn, IsOptional, IsArray, MinLength, Matches } from 'class-validator';
 
 export class CreateTemplateDto {
   @IsString()
@@ -14,4 +14,10 @@ export class CreateTemplateDto {
   @IsString()
   @MinLength(1)
   bodyText: string;
+
+  // Un valor de ejemplo por cada {{n}} en bodyText — Meta lo exige para aprobar
+  // la plantilla, si no la rechaza con motivo INVALID_FORMAT.
+  @IsOptional()
+  @IsArray()
+  exampleValues?: string[];
 }

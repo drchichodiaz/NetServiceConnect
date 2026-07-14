@@ -159,7 +159,7 @@ export const tenantsApi = {
 
 export const templatesApi = {
   list: () => api.get('/whatsapp/templates').then((r) => r.data),
-  create: (data: { name: string; language: string; category: string; bodyText: string }) =>
+  create: (data: { name: string; language: string; category: string; bodyText: string; exampleValues?: string[] }) =>
     api.post('/whatsapp/templates', data).then((r) => r.data),
   refresh: (id: string) => api.patch(`/whatsapp/templates/${id}/refresh`).then((r) => r.data),
   remove: (id: string) => api.delete(`/whatsapp/templates/${id}`).then((r) => r.data),
