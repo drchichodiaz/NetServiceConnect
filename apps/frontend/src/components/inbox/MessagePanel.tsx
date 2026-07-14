@@ -14,12 +14,25 @@ export default function MessagePanel({ conversationId }: Props) {
   const { messages, notes, isLoadingMessages, conversations } = useInboxStore();
   const bottomRef = useRef<HTMLDivElement>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const lastScrolledConversationId = useRef<string | null>(null);
 
   const conversation = conversations.find((c) => c.id === conversationId);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    if (isLoadingMessages) return;
+    const justOpened = lastScrolledConversationId.current !== conversationId;
+    lastScrolledConversationId.current = conversationId;
+
+    // Al abrir/cambiar de conversación saltamos directo al final (sin animación):
+    // con "smooth" la imagen/audio/video del último mensaje a veces todavía no
+    // terminó de cargar y el scroll queda a mitad de camino en vez de al fondo.
+    bottomRef.current?.scrollIntoView({ behavior: justOpened ? 'auto' : 'smooth' });
+
+    if (justOpened) {
+      const t = setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'auto' }), 200);
+      return () => clearTimeout(t);
+    }
+  }, [messages, isLoadingMessages, conversationId]);
 
   // Cerrar sidebar al cambiar de conversación
   useEffect(() => {
