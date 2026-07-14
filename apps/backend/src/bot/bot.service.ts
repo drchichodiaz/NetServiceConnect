@@ -37,7 +37,9 @@ export class BotService {
   /** Envía el menú principal como WhatsApp interactive list message. */
   async sendMenu(tenantId: string, conversationId: string, phone: string) {
     const account = await this.getAccount(tenantId);
-    if (!account) return;
+    if (!account) {
+      return this.handoffToHuman(tenantId, conversationId, 'whatsapp_account_unavailable');
+    }
 
     const payload = {
       messaging_product: 'whatsapp',
@@ -55,13 +57,21 @@ export class BotService {
     };
 
     const summary = `[Menú] ${MENU_OPTIONS.map((o) => o.title).join(' · ')}`;
-    await this.sendAndLog(tenantId, conversationId, account, payload, summary);
+    const sent = await this.sendAndLog(tenantId, conversationId, account, payload, summary);
+    if (!sent) {
+      // Si no pudimos siquiera mandar el menú, no dejamos la conversación en el limbo
+      // (en modo BOT sin asignar, invisible para cualquier AGENT) — la pasamos a un
+      // humano igual, aunque no hayamos podido avisarle nada al cliente por WhatsApp.
+      await this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
+    }
   }
 
   /** Rutea la respuesta de un cliente cuando la conversación sigue en modo BOT. */
   async handleBotReply(tenantId: string, conversationId: string, botState: string | null, phone: string, msg: any) {
     const account = await this.getAccount(tenantId);
-    if (!account) return;
+    if (!account) {
+      return this.handoffToHuman(tenantId, conversationId, 'whatsapp_account_unavailable');
+    }
 
     if (botState === 'AWAITING_ORDER_NUMBER') {
       return this.handleOrderNumberReply(tenantId, conversationId, phone, msg, account);
@@ -97,11 +107,15 @@ export class BotService {
       servicios: config?.serviciosText,
     };
     const text = fieldMap[optionId]?.trim() || DEFAULT_CONFIG_TEXT;
-    await this.sendText(tenantId, conversationId, phone, account, text);
+    const sent = await this.sendText(tenantId, conversationId, phone, account, text);
+    if (!sent) await this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
   }
 
   private async askOrderNumber(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds) {
-    await this.sendText(tenantId, conversationId, phone, account, 'Decime el número de tu orden y en un momento te ayudamos.');
+    const sent = await this.sendText(tenantId, conversationId, phone, account, 'Decime el número de tu orden y en un momento te ayudamos.');
+    if (!sent) {
+      return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
+    }
     await this.prisma.conversation.update({ where: { id: conversationId }, data: { botState: 'AWAITING_ORDER_NUMBER' } });
   }
 
@@ -137,7 +151,11 @@ export class BotService {
   }
 
   private async resendMenuWithHint(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds) {
-    await this.sendText(tenantId, conversationId, phone, account, 'No entendí tu respuesta. Elegí una opción de la lista:');
+    const sent = await this.sendText(tenantId, conversationId, phone, account, 'No entendí tu respuesta. Elegí una opción de la lista:');
+    if (!sent) {
+      return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
+    }
+    // sendMenu ya se auto-deriva a un humano si el reenvío del menú también falla.
     await this.sendMenu(tenantId, conversationId, phone);
   }
 
@@ -174,7 +192,13 @@ export class BotService {
     return { phoneNumberId: account.phoneNumberId, accessToken: account.accessToken };
   }
 
-  private async sendText(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, body: string) {
+  private async sendText(
+    tenantId: string,
+    conversationId: string,
+    phone: string,
+    account: WhatsAppAccountCreds,
+    body: string,
+  ): Promise<boolean> {
     const payload = {
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
@@ -182,16 +206,17 @@ export class BotService {
       type: 'text',
       text: { preview_url: false, body },
     };
-    await this.sendAndLog(tenantId, conversationId, account, payload, body);
+    return this.sendAndLog(tenantId, conversationId, account, payload, body);
   }
 
+  /** Devuelve true si el mensaje salió — los llamadores usan esto para derivar a un humano en vez de quedarse callados. */
   private async sendAndLog(
     tenantId: string,
     conversationId: string,
     account: WhatsAppAccountCreds,
     payload: any,
     bodyForHistory: string,
-  ) {
+  ): Promise<boolean> {
     let externalId: string | undefined;
     try {
       const url = `https://graph.facebook.com/${this.apiVersion}/${account.phoneNumberId}/messages`;
@@ -201,7 +226,7 @@ export class BotService {
       externalId = data?.messages?.[0]?.id;
     } catch (err) {
       this.logger.error('Failed to send bot message', err?.response?.data || err?.message);
-      return;
+      return false;
     }
 
     const now = new Date();
@@ -233,5 +258,7 @@ export class BotService {
         lastMessageAt: now.toISOString(),
       },
     });
+
+    return true;
   }
 }
