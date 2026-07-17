@@ -1,12 +1,13 @@
 'use client';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { contactsApi, conversationsApi, templatesApi, whatsappApi } from '@/lib/api';
+import { contactsApi, conversationsApi, templatesApi, whatsappApi, ImportContactsResult } from '@/lib/api';
 import { useInboxStore } from '@/store/inbox.store';
 import { Contact, Conversation } from '@/types';
 import {
   Search, Phone, Mail, Building2, MessageSquare,
   Pencil, Check, X, ChevronRight, Users, MessageCirclePlus, Loader2,
+  Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle2,
 } from 'lucide-react';
 import { formatDistanceToNow, format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -68,6 +69,9 @@ export default function ContactsPage() {
   // Nueva conversación
   const [showNewConv, setShowNewConv] = useState(false);
   const [newConvContact, setNewConvContact] = useState<Contact | null>(null);
+
+  // Importar contactos
+  const [showImport, setShowImport] = useState(false);
 
   const load = useCallback(async (q?: string) => {
     setLoading(true);
@@ -150,6 +154,13 @@ export default function ContactsPage() {
               <span className="text-xs text-ink-muted bg-surface-muted rounded-full px-2 py-0.5 font-medium">
                 {contacts.length}
               </span>
+              <button
+                onClick={() => setShowImport(true)}
+                title="Importar contactos desde Excel"
+                className="w-7 h-7 rounded-lg flex items-center justify-center text-ink-subtle hover:text-ink hover:bg-black/5"
+              >
+                <Upload className="w-4 h-4" />
+              </button>
               <button
                 onClick={() => { setNewConvContact(null); setShowNewConv(true); }}
                 title="Nueva conversación con un contacto nuevo"
@@ -374,6 +385,13 @@ export default function ContactsPage() {
           onSent={handleConversationStarted}
         />
       )}
+
+      {showImport && (
+        <ImportContactsModal
+          onClose={() => setShowImport(false)}
+          onImported={() => load(search || undefined)}
+        />
+      )}
     </div>
   );
 }
@@ -526,6 +544,145 @@ function NewConversationModal({ contact, onClose, onSent }: {
             Enviar
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ImportContactsModal({ onClose, onImported }: { onClose: () => void; onImported: () => void }) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [downloadingTemplate, setDownloadingTemplate] = useState(false);
+  const [result, setResult] = useState<ImportContactsResult | null>(null);
+
+  async function handleDownloadTemplate() {
+    setDownloadingTemplate(true);
+    try {
+      await contactsApi.downloadImportTemplate();
+    } catch {
+      toast.error('Error al descargar la plantilla');
+    } finally {
+      setDownloadingTemplate(false);
+    }
+  }
+
+  async function handleUpload() {
+    if (!file) return;
+    setUploading(true);
+    try {
+      const res = await contactsApi.import(file);
+      setResult(res);
+      if (res.created > 0) onImported();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Error al importar el archivo');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function handleClose() {
+    if (result && result.created > 0) onImported();
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+      <div className="card w-full max-w-md p-5 animate-pop">
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-sm font-semibold text-ink">Importar contactos</p>
+          <button onClick={handleClose} className="w-7 h-7 rounded-lg flex items-center justify-center text-ink-subtle hover:bg-black/5">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {!result ? (
+          <div className="space-y-4">
+            <p className="text-xs text-ink-muted">
+              Subí un archivo .xlsx o .csv con las columnas <strong>Nombre</strong>, <strong>Telefono</strong>, <strong>Email</strong> y <strong>Empresa</strong> (solo el teléfono es obligatorio). El teléfono debe incluir el código de país, por ejemplo <code className="text-[11px]">50760000000</code>.
+            </p>
+
+            <button
+              onClick={handleDownloadTemplate}
+              disabled={downloadingTemplate}
+              className="w-full flex items-center justify-center gap-2 text-xs font-medium text-ink-muted hover:text-ink py-2 rounded-lg border border-dashed border-border transition-colors"
+            >
+              {downloadingTemplate ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+              Descargar plantilla
+            </button>
+
+            <label
+              className="flex flex-col items-center justify-center gap-2 py-8 rounded-xl cursor-pointer transition-colors hover:bg-surface-muted"
+              style={{ border: '2px dashed var(--border)' }}
+            >
+              <FileSpreadsheet className="w-6 h-6 text-ink-subtle" />
+              <span className="text-xs text-ink-muted text-center px-4">
+                {file ? file.name : 'Elegí un archivo .xlsx o .csv'}
+              </span>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx,.csv"
+                className="hidden"
+                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              />
+            </label>
+
+            <div className="flex gap-2">
+              <button onClick={handleClose} className="btn-secondary flex-1">Cancelar</button>
+              <button onClick={handleUpload} disabled={!file || uploading} className="btn-primary flex-1">
+                {uploading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                Importar
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-3 gap-2">
+              <div className="rounded-xl p-3 text-center" style={{ background: '#E8FBF0' }}>
+                <p className="text-xl font-bold" style={{ color: '#128C7E' }}>{result.created}</p>
+                <p className="text-[10px] text-ink-muted mt-0.5">Creados</p>
+              </div>
+              <div className="rounded-xl p-3 text-center" style={{ background: 'var(--surface-muted)' }}>
+                <p className="text-xl font-bold text-ink">{result.skippedDuplicate}</p>
+                <p className="text-[10px] text-ink-muted mt-0.5">Ya existían</p>
+              </div>
+              <div className="rounded-xl p-3 text-center" style={{ background: 'var(--surface-muted)' }}>
+                <p className="text-xl font-bold text-ink">{result.skippedInvalid}</p>
+                <p className="text-[10px] text-ink-muted mt-0.5">Inválidos</p>
+              </div>
+            </div>
+
+            {result.created > 0 && result.errors.length === 0 && (
+              <div className="flex items-center gap-2 text-xs text-ink-muted">
+                <CheckCircle2 className="w-3.5 h-3.5" style={{ color: '#25D366' }} />
+                Todo se importó sin problemas.
+              </div>
+            )}
+
+            {result.errors.length > 0 && (
+              <div>
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-ink-muted mb-2">
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  Filas con problemas
+                </div>
+                <div className="max-h-40 overflow-y-auto rounded-lg divide-y divide-border" style={{ border: '1px solid var(--border)' }}>
+                  {result.errors.map((e, i) => (
+                    <div key={i} className="px-3 py-2 text-xs">
+                      <span className="font-medium text-ink">Fila {e.row}:</span>{' '}
+                      <span className="text-ink-muted">{e.reason}</span>
+                    </div>
+                  ))}
+                </div>
+                {result.truncatedErrors && (
+                  <p className="text-[11px] text-ink-subtle mt-1.5">Mostrando los primeros {result.errors.length} problemas.</p>
+                )}
+              </div>
+            )}
+
+            <button onClick={handleClose} className="btn-primary w-full">Listo</button>
+          </div>
+        )}
       </div>
     </div>
   );

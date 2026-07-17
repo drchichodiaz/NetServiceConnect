@@ -198,12 +198,39 @@ export const templatesApi = {
 
 // ─── Contacts ─────────────────────────────────────────────────────────────────
 
+export interface ImportContactsResult {
+  totalRows: number;
+  created: number;
+  skippedDuplicate: number;
+  skippedInvalid: number;
+  errors: { row: number; reason: string }[];
+  truncatedErrors: boolean;
+}
+
 export const contactsApi = {
   list: (search?: string) =>
     api.get('/contacts', { params: search ? { search } : {} }).then((r) => r.data),
   get: (id: string) => api.get(`/contacts/${id}`).then((r) => r.data),
   update: (id: string, data: { name?: string; email?: string; company?: string }) =>
     api.patch(`/contacts/${id}`, data).then((r) => r.data),
+  import: (file: File): Promise<ImportContactsResult> => {
+    const form = new FormData();
+    form.append('file', file);
+    return api.post('/contacts/import', form, { headers: { 'Content-Type': 'multipart/form-data' } }).then((r) => r.data);
+  },
+  // El link de descarga necesita el header de Authorization, así que no puede ser
+  // un <a href> directo — se pide como blob y se dispara la descarga a mano.
+  downloadImportTemplate: async () => {
+    const res = await api.get('/contacts/import-template', { responseType: 'blob' });
+    const url = URL.createObjectURL(res.data);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'plantilla-contactos.xlsx';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
 };
 
 // ─── Quick Replies ────────────────────────────────────────────────────────────
