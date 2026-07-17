@@ -136,7 +136,7 @@ export class BotService {
     const rowCap = isRoot ? ROOT_ROW_CAP : CHILD_ROW_CAP;
 
     if (children.length > rowCap) {
-      const prompt = node?.promptText?.trim() || '¿Qué estás buscando? Escribime el nombre de la opción.';
+      const prompt = node?.promptText?.trim() || '¿Qué estás buscando? Escríbeme el nombre de la opción.';
       const sent = await this.sendText(tenantId, conversationId, phone, acc, prompt);
       if (!sent) {
         return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
@@ -160,7 +160,7 @@ export class BotService {
       type: 'interactive',
       interactive: {
         type: 'list',
-        body: { text: node?.promptText?.trim() || (isRoot ? '¡Hola! ¿En qué te podemos ayudar?' : `¿Qué necesitás de "${node!.title}"?`) },
+        body: { text: node?.promptText?.trim() || (isRoot ? '¡Hola! ¿En qué te podemos ayudar?' : `¿Qué necesitas de "${node!.title}"?`) },
         action: { button: 'Ver opciones', sections: [{ title: node?.title || 'Menú', rows }] },
       },
     };
@@ -200,7 +200,7 @@ export class BotService {
   }
 
   private async resendListWithHint(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, nodeId: string | null) {
-    const sent = await this.sendText(tenantId, conversationId, phone, account, 'No entendí tu respuesta. Elegí una opción de la lista:');
+    const sent = await this.sendText(tenantId, conversationId, phone, account, 'No entendí tu respuesta. Elige una opción de la lista:');
     if (!sent) {
       return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
     }
@@ -239,7 +239,7 @@ export class BotService {
     }
 
     if (!query) {
-      const sent = await this.sendText(tenantId, conversationId, phone, account, 'No entendí. Escribime el nombre de la opción que buscás.');
+      const sent = await this.sendText(tenantId, conversationId, phone, account, 'No entendí. Escríbeme el nombre de la opción que buscas.');
       if (!sent) return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
       return;
     }
@@ -275,7 +275,7 @@ export class BotService {
       conversationId,
       phone,
       account,
-      `Encontré varias opciones, ¿cuál es la tuya?\n\n${names}\n\nEscribí el nombre completo.`,
+      `Encontré varias opciones, ¿cuál es la tuya?\n\n${names}\n\nEscribe el nombre completo.`,
     );
     if (!sent) {
       return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
@@ -302,7 +302,7 @@ export class BotService {
   // ─── Prompt post-respuesta (generaliza confirmación de resolución + follow-up) ─
 
   private async sendPostReplyPrompt(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, parentNodeId: string | null) {
-    const sent = await this.sendButtons(tenantId, conversationId, phone, account, '¿Necesitás algo más?', [
+    const sent = await this.sendButtons(tenantId, conversationId, phone, account, '¿Necesitas algo más?', [
       { id: 'post_no_more', title: 'No, gracias' },
       { id: 'post_more', title: 'Ver otra opción' },
       { id: 'post_agent', title: 'Hablar con un agente' },
@@ -340,7 +340,7 @@ export class BotService {
       conversationId,
       phone,
       account,
-      '¡Perfecto! Me alegra haberte ayudado.\n\nCuando necesites algo más, podés volver a escribirnos.',
+      '¡Perfecto! Me alegra haberte ayudado.\n\nCuando necesites algo más, puedes volver a escribirnos.',
     );
 
     const updated = await this.prisma.conversation.updateMany({
@@ -360,7 +360,7 @@ export class BotService {
   // ─── Consultar orden (sin cambios respecto al árbol configurable) ──────────
 
   private async askOrderNumber(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds) {
-    const sent = await this.sendText(tenantId, conversationId, phone, account, 'Decime el número de tu orden y en un momento te ayudamos.');
+    const sent = await this.sendText(tenantId, conversationId, phone, account, 'Dime el número de tu orden y en un momento te ayudamos.');
     if (!sent) {
       return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
     }
@@ -460,7 +460,7 @@ export class BotService {
         conversationId,
         phone,
         account,
-        'Parece que necesitás una atención más específica. Ya te comunico con uno de nuestros asesores.',
+        'Parece que necesitas una atención más específica. Ya te comunico con uno de nuestros asesores.',
       );
       return this.handoffToHuman(tenantId, conversationId, 'max_retries_reached');
     }

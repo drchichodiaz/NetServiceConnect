@@ -60,7 +60,7 @@ export default function TemplatesPage() {
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     if (variableCount > 0 && exampleValues.some((v) => !v.trim())) {
-      toast.error('Completá un valor de ejemplo para cada variable');
+      toast.error('Completa un valor de ejemplo para cada variable');
       return;
     }
     setIsSaving(true);
@@ -143,7 +143,7 @@ export default function TemplatesPage() {
                 className="input w-full" rows={3}
               />
               <p className="text-[11px] text-ink-subtle mt-1">
-                Usá <code>{'{{1}}'}</code>, <code>{'{{2}}'}</code>, etc. para las partes que van a variar en cada envío.
+                Usa <code>{'{{1}}'}</code>, <code>{'{{2}}'}</code>, etc. para las partes que van a variar en cada envío.
               </p>
             </div>
 

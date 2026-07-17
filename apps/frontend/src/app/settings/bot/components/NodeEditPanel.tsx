@@ -113,7 +113,7 @@ export default function NodeEditPanel({ node, descendantCount, saving, onSave, o
           <label className="text-xs font-semibold text-ink flex items-center gap-1.5">
             <span>Respuesta del bot</span>
             <InfoTooltip
-              text="El mensaje que el bot envía apenas el cliente toca esta opción. Podés escribir varias líneas, con emojis incluidos."
+              text="El mensaje que el bot envía apenas el cliente toca esta opción. Puedes escribir varias líneas, con emojis incluidos."
               example={'Lunes a sábado de 9am a 7pm\nDomingos de 10am a 4pm'}
             />
           </label>
@@ -155,7 +155,7 @@ export default function NodeEditPanel({ node, descendantCount, saving, onSave, o
         <span className="text-xs font-semibold text-ink flex items-center gap-1.5">
           <span>Activa</span>
           <InfoTooltip
-            text="Si la desactivás, esta opción (y sus opciones adentro, si tiene) deja de aparecer en el menú del bot, pero no se borra — la podés reactivar cuando quieras."
+            text="Si la desactivas, esta opción (y sus opciones adentro, si tiene) deja de aparecer en el menú del bot, pero no se borra — la puedes reactivar cuando quieras."
             example="Una sucursal cerrada temporalmente"
           />
         </span>
@@ -176,7 +176,7 @@ export default function NodeEditPanel({ node, descendantCount, saving, onSave, o
         <div className="pt-3" style={{ borderTop: '1px solid var(--border)' }}>
           {showAddMenu ? (
             <div className="space-y-1.5">
-              <p className="text-xs font-semibold text-ink">Elegí el tipo de opción</p>
+              <p className="text-xs font-semibold text-ink">Elige el tipo de opción</p>
               <div className="grid grid-cols-2 gap-2">
                 {ADDABLE_TYPES.map((t) => (
                   <button

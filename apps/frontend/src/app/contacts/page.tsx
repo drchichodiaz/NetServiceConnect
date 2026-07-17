@@ -456,8 +456,8 @@ function NewConversationModal({ contact, onClose, onSent }: {
   }
 
   async function handleSend() {
-    if (!templateId) { toast.error('Elegí una plantilla'); return; }
-    if (!contact && !phone.trim()) { toast.error('Ingresá el teléfono del contacto'); return; }
+    if (!templateId) { toast.error('Elige una plantilla'); return; }
+    if (!contact && !phone.trim()) { toast.error('Ingresa el teléfono del contacto'); return; }
 
     setSending(true);
     try {
@@ -509,11 +509,11 @@ function NewConversationModal({ contact, onClose, onSent }: {
             </div>
           ) : templates.length === 0 ? (
             <p className="text-sm text-ink-muted py-2">
-              No tenés plantillas aprobadas todavía. Creá una en Settings → Plantillas y esperá su aprobación de Meta.
+              No tienes plantillas aprobadas todavía. Crea una en Settings → Plantillas y espera su aprobación de Meta.
             </p>
           ) : (
             <select value={templateId} onChange={(e) => handleSelectTemplate(e.target.value)} className="input w-full">
-              <option value="">Elegí una plantilla...</option>
+              <option value="">Elige una plantilla...</option>
               {templates.map((t) => (
                 <option key={t.id} value={t.id}>{t.name}</option>
               ))}
@@ -599,7 +599,7 @@ function ImportContactsModal({ onClose, onImported }: { onClose: () => void; onI
         {!result ? (
           <div className="space-y-4">
             <p className="text-xs text-ink-muted">
-              Subí un archivo .xlsx o .csv con las columnas <strong>Nombre</strong>, <strong>Telefono</strong>, <strong>Email</strong> y <strong>Empresa</strong> (solo el teléfono es obligatorio). El teléfono debe incluir el código de país, por ejemplo <code className="text-[11px]">50760000000</code>.
+              Sube un archivo .xlsx o .csv con las columnas <strong>Nombre</strong>, <strong>Telefono</strong>, <strong>Email</strong> y <strong>Empresa</strong> (solo el teléfono es obligatorio). El teléfono debe incluir el código de país, por ejemplo <code className="text-[11px]">50760000000</code>.
             </p>
 
             <button
@@ -617,7 +617,7 @@ function ImportContactsModal({ onClose, onImported }: { onClose: () => void; onI
             >
               <FileSpreadsheet className="w-6 h-6 text-ink-subtle" />
               <span className="text-xs text-ink-muted text-center px-4">
-                {file ? file.name : 'Elegí un archivo .xlsx o .csv'}
+                {file ? file.name : 'Elige un archivo .xlsx o .csv'}
               </span>
               <input
                 ref={fileInputRef}

@@ -36,7 +36,7 @@ export class TemplatesService {
 
     if (variableCount > 0 && dto.exampleValues?.length !== variableCount) {
       throw new BadRequestException(
-        `Esta plantilla tiene ${variableCount} variable(s) — necesitás dar un valor de ejemplo para cada una (Meta lo exige para poder aprobarla).`,
+        `Esta plantilla tiene ${variableCount} variable(s) — necesitas dar un valor de ejemplo para cada una (Meta lo exige para poder aprobarla).`,
       );
     }
 

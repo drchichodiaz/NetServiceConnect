@@ -196,7 +196,7 @@ export default function MenuTreeEditor() {
     <div className="flex flex-col lg:flex-row gap-6 items-start">
       <div className="flex-1 min-w-0 w-full space-y-3">
         <div className="flex items-center justify-between">
-          <p className="text-xs text-ink-muted">Arrastrá una opción para reordenarla o moverla adentro de un submenú.</p>
+          <p className="text-xs text-ink-muted">Arrastra una opción para reordenarla o moverla adentro de un submenú.</p>
           <div className="relative">
             <button onClick={() => setShowRootAdd((v) => !v)} className="btn-primary text-sm">
               <Plus className="w-4 h-4" />
@@ -226,7 +226,7 @@ export default function MenuTreeEditor() {
           <div className="card flex flex-col items-center justify-center py-14 text-center" style={{ border: '2px dashed var(--border)' }}>
             <FolderTree className="w-6 h-6 text-ink-subtle mb-2" />
             <p className="text-sm font-semibold text-ink">Todavía no armaste el menú</p>
-            <p className="text-xs text-ink-muted mt-1 mb-4">Agregá la primera opción para que el bot empiece a responder.</p>
+            <p className="text-xs text-ink-muted mt-1 mb-4">Agrega la primera opción para que el bot empiece a responder.</p>
             <button onClick={() => handleCreate(null, 'TEXT')} className="btn-primary text-sm">
               <Plus className="w-4 h-4" />
               Agregar primera opción
@@ -287,7 +287,7 @@ export default function MenuTreeEditor() {
           />
         ) : (
           <div className="card p-5 text-center">
-            <p className="text-xs text-ink-muted">Elegí una opción del menú para editarla.</p>
+            <p className="text-xs text-ink-muted">Elige una opción del menú para editarla.</p>
           </div>
         )}
       </div>
