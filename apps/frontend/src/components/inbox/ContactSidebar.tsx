@@ -1,15 +1,16 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Conversation } from '@/types';
+import { Conversation, Tag as TagType } from '@/types';
 import { useInboxStore } from '@/store/inbox.store';
-import { conversationsApi } from '@/lib/api';
+import { conversationsApi, tagsApi } from '@/lib/api';
 import {
   Phone, Mail, Tag, MessageSquare, StickyNote,
-  CheckCircle, Clock, XCircle, ChevronRight, X,
+  CheckCircle, Clock, XCircle, ChevronRight, X, Plus,
   User, Calendar,
 } from 'lucide-react';
 import { formatDistanceToNow, format } from 'date-fns';
 import { es } from 'date-fns/locale';
+import toast from 'react-hot-toast';
 import clsx from 'clsx';
 
 interface Props {
@@ -24,13 +25,17 @@ const STATUS_CONFIG = {
 };
 
 export default function ContactSidebar({ conversation, onClose }: Props) {
-  const { notes } = useInboxStore();
+  const { notes, updateConversation } = useInboxStore();
   const { contact } = conversation;
   const displayName = contact.name || contact.phone;
   const initials = displayName.slice(0, 2).toUpperCase();
 
   const [history, setHistory] = useState<Conversation[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
+
+  const [tagCatalog, setTagCatalog] = useState<TagType[]>([]);
+  const [showTagMenu, setShowTagMenu] = useState(false);
+  const [savingTags, setSavingTags] = useState(false);
 
   useEffect(() => {
     setLoadingHistory(true);
@@ -43,6 +48,33 @@ export default function ContactSidebar({ conversation, onClose }: Props) {
       .catch(() => setHistory([]))
       .finally(() => setLoadingHistory(false));
   }, [contact.id, conversation.id]);
+
+  useEffect(() => {
+    tagsApi.list().then(setTagCatalog).catch(() => setTagCatalog([]));
+  }, []);
+
+  const assignedTagIds = conversation.tags.map(({ tag }) => tag.id);
+  const availableTags = tagCatalog.filter((t) => !assignedTagIds.includes(t.id));
+
+  async function setTagIds(tagIds: string[]) {
+    setSavingTags(true);
+    try {
+      await updateConversation(conversation.id, { tagIds });
+    } catch {
+      toast.error('Error al actualizar las etiquetas');
+    } finally {
+      setSavingTags(false);
+    }
+  }
+
+  function handleAddTag(tagId: string) {
+    setShowTagMenu(false);
+    setTagIds([...assignedTagIds, tagId]);
+  }
+
+  function handleRemoveTag(tagId: string) {
+    setTagIds(assignedTagIds.filter((id) => id !== tagId));
+  }
 
   const status = STATUS_CONFIG[conversation.status] ?? STATUS_CONFIG.OPEN;
 
@@ -145,22 +177,66 @@ export default function ContactSidebar({ conversation, onClose }: Props) {
         </Section>
 
         {/* ── Etiquetas ─────────────────────────────────── */}
-        {conversation.tags?.length > 0 && (
-          <Section title="Etiquetas">
-            <div className="flex flex-wrap gap-1.5">
-              {conversation.tags.map(({ tag }) => (
-                <span
-                  key={tag.id}
-                  className="inline-flex items-center gap-1 text-[11px] font-medium rounded-full px-2 py-0.5"
-                  style={{ background: tag.color + '22', color: tag.color, border: `1px solid ${tag.color}44` }}
+        <Section title="Etiquetas">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {conversation.tags.map(({ tag }) => (
+              <span
+                key={tag.id}
+                className="inline-flex items-center gap-1 text-[11px] font-medium rounded-full pl-2 pr-1 py-0.5 group"
+                style={{ background: tag.color + '22', color: tag.color, border: `1px solid ${tag.color}44` }}
+              >
+                <Tag className="w-2.5 h-2.5" />
+                {tag.name}
+                <button
+                  onClick={() => handleRemoveTag(tag.id)}
+                  disabled={savingTags}
+                  className="w-3.5 h-3.5 rounded-full flex items-center justify-center opacity-50 hover:opacity-100 transition-opacity"
+                  title="Quitar etiqueta"
                 >
-                  <Tag className="w-2.5 h-2.5" />
-                  {tag.name}
-                </span>
-              ))}
+                  <X className="w-2.5 h-2.5" />
+                </button>
+              </span>
+            ))}
+
+            <div className="relative">
+              <button
+                onClick={() => setShowTagMenu(!showTagMenu)}
+                disabled={savingTags}
+                className="w-5 h-5 rounded-full flex items-center justify-center text-ink-subtle hover:text-ink hover:bg-black/5 transition-colors"
+                title="Agregar etiqueta"
+              >
+                <Plus className="w-3 h-3" />
+              </button>
+
+              {showTagMenu && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setShowTagMenu(false)} />
+                  <div
+                    className="absolute left-0 top-full mt-1 bg-white rounded-xl shadow-float z-20 overflow-hidden animate-pop"
+                    style={{ border: '1px solid var(--border)', minWidth: '160px', maxHeight: '220px', overflowY: 'auto' }}
+                  >
+                    {availableTags.length === 0 ? (
+                      <p className="px-3.5 py-2.5 text-xs text-ink-subtle">
+                        {tagCatalog.length === 0 ? 'Sin etiquetas creadas todavía' : 'Ya tiene todas las etiquetas'}
+                      </p>
+                    ) : (
+                      availableTags.map((tag) => (
+                        <button
+                          key={tag.id}
+                          onClick={() => handleAddTag(tag.id)}
+                          className="flex items-center gap-2 w-full px-3.5 py-2.5 text-sm hover:bg-surface-muted transition-colors text-left"
+                        >
+                          <span className="w-2 h-2 rounded-full shrink-0" style={{ background: tag.color }} />
+                          <span className="text-ink truncate">{tag.name}</span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </>
+              )}
             </div>
-          </Section>
-        )}
+          </div>
+        </Section>
 
         {/* ── Notas internas ────────────────────────────── */}
         {notes.length > 0 && (
