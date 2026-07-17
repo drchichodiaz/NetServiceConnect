@@ -10,31 +10,40 @@ interface WhatsAppAccountCreds {
   accessToken: string;
 }
 
-interface BranchLike {
+type MenuNodeType = 'MENU' | 'TEXT' | 'ORDER_LOOKUP' | 'AGENT';
+
+interface MenuNode {
   id: string;
-  name: string;
-  address: string;
-  scheduleText: string | null;
-  phone: string | null;
-  mapsUrl: string | null;
-  servicesText: string | null;
+  parentId: string | null;
+  type: MenuNodeType;
+  title: string;
+  subtitle: string | null;
+  bodyText: string | null;
+  promptText: string | null;
 }
 
-const MENU_OPTIONS: { id: string; title: string }[] = [
-  { id: 'horarios', title: 'Horarios' },
-  { id: 'sucursales', title: 'Sucursales' },
-  { id: 'servicios', title: 'Servicios' },
-  { id: 'consultar_orden', title: 'Consultar mi orden' },
-  { id: 'agente', title: 'Hablar con un agente' },
-];
+interface BotContext {
+  nodeId: string | null;
+  retryCount: number;
+}
 
 const DEFAULT_CONFIG_TEXT = 'Todavía no cargamos esta información. Ya te paso con un agente para ayudarte.';
-const MAX_LIST_ROWS = 10;
+// Meta permite máx. 10 filas por interactive list. En un nodo no-raíz reservamos
+// 1 fila para "‹ Volver" (UP_ID), así que ahí el cupo real de opciones es 9.
+const ROOT_ROW_CAP = 10;
+const CHILD_ROW_CAP = 9;
+const UP_ID = '__up__';
 const HUMAN_ESCAPE_RE = /\b(agente|humano)\b/i;
+const BACK_TO_MENU_RE = /\b(volver|menu|menú|atras|atrás)\b/i;
 // Cuántas respuestas no reconocidas seguidas tolera el bot en un mismo prompt
-// (menú, sucursal, follow-up, confirmación) antes de derivar a un humano en vez
-// de seguir reenviando lo mismo indefinidamente.
+// (listado de opciones, búsqueda, confirmación post-respuesta) antes de derivar
+// a un humano en vez de seguir reenviando lo mismo indefinidamente.
 const MAX_UNKNOWN_RETRIES = 3;
+// Estados que conoce el motor genérico. Cualquier otro valor de ConversationBotState
+// (los 4 legacy de Fase D: BRANCH_MENU/AWAITING_BRANCH_QUERY/AWAITING_BRANCH_FOLLOWUP/
+// AWAITING_RESOLUTION_CONFIRMATION) significa que la conversación quedó a mitad de
+// camino en el deploy del árbol configurable — se resetea a la raíz sin crashear.
+const NEW_STATES = new Set(['MENU', 'AWAITING_QUERY', 'AWAITING_ORDER_NUMBER', 'AWAITING_POST_REPLY']);
 
 @Injectable()
 export class BotService {
@@ -50,34 +59,9 @@ export class BotService {
     this.apiVersion = config.get('META_API_VERSION') || 'v19.0';
   }
 
-  /** Envía el menú principal como WhatsApp interactive list message. */
+  /** Envía el menú raíz del tenant. */
   async sendMenu(tenantId: string, conversationId: string, phone: string) {
-    const account = await this.getAccount(tenantId);
-    if (!account) {
-      return this.handoffToHuman(tenantId, conversationId, 'whatsapp_account_unavailable');
-    }
-
-    const payload = {
-      messaging_product: 'whatsapp',
-      recipient_type: 'individual',
-      to: phone,
-      type: 'interactive',
-      interactive: {
-        type: 'list',
-        body: { text: '¡Hola! ¿En qué te podemos ayudar?' },
-        action: {
-          button: 'Ver opciones',
-          sections: [{ title: 'Menú', rows: MENU_OPTIONS.map((o) => ({ id: o.id, title: o.title })) }],
-        },
-      },
-    };
-
-    const summary = `[Menú] ${MENU_OPTIONS.map((o) => o.title).join(' · ')}`;
-    const sent = await this.sendAndLog(tenantId, conversationId, account, payload, summary);
-    if (!sent) {
-      return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
-    }
-    await this.prisma.conversation.update({ where: { id: conversationId }, data: { botState: 'MENU' } });
+    return this.enterNode(tenantId, conversationId, phone, null);
   }
 
   /** Rutea la respuesta de un cliente cuando la conversación sigue en modo BOT. */
@@ -87,95 +71,88 @@ export class BotService {
       return this.handoffToHuman(tenantId, conversationId, 'whatsapp_account_unavailable');
     }
 
+    if (botState && !NEW_STATES.has(botState)) {
+      await this.setContext(conversationId, { nodeId: null, retryCount: 0 });
+      return this.enterNode(tenantId, conversationId, phone, null, account);
+    }
+
     switch (botState) {
       case 'AWAITING_ORDER_NUMBER':
         return this.handleOrderNumberReply(tenantId, conversationId, phone, msg, account);
-      case 'BRANCH_MENU':
-        return this.handleBranchMenuReply(tenantId, conversationId, phone, msg, account);
-      case 'AWAITING_BRANCH_QUERY':
-        return this.handleBranchQueryReply(tenantId, conversationId, phone, msg, account);
-      case 'AWAITING_BRANCH_FOLLOWUP':
-        return this.handleBranchFollowupReply(tenantId, conversationId, phone, msg, account);
-      case 'AWAITING_RESOLUTION_CONFIRMATION':
-        return this.handleResolutionConfirmationReply(tenantId, conversationId, phone, msg, account);
+      case 'AWAITING_QUERY':
+        return this.handleQueryReply(tenantId, conversationId, phone, msg, account);
+      case 'AWAITING_POST_REPLY':
+        return this.handlePostReplyReply(tenantId, conversationId, phone, msg, account);
     }
-
-    const optionId = this.extractReplyId(msg);
-    switch (optionId) {
-      case 'horarios':
-      case 'servicios':
-        await this.resetRetryCount(conversationId);
-        return this.replyWithConfigText(tenantId, conversationId, phone, optionId, account);
-      case 'sucursales':
-        await this.resetRetryCount(conversationId);
-        return this.startBranchLookup(tenantId, conversationId, phone, account);
-      case 'consultar_orden':
-        await this.resetRetryCount(conversationId);
-        return this.askOrderNumber(tenantId, conversationId, phone, account);
-      case 'agente':
-        await this.resetRetryCount(conversationId);
-        await this.sendText(tenantId, conversationId, phone, account, 'Perfecto, ya te conecto con un agente.');
-        return this.handoffToHuman(tenantId, conversationId, 'menu_selection');
-      default:
-        return this.resendMenuWithHint(tenantId, conversationId, phone, account, msg);
-    }
+    return this.handleMenuReply(tenantId, conversationId, phone, msg, account);
   }
 
-  // ─── Horarios / Servicios / Sucursales (fallback plano) ───────────────────
+  // ─── Motor genérico del árbol de menú ──────────────────────────────────────
 
-  private async replyWithConfigText(
+  /**
+   * Lista los hijos activos de `nodeId` (null = raíz) como interactive list, o
+   * pide texto libre si superan el cupo de filas de WhatsApp. Siempre revalida
+   * el nodo contra la DB — nunca confía ciegamente en botContext.nodeId, porque
+   * un admin puede haber borrado/desactivado el nodo mientras la conversación
+   * estaba a mitad de camino.
+   */
+  private async enterNode(
     tenantId: string,
     conversationId: string,
     phone: string,
-    optionId: 'horarios' | 'sucursales' | 'servicios',
-    account: WhatsAppAccountCreds,
+    nodeId: string | null,
+    account?: WhatsAppAccountCreds,
   ) {
-    const config = await this.prisma.tenantBotConfig.findUnique({ where: { tenantId } });
-    const fieldMap = {
-      horarios: config?.horariosText,
-      sucursales: config?.sucursalesText,
-      servicios: config?.serviciosText,
-    };
-    const text = fieldMap[optionId]?.trim() || DEFAULT_CONFIG_TEXT;
-    const sent = await this.sendText(tenantId, conversationId, phone, account, text);
-    if (!sent) {
-      return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
+    const acc = account ?? (await this.getAccount(tenantId));
+    if (!acc) {
+      return this.handoffToHuman(tenantId, conversationId, 'whatsapp_account_unavailable');
     }
-    return this.sendResolutionConfirmation(tenantId, conversationId, phone, account);
-  }
 
-  // ─── Sucursales dinámicas ───────────────────────────────────────────────────
+    let node: MenuNode | null = null;
+    if (nodeId) {
+      node = await this.resolveNode(tenantId, nodeId);
+      if (!node) {
+        return this.enterNode(tenantId, conversationId, phone, null, acc);
+      }
+    }
 
-  private async startBranchLookup(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds) {
-    const branches = await this.prisma.tenantBranch.findMany({
-      where: { tenantId, active: true },
-      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+    const children = await this.prisma.tenantMenuNode.findMany({
+      where: { tenantId, parentId: nodeId, active: true },
+      orderBy: [{ sortOrder: 'asc' }],
     });
 
-    if (branches.length === 0) {
-      return this.replyWithConfigText(tenantId, conversationId, phone, 'sucursales', account);
+    if (children.length === 0) {
+      const sent = await this.sendText(tenantId, conversationId, phone, acc, DEFAULT_CONFIG_TEXT);
+      if (!sent) {
+        return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
+      }
+      if (node) {
+        return this.enterNode(tenantId, conversationId, phone, node.parentId, acc);
+      }
+      return this.handoffToHuman(tenantId, conversationId, 'bot_not_configured');
     }
 
-    if (branches.length <= MAX_LIST_ROWS) {
-      return this.sendBranchMenu(tenantId, conversationId, phone, account, branches);
+    const isRoot = nodeId === null;
+    const rowCap = isRoot ? ROOT_ROW_CAP : CHILD_ROW_CAP;
+
+    if (children.length > rowCap) {
+      const prompt = node?.promptText?.trim() || '¿Qué estás buscando? Escribime el nombre de la opción.';
+      const sent = await this.sendText(tenantId, conversationId, phone, acc, prompt);
+      if (!sent) {
+        return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
+      }
+      await this.setContext(conversationId, { nodeId, retryCount: 0 });
+      await this.prisma.conversation.update({ where: { id: conversationId }, data: { botState: 'AWAITING_QUERY' } });
+      return;
     }
 
-    // Meta no permite más de 10 filas en un interactive list message — con más
-    // sucursales que eso, pedimos texto libre y buscamos por nombre/dirección.
-    const sent = await this.sendText(
-      tenantId,
-      conversationId,
-      phone,
-      account,
-      '¿En qué ciudad estás o cuál es el nombre de la sucursal más cercana?',
-    );
-    if (!sent) {
-      return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
-    }
-    await this.prisma.conversation.update({ where: { id: conversationId }, data: { botState: 'AWAITING_BRANCH_QUERY' } });
-  }
+    const rows = children.map((c) => {
+      const row: { id: string; title: string; description?: string } = { id: c.id, title: c.title.slice(0, 24) };
+      if (c.subtitle) row.description = c.subtitle.slice(0, 72);
+      return row;
+    });
+    if (!isRoot) rows.push({ id: UP_ID, title: '‹ Volver' });
 
-  private async sendBranchMenu(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, branches: BranchLike[]) {
     const payload = {
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
@@ -183,175 +160,174 @@ export class BotService {
       type: 'interactive',
       interactive: {
         type: 'list',
-        body: { text: '¿Cuál es tu sucursal más cercana?' },
-        action: {
-          button: 'Ver sucursales',
-          sections: [{
-            title: 'Sucursales',
-            rows: branches.map((b) => ({ id: b.id, title: b.name.slice(0, 24), description: (b.address || '').slice(0, 72) })),
-          }],
-        },
+        body: { text: node?.promptText?.trim() || (isRoot ? '¡Hola! ¿En qué te podemos ayudar?' : `¿Qué necesitás de "${node!.title}"?`) },
+        action: { button: 'Ver opciones', sections: [{ title: node?.title || 'Menú', rows }] },
       },
     };
 
-    const summary = `[Sucursales] ${branches.map((b) => b.name).join(' · ')}`;
-    const sent = await this.sendAndLog(tenantId, conversationId, account, payload, summary);
+    const summary = `[${node?.title || 'Menú'}] ${children.map((c) => c.title).join(' · ')}`;
+    const sent = await this.sendAndLog(tenantId, conversationId, acc, payload, summary);
     if (!sent) {
       return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
     }
-    await this.prisma.conversation.update({ where: { id: conversationId }, data: { botState: 'BRANCH_MENU' } });
+
+    await this.setContext(conversationId, { nodeId, retryCount: 0 });
+    await this.prisma.conversation.update({ where: { id: conversationId }, data: { botState: 'MENU' } });
   }
 
-  private async resendBranchMenuWithHint(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, msg: any) {
-    return this.trackUnrecognizedReply(tenantId, conversationId, phone, account, msg, async () => {
-      const sent = await this.sendText(tenantId, conversationId, phone, account, 'No identifiqué esa opción. Elegí una sucursal de la lista:');
-      if (!sent) {
-        return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
-      }
-      return this.startBranchLookup(tenantId, conversationId, phone, account);
-    });
-  }
+  private async handleMenuReply(tenantId: string, conversationId: string, phone: string, msg: any, account: WhatsAppAccountCreds) {
+    const { nodeId } = await this.getContext(conversationId);
+    const optionId = this.extractReplyId(msg);
 
-  private async handleBranchMenuReply(tenantId: string, conversationId: string, phone: string, msg: any, account: WhatsAppAccountCreds) {
-    const branchId = this.extractReplyId(msg);
-    const branch = branchId
-      ? await this.prisma.tenantBranch.findFirst({ where: { id: branchId, tenantId, active: true } })
+    if (optionId === UP_ID) {
+      await this.resetRetryCount(conversationId);
+      const current = nodeId ? await this.resolveNode(tenantId, nodeId) : null;
+      return this.enterNode(tenantId, conversationId, phone, current?.parentId ?? null, account);
+    }
+
+    const child = optionId
+      ? await this.prisma.tenantMenuNode.findFirst({ where: { id: optionId, tenantId, parentId: nodeId, active: true } })
       : null;
 
-    if (!branch) {
-      return this.resendBranchMenuWithHint(tenantId, conversationId, phone, account, msg);
+    if (!child) {
+      return this.trackUnrecognizedReply(tenantId, conversationId, phone, account, msg, () =>
+        this.resendListWithHint(tenantId, conversationId, phone, account, nodeId),
+      );
     }
+
     await this.resetRetryCount(conversationId);
-    return this.showBranchDetails(tenantId, conversationId, phone, account, branch);
+    return this.dispatchNode(tenantId, conversationId, phone, account, child);
   }
 
-  private async handleBranchQueryReply(tenantId: string, conversationId: string, phone: string, msg: any, account: WhatsAppAccountCreds) {
+  private async resendListWithHint(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, nodeId: string | null) {
+    const sent = await this.sendText(tenantId, conversationId, phone, account, 'No entendí tu respuesta. Elegí una opción de la lista:');
+    if (!sent) {
+      return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
+    }
+    // enterNode ya se auto-deriva a un humano si el reenvío del listado también falla.
+    return this.enterNode(tenantId, conversationId, phone, nodeId, account);
+  }
+
+  private async dispatchNode(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, node: MenuNode) {
+    switch (node.type) {
+      case 'MENU':
+        return this.enterNode(tenantId, conversationId, phone, node.id, account);
+      case 'TEXT':
+        return this.sendLeafText(tenantId, conversationId, phone, account, node);
+      case 'ORDER_LOOKUP':
+        return this.askOrderNumber(tenantId, conversationId, phone, account);
+      case 'AGENT':
+        await this.sendText(tenantId, conversationId, phone, account, 'Perfecto, ya te conecto con un agente.');
+        return this.handoffToHuman(tenantId, conversationId, 'menu_selection');
+    }
+  }
+
+  // ─── Búsqueda de texto libre cuando un nodo MENU supera el cupo de filas ───
+
+  private async handleQueryReply(tenantId: string, conversationId: string, phone: string, msg: any, account: WhatsAppAccountCreds) {
+    const { nodeId } = await this.getContext(conversationId);
     const query = msg.text?.body?.trim() || '';
 
     if (HUMAN_ESCAPE_RE.test(query)) {
-      return this.handoffToHuman(tenantId, conversationId, 'branch_lookup_escape');
+      return this.handoffToHuman(tenantId, conversationId, 'query_escape');
+    }
+
+    if (BACK_TO_MENU_RE.test(query)) {
+      await this.resetRetryCount(conversationId);
+      const current = nodeId ? await this.resolveNode(tenantId, nodeId) : null;
+      return this.enterNode(tenantId, conversationId, phone, current?.parentId ?? null, account);
     }
 
     if (!query) {
-      const sent = await this.sendText(tenantId, conversationId, phone, account, 'No entendí. Escribime el nombre de tu ciudad o de la sucursal más cercana.');
+      const sent = await this.sendText(tenantId, conversationId, phone, account, 'No entendí. Escribime el nombre de la opción que buscás.');
       if (!sent) return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
       return;
     }
 
     // Se filtra en memoria (no con `contains` de Postgres) porque necesitamos ignorar
-    // tildes: un cliente escribiendo el nombre de su propia sucursal sin acentos
+    // tildes: un cliente escribiendo el nombre de su propia opción sin acentos
     // (muy común en WhatsApp) no debe fallar el match por eso.
     const normalizedQuery = this.normalizeText(query);
-    const allActive = await this.prisma.tenantBranch.findMany({
-      where: { tenantId, active: true },
-      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+    const children = await this.prisma.tenantMenuNode.findMany({
+      where: { tenantId, parentId: nodeId, active: true },
+      orderBy: [{ sortOrder: 'asc' }],
     });
-    const matches = allActive
-      .filter((b) => this.normalizeText(b.name).includes(normalizedQuery) || this.normalizeText(b.address).includes(normalizedQuery))
+    const matches = children
+      .filter((c) => this.normalizeText(c.title).includes(normalizedQuery) || this.normalizeText(c.subtitle || '').includes(normalizedQuery))
       .slice(0, 8);
 
     if (matches.length === 0) {
       await this.prisma.auditLog.create({
-        data: { tenantId, conversationId, action: 'conversation.branch_lookup_no_match', metadata: { query } },
+        data: { tenantId, conversationId, action: 'conversation.menu_query_no_match', metadata: { query } },
       });
-      await this.sendText(tenantId, conversationId, phone, account, 'No encontré una sucursal con ese nombre. Ya te paso con un agente.');
-      return this.handoffToHuman(tenantId, conversationId, 'branch_lookup_no_match');
+      await this.sendText(tenantId, conversationId, phone, account, 'No encontré ninguna opción con ese nombre. Ya te paso con un agente.');
+      return this.handoffToHuman(tenantId, conversationId, 'query_no_match');
     }
 
     if (matches.length === 1) {
-      return this.showBranchDetails(tenantId, conversationId, phone, account, matches[0]);
+      await this.resetRetryCount(conversationId);
+      return this.dispatchNode(tenantId, conversationId, phone, account, matches[0]);
     }
 
-    const names = matches.map((b) => `• ${b.name}`).join('\n');
+    const names = matches.map((c) => `• ${c.title}`).join('\n');
     const sent = await this.sendText(
       tenantId,
       conversationId,
       phone,
       account,
-      `Encontré varias sucursales, ¿cuál es la tuya?\n\n${names}\n\nEscribí el nombre completo.`,
+      `Encontré varias opciones, ¿cuál es la tuya?\n\n${names}\n\nEscribí el nombre completo.`,
     );
     if (!sent) {
       return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
     }
-    // se queda en AWAITING_BRANCH_QUERY para reintentar con un texto más específico
+    // se queda en AWAITING_QUERY para reintentar con un texto más específico
   }
 
-  private async showBranchDetails(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, branch: BranchLike) {
-    const lines = [`🏬 ${branch.name}`, `📍 ${branch.address}`];
-    if (branch.scheduleText) lines.push(`🕐 ${branch.scheduleText}`);
-    if (branch.phone) lines.push(`☎️ ${branch.phone}`);
-    if (branch.mapsUrl) lines.push(branch.mapsUrl);
-    if (branch.servicesText) lines.push('', `Servicios disponibles: ${branch.servicesText}`);
+  // ─── Hoja de texto (horarios/servicios/detalle de sucursal/lo que cargue el tenant) ─
 
-    const sent = await this.sendText(tenantId, conversationId, phone, account, lines.join('\n'));
+  private async sendLeafText(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, node: MenuNode) {
+    const text = node.bodyText?.trim() || DEFAULT_CONFIG_TEXT;
+    const sent = await this.sendText(tenantId, conversationId, phone, account, text);
     if (!sent) {
       return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
     }
 
     await this.prisma.auditLog.create({
-      data: { tenantId, conversationId, action: 'bot.branch_selected', metadata: { branchId: branch.id, branchName: branch.name } },
+      data: { tenantId, conversationId, action: 'bot.node_selected', metadata: { nodeId: node.id, title: node.title, nodeType: node.type } },
     });
 
-    return this.sendBranchFollowup(tenantId, conversationId, phone, account);
+    return this.sendPostReplyPrompt(tenantId, conversationId, phone, account, node.parentId);
   }
 
-  private async sendBranchFollowup(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds) {
+  // ─── Prompt post-respuesta (generaliza confirmación de resolución + follow-up) ─
+
+  private async sendPostReplyPrompt(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, parentNodeId: string | null) {
     const sent = await this.sendButtons(tenantId, conversationId, phone, account, '¿Necesitás algo más?', [
-      { id: 'branch_other', title: 'Ver otra sucursal' },
-      { id: 'branch_menu', title: 'Volver al menú' },
-      { id: 'branch_agent', title: 'Hablar con un agente' },
+      { id: 'post_yes', title: 'Sí, gracias' },
+      { id: 'post_more', title: 'Ver otra opción' },
+      { id: 'post_agent', title: 'Hablar con un agente' },
     ]);
     if (!sent) {
       return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
     }
-    await this.prisma.conversation.update({ where: { id: conversationId }, data: { botState: 'AWAITING_BRANCH_FOLLOWUP' } });
+    await this.setContext(conversationId, { nodeId: parentNodeId, retryCount: 0 });
+    await this.prisma.conversation.update({ where: { id: conversationId }, data: { botState: 'AWAITING_POST_REPLY' } });
   }
 
-  private async handleBranchFollowupReply(tenantId: string, conversationId: string, phone: string, msg: any, account: WhatsAppAccountCreds) {
+  private async handlePostReplyReply(tenantId: string, conversationId: string, phone: string, msg: any, account: WhatsAppAccountCreds) {
+    const { nodeId } = await this.getContext(conversationId);
     const optionId = this.extractReplyId(msg);
     switch (optionId) {
-      case 'branch_other':
-        await this.resetRetryCount(conversationId);
-        return this.startBranchLookup(tenantId, conversationId, phone, account);
-      case 'branch_menu':
-        await this.resetRetryCount(conversationId);
-        return this.sendMenu(tenantId, conversationId, phone);
-      case 'branch_agent':
-        return this.handoffToHuman(tenantId, conversationId, 'branch_followup');
-      default:
-        return this.trackUnrecognizedReply(tenantId, conversationId, phone, account, msg, () =>
-          this.sendBranchFollowup(tenantId, conversationId, phone, account),
-        );
-    }
-  }
-
-  // ─── Confirmación de resolución ────────────────────────────────────────────
-
-  private async sendResolutionConfirmation(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds) {
-    const sent = await this.sendButtons(tenantId, conversationId, phone, account, '¿Pude resolver tu consulta?', [
-      { id: 'yes', title: 'Sí, gracias' },
-      { id: 'menu', title: 'Volver al menú' },
-      { id: 'agent', title: 'Hablar con un agente' },
-    ]);
-    if (!sent) {
-      return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
-    }
-    await this.prisma.conversation.update({ where: { id: conversationId }, data: { botState: 'AWAITING_RESOLUTION_CONFIRMATION' } });
-  }
-
-  private async handleResolutionConfirmationReply(tenantId: string, conversationId: string, phone: string, msg: any, account: WhatsAppAccountCreds) {
-    const optionId = this.extractReplyId(msg);
-    switch (optionId) {
-      case 'yes':
+      case 'post_yes':
         return this.closeAsBotResolved(tenantId, conversationId, phone, account);
-      case 'menu':
+      case 'post_more':
         await this.resetRetryCount(conversationId);
-        return this.sendMenu(tenantId, conversationId, phone);
-      case 'agent':
-        return this.handoffToHuman(tenantId, conversationId, 'resolution_confirmation');
+        return this.enterNode(tenantId, conversationId, phone, nodeId, account);
+      case 'post_agent':
+        return this.handoffToHuman(tenantId, conversationId, 'post_reply_agent');
       default:
         return this.trackUnrecognizedReply(tenantId, conversationId, phone, account, msg, () =>
-          this.sendResolutionConfirmation(tenantId, conversationId, phone, account),
+          this.sendPostReplyPrompt(tenantId, conversationId, phone, account, nodeId),
         );
     }
   }
@@ -381,7 +357,7 @@ export class BotService {
     this.eventBus.publish({ type: 'conversation_updated', tenantId, payload: { conversationId } });
   }
 
-  // ─── Consultar orden (sin cambios de Fase D) ───────────────────────────────
+  // ─── Consultar orden (sin cambios respecto al árbol configurable) ──────────
 
   private async askOrderNumber(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds) {
     const sent = await this.sendText(tenantId, conversationId, phone, account, 'Decime el número de tu orden y en un momento te ayudamos.');
@@ -410,8 +386,8 @@ export class BotService {
     });
 
     // Todavía no hay ninguna API de pedidos conectada para ningún tenant — siempre
-    // cae al fallback humano. Cuando exista TenantBotConfig.orderStatusApiUrl para
-    // el tenant, acá es donde se debería intentar la consulta real antes de derivar.
+    // cae al fallback humano. Cuando el nodo ORDER_LOOKUP tenga una config.apiUrl,
+    // acá es donde se debería intentar la consulta real antes de derivar.
     await this.sendText(
       tenantId,
       conversationId,
@@ -420,19 +396,6 @@ export class BotService {
       'Por ahora no puedo consultar tu orden automáticamente. Ya te paso con un agente que te va a ayudar con el número que me pasaste.',
     );
     await this.handoffToHuman(tenantId, conversationId, 'order_lookup_fallback');
-  }
-
-  // ─── Menú principal: reenvío ante texto no reconocido ──────────────────────
-
-  private async resendMenuWithHint(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, msg: any) {
-    return this.trackUnrecognizedReply(tenantId, conversationId, phone, account, msg, async () => {
-      const sent = await this.sendText(tenantId, conversationId, phone, account, 'No entendí tu respuesta. Elegí una opción de la lista:');
-      if (!sent) {
-        return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
-      }
-      // sendMenu ya se auto-deriva a un humano si el reenvío del menú también falla.
-      await this.sendMenu(tenantId, conversationId, phone);
-    });
   }
 
   // ─── Handoff a humano (idempotente) ────────────────────────────────────────
@@ -468,11 +431,11 @@ export class BotService {
   // ─── Contador de respuestas no reconocidas ─────────────────────────────────
 
   /**
-   * Se llama desde cada prompt del bot (menú, sucursal, follow-up, confirmación)
-   * cuando la respuesta del cliente no matchea ninguna opción esperada. Reenvía
-   * el mismo prompt hasta MAX_UNKNOWN_RETRIES veces seguidas; a partir de ahí
-   * deriva a un humano en vez de seguir dando vueltas indefinidamente si el
-   * cliente nunca toca una opción válida.
+   * Se llama desde cada prompt del bot (listado de opciones, confirmación
+   * post-respuesta) cuando la respuesta del cliente no matchea ninguna opción
+   * esperada. Reenvía el mismo prompt hasta MAX_UNKNOWN_RETRIES veces seguidas;
+   * a partir de ahí deriva a un humano en vez de seguir dando vueltas
+   * indefinidamente si el cliente nunca toca una opción válida.
    */
   private async trackUnrecognizedReply(
     tenantId: string,
@@ -482,8 +445,8 @@ export class BotService {
     msg: any,
     resend: () => Promise<any>,
   ) {
-    const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId }, select: { botContext: true } });
-    const retryCount = ((conv?.botContext as any)?.retryCount ?? 0) + 1;
+    const { retryCount: prevRetryCount } = await this.getContext(conversationId);
+    const retryCount = prevRetryCount + 1;
     const rawReply = msg.text?.body || msg.interactive?.list_reply?.title || msg.interactive?.button_reply?.title || `[${msg.type}]`;
 
     await this.prisma.auditLog.create({
@@ -502,12 +465,37 @@ export class BotService {
       return this.handoffToHuman(tenantId, conversationId, 'max_retries_reached');
     }
 
-    await this.prisma.conversation.update({ where: { id: conversationId }, data: { botContext: { retryCount } } });
+    await this.setContext(conversationId, { retryCount });
     return resend();
   }
 
   private async resetRetryCount(conversationId: string) {
-    await this.prisma.conversation.update({ where: { id: conversationId }, data: { botContext: { retryCount: 0 } } });
+    await this.setContext(conversationId, { retryCount: 0 });
+  }
+
+  // ─── botContext (merge, nunca overwrite — ver setContext) ──────────────────
+
+  private async getContext(conversationId: string): Promise<BotContext> {
+    const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId }, select: { botContext: true } });
+    const ctx = (conv?.botContext as Partial<BotContext>) || {};
+    return { nodeId: ctx.nodeId ?? null, retryCount: ctx.retryCount ?? 0 };
+  }
+
+  /**
+   * Siempre mergea sobre el botContext actual — nunca sobrescribe. botContext
+   * ahora carga tanto `nodeId` (en qué punto del árbol está la conversación)
+   * como `retryCount`; escribir uno sin el otro borraría el que no se pasó.
+   */
+  private async setContext(conversationId: string, patch: Partial<BotContext>) {
+    const current = await this.getContext(conversationId);
+    await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: { botContext: { ...current, ...patch } },
+    });
+  }
+
+  private async resolveNode(tenantId: string, nodeId: string): Promise<MenuNode | null> {
+    return this.prisma.tenantMenuNode.findFirst({ where: { id: nodeId, tenantId, active: true } });
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────────────

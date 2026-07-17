@@ -120,35 +120,37 @@ export const settingsApi = {
     api.patch('/settings', data).then((r) => r.data),
 };
 
-// ─── Bot config (Fase D: menú de WhatsApp) ─────────────────────────────────────
+// ─── Bot config (menú de WhatsApp) ─────────────────────────────────────────────
 
 export const botConfigApi = {
   get: () => api.get('/bot-config').then((r) => r.data),
-  update: (data: { horariosText?: string; sucursalesText?: string; serviciosText?: string; orderStatusApiUrl?: string }) =>
-    api.patch('/bot-config', data).then((r) => r.data),
-};
-
-export interface BranchInput {
-  name: string;
-  address: string;
-  scheduleText?: string;
-  phone?: string;
-  mapsUrl?: string;
-  servicesText?: string;
-  active?: boolean;
-  sortOrder?: number;
-}
-
-export const branchesApi = {
-  list: () => api.get('/bot-config/branches').then((r) => r.data),
-  create: (data: BranchInput) => api.post('/bot-config/branches', data).then((r) => r.data),
-  update: (id: string, data: Partial<BranchInput>) => api.patch(`/bot-config/branches/${id}`, data).then((r) => r.data),
-  remove: (id: string) => api.delete(`/bot-config/branches/${id}`).then((r) => r.data),
+  update: (data: { orderStatusApiUrl?: string }) => api.patch('/bot-config', data).then((r) => r.data),
 };
 
 export const botStatsApi = {
   get: (period: 'today' | 'week' | 'month' = 'week') =>
     api.get('/bot-config/stats', { params: { period } }).then((r) => r.data),
+};
+
+// ─── Menu nodes (árbol configurable del menú de WhatsApp) ──────────────────────
+
+export interface MenuNodeInput {
+  parentId?: string | null;
+  type?: 'MENU' | 'TEXT' | 'ORDER_LOOKUP' | 'AGENT';
+  title: string;
+  subtitle?: string;
+  bodyText?: string;
+  promptText?: string;
+  active?: boolean;
+}
+
+export const menuNodesApi = {
+  getTree: () => api.get('/menu-nodes').then((r) => r.data),
+  create: (data: MenuNodeInput) => api.post('/menu-nodes', data).then((r) => r.data),
+  update: (id: string, data: Partial<MenuNodeInput>) => api.patch(`/menu-nodes/${id}`, data).then((r) => r.data),
+  move: (id: string, data: { parentId: string | null; orderedSiblingIds: string[] }) =>
+    api.patch(`/menu-nodes/${id}/reparent`, data).then((r) => r.data),
+  remove: (id: string) => api.delete(`/menu-nodes/${id}`).then((r) => r.data),
 };
 
 // ─── Stats ────────────────────────────────────────────────────────────────────

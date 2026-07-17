@@ -1,17 +1,6 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { getPeriodStart, StatsPeriod } from '../common/period-range';
-
-export interface BranchDto {
-  name: string;
-  address: string;
-  scheduleText?: string;
-  phone?: string;
-  mapsUrl?: string;
-  servicesText?: string;
-  active?: boolean;
-  sortOrder?: number;
-}
 
 const STATS_ACTIONS = [
   'bot.started',
@@ -26,23 +15,11 @@ export class BotConfigService {
 
   async getConfig(tenantId: string) {
     const config = await this.prisma.tenantBotConfig.findUnique({ where: { tenantId } });
-
-    return {
-      horariosText: config?.horariosText ?? '',
-      sucursalesText: config?.sucursalesText ?? '',
-      serviciosText: config?.serviciosText ?? '',
-      orderStatusApiUrl: config?.orderStatusApiUrl ?? '',
-    };
+    return { orderStatusApiUrl: config?.orderStatusApiUrl ?? '' };
   }
 
-  async updateConfig(
-    tenantId: string,
-    dto: { horariosText?: string; sucursalesText?: string; serviciosText?: string; orderStatusApiUrl?: string },
-  ) {
+  async updateConfig(tenantId: string, dto: { orderStatusApiUrl?: string }) {
     const data: any = {};
-    if (dto.horariosText !== undefined) data.horariosText = dto.horariosText.trim() || null;
-    if (dto.sucursalesText !== undefined) data.sucursalesText = dto.sucursalesText.trim() || null;
-    if (dto.serviciosText !== undefined) data.serviciosText = dto.serviciosText.trim() || null;
     if (dto.orderStatusApiUrl !== undefined) data.orderStatusApiUrl = dto.orderStatusApiUrl.trim() || null;
 
     await this.prisma.tenantBotConfig.upsert({
@@ -52,56 +29,6 @@ export class BotConfigService {
     });
 
     return this.getConfig(tenantId);
-  }
-
-  // ─── Sucursales ────────────────────────────────────────────────────────────
-
-  listBranches(tenantId: string) {
-    return this.prisma.tenantBranch.findMany({
-      where: { tenantId },
-      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-    });
-  }
-
-  createBranch(tenantId: string, dto: BranchDto) {
-    return this.prisma.tenantBranch.create({
-      data: {
-        tenantId,
-        name: dto.name.trim(),
-        address: dto.address.trim(),
-        scheduleText: dto.scheduleText?.trim() || null,
-        phone: dto.phone?.trim() || null,
-        mapsUrl: dto.mapsUrl?.trim() || null,
-        servicesText: dto.servicesText?.trim() || null,
-        active: dto.active ?? true,
-        sortOrder: dto.sortOrder ?? 0,
-      },
-    });
-  }
-
-  async updateBranch(tenantId: string, id: string, dto: Partial<BranchDto>) {
-    const existing = await this.prisma.tenantBranch.findFirst({ where: { id, tenantId } });
-    if (!existing) throw new NotFoundException('Sucursal no encontrada');
-
-    return this.prisma.tenantBranch.update({
-      where: { id },
-      data: {
-        ...(dto.name !== undefined && { name: dto.name.trim() }),
-        ...(dto.address !== undefined && { address: dto.address.trim() }),
-        ...(dto.scheduleText !== undefined && { scheduleText: dto.scheduleText.trim() || null }),
-        ...(dto.phone !== undefined && { phone: dto.phone.trim() || null }),
-        ...(dto.mapsUrl !== undefined && { mapsUrl: dto.mapsUrl.trim() || null }),
-        ...(dto.servicesText !== undefined && { servicesText: dto.servicesText.trim() || null }),
-        ...(dto.active !== undefined && { active: dto.active }),
-        ...(dto.sortOrder !== undefined && { sortOrder: dto.sortOrder }),
-      },
-    });
-  }
-
-  async removeBranch(tenantId: string, id: string) {
-    const existing = await this.prisma.tenantBranch.findFirst({ where: { id, tenantId } });
-    if (!existing) throw new NotFoundException('Sucursal no encontrada');
-    return this.prisma.tenantBranch.delete({ where: { id } });
   }
 
   // ─── Métricas básicas del bot ──────────────────────────────────────────────

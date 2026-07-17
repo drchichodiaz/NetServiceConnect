@@ -14,7 +14,8 @@
     "db:migrate": "npm run prisma:migrate --workspace=apps/backend",
     "db:push": "npm run prisma:push --workspace=apps/backend",
     "db:studio": "npm run prisma:studio --workspace=apps/backend",
-    "db:seed": "npm run prisma:seed --workspace=apps/backend"
+    "db:seed": "npm run prisma:seed --workspace=apps/backend",
+    "db:backfill-menu": "npm run prisma:backfill-menu --workspace=apps/backend"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

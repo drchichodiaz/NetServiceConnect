@@ -32,6 +32,7 @@ model Tenant {
   messageTemplates MessageTemplate[]
   botConfig        TenantBotConfig?
   branches         TenantBranch[]
+  menuNodes        TenantMenuNode[]
 }
 
 // ─── User ─────────────────────────────────────────────────────────────────────
@@ -166,10 +167,17 @@ enum ConversationMode {
 enum ConversationBotState {
   MENU
   AWAITING_ORDER_NUMBER
+  // Legacy (Fase D, generalizadas por el arbol de menu configurable): ya no las
+  // dispara el codigo nuevo, pero Postgres no permite dropear valores de enum sin
+  // recrear el tipo, asi que quedan inertes como red de compatibilidad con
+  // conversaciones que hayan quedado a mitad de camino al momento del deploy.
   BRANCH_MENU
   AWAITING_BRANCH_QUERY
   AWAITING_BRANCH_FOLLOWUP
   AWAITING_RESOLUTION_CONFIRMATION
+  // Generalizan BRANCH_MENU/AWAITING_BRANCH_QUERY/AWAITING_BRANCH_FOLLOWUP/AWAITING_RESOLUTION_CONFIRMATION.
+  AWAITING_QUERY
+  AWAITING_POST_REPLY
 }
 
 // ─── Message ──────────────────────────────────────────────────────────────────
@@ -341,6 +349,40 @@ model TenantBranch {
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
+}
+
+// ─── Tenant Menu Node (menu de WhatsApp configurable, arbol generico) ─────────
+// Reemplaza el menu hardcoded (MENU_OPTIONS) + TenantBranch: cada tenant arma su
+// propio arbol de opciones. "Sucursales" ya no es un caso especial: es un nodo
+// MENU con hijos TEXT, igual que cualquier otro submenu que arme un tenant.
+
+model TenantMenuNode {
+  id         String       @id @default(cuid())
+  tenantId   String
+  parentId   String?
+  type       MenuNodeType @default(TEXT)
+  title      String
+  subtitle   String?
+  bodyText   String?
+  promptText String?
+  config     Json?
+  active     Boolean      @default(true)
+  sortOrder  Int          @default(0)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  parent   TenantMenuNode?  @relation("MenuNodeChildren", fields: [parentId], references: [id], onDelete: Cascade)
+  children TenantMenuNode[] @relation("MenuNodeChildren")
+
+  @@index([tenantId, parentId])
+}
+
+enum MenuNodeType {
+  MENU
+  TEXT
+  ORDER_LOOKUP
+  AGENT
 }
 
 // ─── System Config (global, singleton) ───────────────────────────────────────

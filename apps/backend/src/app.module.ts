@@ -21,6 +21,7 @@ import { SettingsModule } from './settings/settings.module';
 import { SystemConfigModule } from './system-config/system-config.module';
 import { TemplatesModule } from './templates/templates.module';
 import { BotConfigModule } from './bot-config/bot-config.module';
+import { MenuNodesModule } from './menu-nodes/menu-nodes.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { BotConfigModule } from './bot-config/bot-config.module';
     SystemConfigModule,
     TemplatesModule,
     BotConfigModule,
+    MenuNodesModule,
   ],
 })
 export class AppModule {}
