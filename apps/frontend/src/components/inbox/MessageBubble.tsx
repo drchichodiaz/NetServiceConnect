@@ -1,6 +1,6 @@
 'use client';
 import { format } from 'date-fns';
-import { Check, CheckCheck, Clock, AlertCircle, Image, Mic, FileText, Loader2, Download } from 'lucide-react';
+import { Check, CheckCheck, Clock, AlertCircle, Image, Mic, FileText, Loader2, Download, Bot } from 'lucide-react';
 import { Message } from '@/types';
 import { useAuthedMedia } from '@/hooks/useAuthedMedia';
 import clsx from 'clsx';
@@ -106,6 +106,9 @@ function MediaContent({ message }: { message: Message }) {
 
 export default function MessageBubble({ message }: Props) {
   const isOut = message.direction === 'OUTBOUND';
+  // Los mensajes que manda el bot son OUTBOUND pero sin senderId (a diferencia de
+  // los que manda un agente humano desde el inbox, que siempre llevan el suyo).
+  const isBot = isOut && !message.senderId;
 
   return (
     <div className={clsx('flex mb-1', isOut ? 'justify-end' : 'justify-start')}>
@@ -115,16 +118,25 @@ export default function MessageBubble({ message }: Props) {
           isOut ? 'rounded-br-sm' : 'rounded-bl-sm',
         )}
         style={
-          isOut
-            ? { background: '#DCF8C6', color: '#0F1117' }
-            : { background: '#FFFFFF', color: '#1A1D23', border: '1px solid var(--border)' }
+          isBot
+            ? { background: '#EEF2FF', color: '#0F1117', border: '1px solid #C7D2FE' }
+            : isOut
+              ? { background: '#DCF8C6', color: '#0F1117' }
+              : { background: '#FFFFFF', color: '#1A1D23', border: '1px solid var(--border)' }
         }
       >
-        {/* Agent name for outbound */}
-        {isOut && message.sender && (
-          <p className="text-[10px] font-semibold mb-1" style={{ color: '#128C7E' }}>
-            {message.sender.name}
-          </p>
+        {/* Nombre del agente, o etiqueta "Bot" si lo mandó el bot */}
+        {isOut && (
+          message.sender ? (
+            <p className="text-[10px] font-semibold mb-1" style={{ color: '#128C7E' }}>
+              {message.sender.name}
+            </p>
+          ) : isBot ? (
+            <p className="text-[10px] font-semibold mb-1 flex items-center gap-1" style={{ color: '#4F46E5' }}>
+              <Bot className="w-3 h-3" />
+              Bot
+            </p>
+          ) : null
         )}
 
         {message.type !== 'TEXT' && <MediaContent message={message} />}

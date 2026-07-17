@@ -303,7 +303,7 @@ export class BotService {
 
   private async sendPostReplyPrompt(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, parentNodeId: string | null) {
     const sent = await this.sendButtons(tenantId, conversationId, phone, account, '¿Necesitás algo más?', [
-      { id: 'post_yes', title: 'Sí, gracias' },
+      { id: 'post_no_more', title: 'No, gracias' },
       { id: 'post_more', title: 'Ver otra opción' },
       { id: 'post_agent', title: 'Hablar con un agente' },
     ]);
@@ -318,7 +318,7 @@ export class BotService {
     const { nodeId } = await this.getContext(conversationId);
     const optionId = this.extractReplyId(msg);
     switch (optionId) {
-      case 'post_yes':
+      case 'post_no_more':
         return this.closeAsBotResolved(tenantId, conversationId, phone, account);
       case 'post_more':
         await this.resetRetryCount(conversationId);

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Trash2, Loader2, Plus, X } from 'lucide-react';
 import { MenuNode, MenuNodeType } from '@/lib/sortable-tree';
 import { TYPE_LABEL } from './MenuNodeRow';
+import InfoTooltip from '@/components/ui/InfoTooltip';
 
 const ADDABLE_TYPES: { type: MenuNodeType; label: string }[] = [
   { type: 'TEXT', label: 'Texto' },
@@ -69,7 +70,13 @@ export default function NodeEditPanel({ node, descendantCount, saving, onSave, o
       </div>
 
       <div className="space-y-1.5">
-        <label className="text-xs font-semibold text-ink">Título (lo que ve el cliente)</label>
+        <label className="text-xs font-semibold text-ink flex items-center gap-1.5">
+          <span>Título</span>
+          <InfoTooltip
+            text="Es el texto que ve el cliente como opción del menú de WhatsApp. Elegilo corto y claro, porque WhatsApp lo corta a 24 caracteres."
+            example="Horarios"
+          />
+        </label>
         <input
           value={form.title}
           onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
@@ -82,8 +89,14 @@ export default function NodeEditPanel({ node, descendantCount, saving, onSave, o
       {(node.type === 'TEXT' || node.type === 'MENU') && (
         <div className="space-y-1.5">
           <label className="text-xs font-semibold text-ink flex items-center justify-between">
-            <span>Descripción corta</span>
-            <span className="text-[10px] font-normal text-ink-subtle">Opcional — se ve en la lista</span>
+            <span className="flex items-center gap-1.5">
+              <span>Descripción corta</span>
+              <InfoTooltip
+                text="Aparece chiquito debajo del título en la lista de WhatsApp. También es lo que el bot usa para encontrar esta opción cuando hay muchas y el cliente escribe en vez de tocar la lista."
+                example="Costa del Este, Town Center"
+              />
+            </span>
+            <span className="text-[10px] font-normal text-ink-subtle">Opcional</span>
           </label>
           <input
             value={form.subtitle}
@@ -97,7 +110,13 @@ export default function NodeEditPanel({ node, descendantCount, saving, onSave, o
 
       {node.type === 'TEXT' && (
         <div className="space-y-1.5">
-          <label className="text-xs font-semibold text-ink">Respuesta del bot</label>
+          <label className="text-xs font-semibold text-ink flex items-center gap-1.5">
+            <span>Respuesta del bot</span>
+            <InfoTooltip
+              text="El mensaje que el bot envía apenas el cliente toca esta opción. Podés escribir varias líneas, con emojis incluidos."
+              example={'Lunes a sábado de 9am a 7pm\nDomingos de 10am a 4pm'}
+            />
+          </label>
           <textarea
             value={form.bodyText}
             onChange={(e) => setForm((f) => ({ ...f, bodyText: e.target.value }))}
@@ -112,7 +131,13 @@ export default function NodeEditPanel({ node, descendantCount, saving, onSave, o
       {node.type === 'MENU' && (
         <div className="space-y-1.5">
           <label className="text-xs font-semibold text-ink flex items-center justify-between">
-            <span>Texto del prompt</span>
+            <span className="flex items-center gap-1.5">
+              <span>Texto del prompt</span>
+              <InfoTooltip
+                text="El mensaje que aparece arriba de la lista de opciones de este submenú. Si adentro hay más de 9 opciones, el bot deja de mostrar la lista y usa este mismo texto para pedirle al cliente que escriba lo que busca."
+                example="¿Cuál es tu sucursal más cercana?"
+              />
+            </span>
             <span className="text-[10px] font-normal text-ink-subtle">Opcional</span>
           </label>
           <textarea
@@ -127,7 +152,13 @@ export default function NodeEditPanel({ node, descendantCount, saving, onSave, o
       )}
 
       <div className="flex items-center justify-between pt-3" style={{ borderTop: '1px solid var(--border)' }}>
-        <span className="text-xs font-semibold text-ink">Activa</span>
+        <span className="text-xs font-semibold text-ink flex items-center gap-1.5">
+          <span>Activa</span>
+          <InfoTooltip
+            text="Si la desactivás, esta opción (y sus opciones adentro, si tiene) deja de aparecer en el menú del bot, pero no se borra — la podés reactivar cuando quieras."
+            example="Una sucursal cerrada temporalmente"
+          />
+        </span>
         <button type="button" onClick={() => saveField('active', !form.active)}>
           <span
             className="w-9 h-5 rounded-full flex items-center px-0.5 transition-colors"
