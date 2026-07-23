@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "TenantBotConfig" ADD COLUMN IF NOT EXISTS "startInAiChat" BOOLEAN NOT NULL DEFAULT false;

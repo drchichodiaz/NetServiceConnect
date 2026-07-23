@@ -73,8 +73,12 @@ export class BotService {
     this.apiVersion = config.get('META_API_VERSION') || 'v19.0';
   }
 
-  /** Envía el menú raíz del tenant. */
+  /** Arranca una conversación nueva — en el árbol de menú, o directo en modo IA si el tenant lo configuró así. */
   async sendMenu(tenantId: string, conversationId: string, phone: string) {
+    const config = await this.prisma.tenantBotConfig.findUnique({ where: { tenantId } });
+    if (config?.startInAiChat) {
+      return this.startAiChat(tenantId, conversationId, phone, null);
+    }
     return this.enterNode(tenantId, conversationId, phone, null);
   }
 
@@ -236,13 +240,30 @@ export class BotService {
         await this.sendText(tenantId, conversationId, phone, account, 'Perfecto, ya te conecto con un agente.');
         return this.handoffToHuman(tenantId, conversationId, 'menu_selection');
       case 'AI_CHAT':
-        return this.startAiChat(tenantId, conversationId, phone, account, node);
+        return this.startAiChat(tenantId, conversationId, phone, node, account);
     }
   }
 
   // ─── Modo IA: chat libre con OpenAI, usando la info del negocio del tenant ─
 
-  private async startAiChat(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, node: MenuNode) {
+  /**
+   * `node` es null cuando el tenant configuró "arrancar directo en modo IA"
+   * (TenantBotConfig.startInAiChat) — en ese caso no hay un nodo del árbol de
+   * menú detrás, así que se usa el texto de bienvenida por defecto y el nivel
+   * al que vuelve un "menú"/"volver" es la raíz del árbol (nodeId: null).
+   */
+  private async startAiChat(
+    tenantId: string,
+    conversationId: string,
+    phone: string,
+    node: MenuNode | null,
+    account?: WhatsAppAccountCreds,
+  ) {
+    const acc = account ?? (await this.getAccount(tenantId));
+    if (!acc) {
+      return this.handoffToHuman(tenantId, conversationId, 'whatsapp_account_unavailable');
+    }
+
     const config = await this.prisma.tenantBotConfig.findUnique({ where: { tenantId } });
     const knowledgeBase = config?.aiKnowledgeBase?.trim();
     const resolved = knowledgeBase ? await this.openaiClient.getClient(tenantId) : null;
@@ -253,17 +274,17 @@ export class BotService {
       return this.handoffToHuman(tenantId, conversationId, 'ai_not_configured');
     }
 
-    const welcome = node.bodyText?.trim() || 'Cuéntame en qué te puedo ayudar.';
-    const sent = await this.sendText(tenantId, conversationId, phone, account, welcome);
+    const welcome = node?.bodyText?.trim() || 'Cuéntame en qué te puedo ayudar.';
+    const sent = await this.sendText(tenantId, conversationId, phone, acc, welcome);
     if (!sent) {
       return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
     }
 
-    await this.setContext(conversationId, { nodeId: node.parentId, retryCount: 0, aiSince: new Date().toISOString() });
+    await this.setContext(conversationId, { nodeId: node?.parentId ?? null, retryCount: 0, aiSince: new Date().toISOString() });
     await this.prisma.conversation.update({ where: { id: conversationId }, data: { botState: 'AWAITING_AI_CHAT' } });
 
     await this.prisma.auditLog.create({
-      data: { tenantId, conversationId, action: 'bot.ai_chat_started', metadata: { nodeId: node.id, title: node.title } },
+      data: { tenantId, conversationId, action: 'bot.ai_chat_started', metadata: { nodeId: node?.id ?? null, title: node?.title ?? 'Entrada directa' } },
     });
   }
 

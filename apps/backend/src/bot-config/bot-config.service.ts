@@ -18,13 +18,15 @@ export class BotConfigService {
     return {
       orderStatusApiUrl: config?.orderStatusApiUrl ?? '',
       aiKnowledgeBase: config?.aiKnowledgeBase ?? '',
+      startInAiChat: config?.startInAiChat ?? false,
     };
   }
 
-  async updateConfig(tenantId: string, dto: { orderStatusApiUrl?: string; aiKnowledgeBase?: string }) {
+  async updateConfig(tenantId: string, dto: { orderStatusApiUrl?: string; aiKnowledgeBase?: string; startInAiChat?: boolean }) {
     const data: any = {};
     if (dto.orderStatusApiUrl !== undefined) data.orderStatusApiUrl = dto.orderStatusApiUrl.trim() || null;
     if (dto.aiKnowledgeBase !== undefined) data.aiKnowledgeBase = dto.aiKnowledgeBase.trim() || null;
+    if (dto.startInAiChat !== undefined) data.startInAiChat = dto.startInAiChat;
 
     await this.prisma.tenantBotConfig.upsert({
       where: { tenantId },

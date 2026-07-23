@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { botConfigApi, settingsApi } from '@/lib/api';
 import { Bot, Check, Loader2, LayoutDashboard, ArrowRight, Sparkles, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
+import clsx from 'clsx';
 import MenuTreeEditor from './components/MenuTreeEditor';
 
 const AI_KNOWLEDGE_MAX_LENGTH = 20000;
@@ -16,6 +17,8 @@ export default function BotSettingsPage() {
   const [aiKnowledgeBase, setAiKnowledgeBase] = useState('');
   const [savingAi, setSavingAi] = useState(false);
   const [hasOpenaiKey, setHasOpenaiKey] = useState(false);
+  const [startInAiChat, setStartInAiChat] = useState(false);
+  const [savingMode, setSavingMode] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -23,6 +26,7 @@ export default function BotSettingsPage() {
         const [config, settings] = await Promise.all([botConfigApi.get(), settingsApi.get()]);
         setOrderStatusApiUrl(config.orderStatusApiUrl ?? '');
         setAiKnowledgeBase(config.aiKnowledgeBase ?? '');
+        setStartInAiChat(!!config.startInAiChat);
         setHasOpenaiKey(!!settings.hasOpenaiKey);
       } catch {
         toast.error('Error al cargar la configuración del bot');
@@ -31,6 +35,22 @@ export default function BotSettingsPage() {
       }
     })();
   }, []);
+
+  async function handleChangeMode(value: boolean) {
+    if (value === startInAiChat || savingMode) return;
+    const prev = startInAiChat;
+    setStartInAiChat(value);
+    setSavingMode(true);
+    try {
+      await botConfigApi.update({ startInAiChat: value });
+      toast.success('Modo de bienvenida actualizado');
+    } catch (err: any) {
+      setStartInAiChat(prev);
+      toast.error(err?.response?.data?.message || 'Error al actualizar el modo');
+    } finally {
+      setSavingMode(false);
+    }
+  }
 
   async function handleSaveConfig(e: React.FormEvent) {
     e.preventDefault();
@@ -106,6 +126,42 @@ export default function BotSettingsPage() {
         <p className="text-[11px] text-ink-subtle">
           Lo que escribas acá alimenta las respuestas de cualquier opción de tipo &quot;Modo IA&quot; del menú — horarios, servicios, políticas, preguntas frecuentes, lo que quieras que el bot sepa responder.
         </p>
+
+        <div className="space-y-1.5 pt-1">
+          <label className="text-xs font-semibold text-ink">¿Cómo arranca el bot con un cliente nuevo?</label>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={savingMode}
+              onClick={() => handleChangeMode(false)}
+              className={clsx('flex-1 text-sm', startInAiChat ? 'btn-secondary' : 'btn-primary')}
+            >
+              Menú de opciones
+            </button>
+            <button
+              type="button"
+              disabled={savingMode}
+              onClick={() => handleChangeMode(true)}
+              className={clsx('flex-1 text-sm', startInAiChat ? 'btn-primary' : 'btn-secondary')}
+            >
+              Chat con IA directo
+            </button>
+          </div>
+          <p className="text-[11px] text-ink-subtle">
+            {startInAiChat
+              ? 'El cliente entra directo al chat de IA — el menú sigue disponible si escribe "menú".'
+              : 'El cliente ve primero el menú de opciones (el comportamiento de siempre).'}
+          </p>
+        </div>
+
+        {startInAiChat && (!hasOpenaiKey || !aiKnowledgeBase.trim()) && (
+          <div className="flex items-start gap-2 rounded-xl p-3 text-xs" style={{ background: '#FEF2F2', color: '#991B1B' }}>
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+            <span>
+              Con &quot;Chat con IA directo&quot; activado, <strong>todas</strong> las conversaciones nuevas van a derivar directo a un agente hasta que completes {!hasOpenaiKey && !aiKnowledgeBase.trim() ? 'la clave de OpenAI y la info del negocio' : !hasOpenaiKey ? 'la clave de OpenAI' : 'la info del negocio'} de acá abajo.
+            </span>
+          </div>
+        )}
 
         {!hasOpenaiKey && (
           <div className="flex items-start gap-2 rounded-xl p-3 text-xs" style={{ background: '#FEF3C7', color: '#92400E' }}>

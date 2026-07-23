@@ -330,6 +330,10 @@ model TenantBotConfig {
   // Info de negocio (horarios, servicios, politicas, FAQs) que alimenta el prompt
   // de cualquier nodo tipo AI_CHAT del arbol de menu. Tenant-wide, no por nodo.
   aiKnowledgeBase   String?
+  // Si es true, una conversacion nueva arranca directo en modo IA en vez de
+  // mostrar el arbol de menu. El menu sigue siendo alcanzable si el cliente
+  // escribe "menu"/"volver" en medio del chat.
+  startInAiChat     Boolean  @default(false)
   updatedAt         DateTime @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
