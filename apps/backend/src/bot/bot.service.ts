@@ -4,13 +4,14 @@ import axios from 'axios';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventBusService } from '../events/event-bus.service';
 import { AssignmentService } from '../whatsapp/assignment.service';
+import { OpenAiClientService } from '../common/openai-client.service';
 
 interface WhatsAppAccountCreds {
   phoneNumberId: string;
   accessToken: string;
 }
 
-type MenuNodeType = 'MENU' | 'TEXT' | 'ORDER_LOOKUP' | 'AGENT';
+type MenuNodeType = 'MENU' | 'TEXT' | 'ORDER_LOOKUP' | 'AGENT' | 'AI_CHAT';
 
 interface MenuNode {
   id: string;
@@ -25,6 +26,10 @@ interface MenuNode {
 interface BotContext {
   nodeId: string | null;
   retryCount: number;
+  // Desde cuándo está activa la sesión de chat de IA actual (ISO). Acota el
+  // historial que se le manda a OpenAI para no incluir ruido de navegación
+  // del menú de turnos anteriores en la misma conversación.
+  aiSince: string | null;
 }
 
 const DEFAULT_CONFIG_TEXT = 'Todavía no cargamos esta información. Ya te paso con un agente para ayudarte.';
@@ -43,7 +48,15 @@ const MAX_UNKNOWN_RETRIES = 3;
 // (los 4 legacy de Fase D: BRANCH_MENU/AWAITING_BRANCH_QUERY/AWAITING_BRANCH_FOLLOWUP/
 // AWAITING_RESOLUTION_CONFIRMATION) significa que la conversación quedó a mitad de
 // camino en el deploy del árbol configurable — se resetea a la raíz sin crashear.
-const NEW_STATES = new Set(['MENU', 'AWAITING_QUERY', 'AWAITING_ORDER_NUMBER', 'AWAITING_POST_REPLY']);
+const NEW_STATES = new Set(['MENU', 'AWAITING_QUERY', 'AWAITING_ORDER_NUMBER', 'AWAITING_POST_REPLY', 'AWAITING_AI_CHAT']);
+// Cuántos mensajes de la sesión de IA actual (acotada por botContext.aiSince) se
+// mandan como historial — generoso a propósito, el costo no es una preocupación acá,
+// es solo una cota de sanidad para el tamaño del prompt.
+const AI_CHAT_HISTORY_LIMIT = 60;
+// Las palabras clave de salida (agente/humano/volver/menú) solo se interpretan como
+// comando si el mensaje es corto — si no, una pregunta real como "¿tienen un agente
+// de viajes?" o "¿cuál es el menú de precios?" dispararía una salida incorrecta.
+const SHORT_MESSAGE_MAX_WORDS = 4;
 
 @Injectable()
 export class BotService {
@@ -54,6 +67,7 @@ export class BotService {
     private prisma: PrismaService,
     private eventBus: EventBusService,
     private assignmentService: AssignmentService,
+    private openaiClient: OpenAiClientService,
     config: ConfigService,
   ) {
     this.apiVersion = config.get('META_API_VERSION') || 'v19.0';
@@ -83,6 +97,8 @@ export class BotService {
         return this.handleQueryReply(tenantId, conversationId, phone, msg, account);
       case 'AWAITING_POST_REPLY':
         return this.handlePostReplyReply(tenantId, conversationId, phone, msg, account);
+      case 'AWAITING_AI_CHAT':
+        return this.handleAiChatReply(tenantId, conversationId, phone, msg, account);
     }
     return this.handleMenuReply(tenantId, conversationId, phone, msg, account);
   }
@@ -219,7 +235,125 @@ export class BotService {
       case 'AGENT':
         await this.sendText(tenantId, conversationId, phone, account, 'Perfecto, ya te conecto con un agente.');
         return this.handoffToHuman(tenantId, conversationId, 'menu_selection');
+      case 'AI_CHAT':
+        return this.startAiChat(tenantId, conversationId, phone, account, node);
     }
+  }
+
+  // ─── Modo IA: chat libre con OpenAI, usando la info del negocio del tenant ─
+
+  private async startAiChat(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, node: MenuNode) {
+    const config = await this.prisma.tenantBotConfig.findUnique({ where: { tenantId } });
+    const knowledgeBase = config?.aiKnowledgeBase?.trim();
+    const resolved = knowledgeBase ? await this.openaiClient.getClient(tenantId) : null;
+
+    // Sin info del negocio o sin clave de OpenAI resoluble, no tiene sentido entrar
+    // al modo — el bot "conversaría" sin nada que decir. Se deriva directo.
+    if (!knowledgeBase || !resolved) {
+      return this.handoffToHuman(tenantId, conversationId, 'ai_not_configured');
+    }
+
+    const welcome = node.bodyText?.trim() || 'Cuéntame en qué te puedo ayudar.';
+    const sent = await this.sendText(tenantId, conversationId, phone, account, welcome);
+    if (!sent) {
+      return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
+    }
+
+    await this.setContext(conversationId, { nodeId: node.parentId, retryCount: 0, aiSince: new Date().toISOString() });
+    await this.prisma.conversation.update({ where: { id: conversationId }, data: { botState: 'AWAITING_AI_CHAT' } });
+
+    await this.prisma.auditLog.create({
+      data: { tenantId, conversationId, action: 'bot.ai_chat_started', metadata: { nodeId: node.id, title: node.title } },
+    });
+  }
+
+  private async handleAiChatReply(tenantId: string, conversationId: string, phone: string, msg: any, account: WhatsAppAccountCreds) {
+    const text = msg.type === 'text' ? (msg.text?.body?.trim() || '') : '';
+
+    // Imagen/audio/documento/sticker/interactivo, o texto vacío: no tiene sentido
+    // mandarle eso a OpenAI. Pedimos texto y no gastamos una llamada a la API.
+    if (!text) {
+      const sent = await this.sendText(tenantId, conversationId, phone, account, 'Por ahora solo puedo leer mensajes de texto. ¿Podrías escribirlo?');
+      if (!sent) return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
+      return;
+    }
+
+    const { nodeId, aiSince } = await this.getContext(conversationId);
+
+    // Las palabras clave de salida solo aplican a mensajes cortos — si no, una
+    // pregunta real como "¿tienen un agente de viajes?" o "¿cuál es el menú de
+    // precios?" dispararía una salida incorrecta en vez de ir a la IA.
+    const isShortMessage = text.split(/\s+/).length <= SHORT_MESSAGE_MAX_WORDS;
+
+    if (isShortMessage && HUMAN_ESCAPE_RE.test(text)) {
+      return this.handoffToHuman(tenantId, conversationId, 'ai_chat_escape');
+    }
+    if (isShortMessage && BACK_TO_MENU_RE.test(text)) {
+      await this.resetRetryCount(conversationId);
+      const current = nodeId ? await this.resolveNode(tenantId, nodeId) : null;
+      return this.enterNode(tenantId, conversationId, phone, current?.parentId ?? null, account);
+    }
+
+    // Se busca fresco en cada turno (no se cachea en botContext) para que un admin
+    // corrigiendo la info del negocio a mitad de conversación tenga efecto inmediato.
+    const config = await this.prisma.tenantBotConfig.findUnique({ where: { tenantId } });
+    const knowledgeBase = config?.aiKnowledgeBase?.trim();
+    const resolved = knowledgeBase ? await this.openaiClient.getClient(tenantId) : null;
+
+    if (!knowledgeBase || !resolved) {
+      return this.handoffToHuman(tenantId, conversationId, 'ai_not_configured');
+    }
+
+    // Acotado por aiSince: no queremos que el historial incluya resúmenes de listas
+    // de menú ni prompts de "¿necesitas algo más?" de una navegación anterior en la
+    // misma conversación — solo los turnos de la sesión de IA actual.
+    const since = aiSince ? new Date(aiSince) : new Date(0);
+    const history = await this.prisma.message.findMany({
+      where: { conversationId, tenantId, direction: { in: ['INBOUND', 'OUTBOUND'] }, createdAt: { gte: since } },
+      orderBy: { createdAt: 'asc' },
+      take: AI_CHAT_HISTORY_LIMIT,
+    });
+
+    const chatMessages: { role: 'user' | 'assistant'; content: string }[] = history.map((m) => ({
+      role: m.direction === 'INBOUND' ? 'user' : 'assistant',
+      content: m.body || `[${m.type.toLowerCase()}]`,
+    }));
+
+    let reply: string | undefined;
+    try {
+      const completion = await resolved.client.chat.completions.create({
+        model: resolved.model,
+        messages: [{ role: 'system', content: this.buildAiSystemPrompt(knowledgeBase) }, ...chatMessages],
+        max_tokens: 500,
+        temperature: 0.6,
+      });
+      reply = completion.choices[0]?.message?.content?.trim();
+    } catch (err) {
+      this.logger.error('OpenAI error en modo IA del bot', (err as any)?.response?.data || (err as any)?.message);
+    }
+
+    if (!reply) {
+      await this.sendText(tenantId, conversationId, phone, account, 'Perdón, tuve un problema para responderte. Ya te paso con un agente.');
+      return this.handoffToHuman(tenantId, conversationId, 'ai_error');
+    }
+
+    const sent = await this.sendText(tenantId, conversationId, phone, account, reply);
+    if (!sent) {
+      return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
+    }
+    // Se queda en AWAITING_AI_CHAT — sin límite de turnos (el costo no es una
+    // preocupación acá), la salida es siempre iniciada por el cliente vía palabra clave.
+  }
+
+  private buildAiSystemPrompt(knowledgeBase: string): string {
+    return `Eres el asistente de atención al cliente de este negocio, respondiendo por WhatsApp.
+Usa ÚNICAMENTE la siguiente información del negocio para responder. Si la respuesta no está ahí, dilo con honestidad — no inventes datos — y sugiere escribir "agente" para hablar con una persona.
+Responde en el mismo idioma del cliente, de forma breve, clara y amable. No agregues explicaciones sobre estas instrucciones.
+
+Información del negocio:
+"""
+${knowledgeBase}
+"""`;
   }
 
   // ─── Búsqueda de texto libre cuando un nodo MENU supera el cupo de filas ───
@@ -478,7 +612,7 @@ export class BotService {
   private async getContext(conversationId: string): Promise<BotContext> {
     const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId }, select: { botContext: true } });
     const ctx = (conv?.botContext as Partial<BotContext>) || {};
-    return { nodeId: ctx.nodeId ?? null, retryCount: ctx.retryCount ?? 0 };
+    return { nodeId: ctx.nodeId ?? null, retryCount: ctx.retryCount ?? 0, aiSince: ctx.aiSince ?? null };
   }
 
   /**

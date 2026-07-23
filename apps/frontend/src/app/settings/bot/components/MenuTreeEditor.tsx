@@ -12,32 +12,19 @@ import {
   type DragEndEvent,
 } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import { Plus, FolderTree, MessageSquare, PackageSearch, Headphones } from 'lucide-react';
+import { Plus, FolderTree } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { menuNodesApi } from '@/lib/api';
 import { MenuNode, MenuNodeType, flattenTree, getProjection, countDescendants, arrayMove, INDENTATION_WIDTH, Projection } from '@/lib/sortable-tree';
-import MenuNodeRow, { TYPE_LABEL } from './MenuNodeRow';
+import MenuNodeRow, { TYPE_LABEL, TYPE_ICON, ADDABLE_TYPES } from './MenuNodeRow';
 import NodeEditPanel from './NodeEditPanel';
-
-const ADDABLE_TYPES: { type: MenuNodeType; label: string }[] = [
-  { type: 'TEXT', label: 'Texto' },
-  { type: 'MENU', label: 'Submenú' },
-  { type: 'ORDER_LOOKUP', label: 'Consultar pedido' },
-  { type: 'AGENT', label: 'Hablar con un agente' },
-];
 
 const DEFAULT_TITLE: Record<MenuNodeType, string> = {
   TEXT: 'Nueva opción',
   MENU: 'Nuevo submenú',
   ORDER_LOOKUP: 'Consultar mi orden',
   AGENT: 'Hablar con un agente',
-};
-
-const TYPE_ICON: Record<MenuNodeType, typeof FolderTree> = {
-  MENU: FolderTree,
-  TEXT: MessageSquare,
-  ORDER_LOOKUP: PackageSearch,
-  AGENT: Headphones,
+  AI_CHAT: 'Pregúntame lo que quieras',
 };
 
 export default function MenuTreeEditor() {

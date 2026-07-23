@@ -2,15 +2,8 @@
 import { useEffect, useState } from 'react';
 import { Trash2, Loader2, Plus, X } from 'lucide-react';
 import { MenuNode, MenuNodeType } from '@/lib/sortable-tree';
-import { TYPE_LABEL } from './MenuNodeRow';
+import { TYPE_LABEL, ADDABLE_TYPES } from './MenuNodeRow';
 import InfoTooltip from '@/components/ui/InfoTooltip';
-
-const ADDABLE_TYPES: { type: MenuNodeType; label: string }[] = [
-  { type: 'TEXT', label: 'Texto' },
-  { type: 'MENU', label: 'Submenú' },
-  { type: 'ORDER_LOOKUP', label: 'Consultar pedido' },
-  { type: 'AGENT', label: 'Hablar con un agente' },
-];
 
 interface FormState {
   title: string;
@@ -124,6 +117,29 @@ export default function NodeEditPanel({ node, descendantCount, saving, onSave, o
             rows={5}
             className="input w-full text-sm"
             placeholder="Lo que responde el bot cuando el cliente elige esta opción"
+          />
+        </div>
+      )}
+
+      {node.type === 'AI_CHAT' && (
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-ink flex items-center justify-between">
+            <span className="flex items-center gap-1.5">
+              <span>Mensaje de bienvenida</span>
+              <InfoTooltip
+                text="Lo primero que dice el bot al entrar a este modo, antes de empezar a responder con IA. Las respuestas del chat usan la información del negocio que cargaste en la sección 'Información del negocio (modo IA)', más abajo en esta página — no algo que se configure acá."
+                example="Cuéntame qué necesitas y te ayudo."
+              />
+            </span>
+            <span className="text-[10px] font-normal text-ink-subtle">Opcional</span>
+          </label>
+          <textarea
+            value={form.bodyText}
+            onChange={(e) => setForm((f) => ({ ...f, bodyText: e.target.value }))}
+            onBlur={(e) => saveField('bodyText', e.target.value)}
+            rows={2}
+            className="input w-full text-sm"
+            placeholder="Ej: Cuéntame en qué te puedo ayudar."
           />
         </div>
       )}

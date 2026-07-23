@@ -1,21 +1,29 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { botConfigApi } from '@/lib/api';
-import { Bot, Check, Loader2, LayoutDashboard, ArrowRight } from 'lucide-react';
+import { botConfigApi, settingsApi } from '@/lib/api';
+import { Bot, Check, Loader2, LayoutDashboard, ArrowRight, Sparkles, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import MenuTreeEditor from './components/MenuTreeEditor';
+
+const AI_KNOWLEDGE_MAX_LENGTH = 20000;
 
 export default function BotSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [orderStatusApiUrl, setOrderStatusApiUrl] = useState('');
 
+  const [aiKnowledgeBase, setAiKnowledgeBase] = useState('');
+  const [savingAi, setSavingAi] = useState(false);
+  const [hasOpenaiKey, setHasOpenaiKey] = useState(false);
+
   useEffect(() => {
     (async () => {
       try {
-        const config = await botConfigApi.get();
+        const [config, settings] = await Promise.all([botConfigApi.get(), settingsApi.get()]);
         setOrderStatusApiUrl(config.orderStatusApiUrl ?? '');
+        setAiKnowledgeBase(config.aiKnowledgeBase ?? '');
+        setHasOpenaiKey(!!settings.hasOpenaiKey);
       } catch {
         toast.error('Error al cargar la configuración del bot');
       } finally {
@@ -34,6 +42,19 @@ export default function BotSettingsPage() {
       toast.error(err?.response?.data?.message || 'Error al guardar');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleSaveAiKnowledgeBase(e: React.FormEvent) {
+    e.preventDefault();
+    setSavingAi(true);
+    try {
+      await botConfigApi.update({ aiKnowledgeBase });
+      toast.success('Información guardada');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Error al guardar');
+    } finally {
+      setSavingAi(false);
     }
   }
 
@@ -74,6 +95,45 @@ export default function BotSettingsPage() {
       </Link>
 
       <MenuTreeEditor />
+
+      <form onSubmit={handleSaveAiKnowledgeBase} className="card p-5 space-y-3">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: '#F3E8FF' }}>
+            <Sparkles className="w-3.5 h-3.5" style={{ color: '#9333EA' }} />
+          </div>
+          <label className="text-xs font-semibold text-ink">Información del negocio (modo IA)</label>
+        </div>
+        <p className="text-[11px] text-ink-subtle">
+          Lo que escribas acá alimenta las respuestas de cualquier opción de tipo &quot;Modo IA&quot; del menú — horarios, servicios, políticas, preguntas frecuentes, lo que quieras que el bot sepa responder.
+        </p>
+
+        {!hasOpenaiKey && (
+          <div className="flex items-start gap-2 rounded-xl p-3 text-xs" style={{ background: '#FEF3C7', color: '#92400E' }}>
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+            <span>
+              Todavía no tienes una clave de OpenAI conectada — sin eso, el modo IA siempre va a derivar a un agente. Configúrala en{' '}
+              <Link href="/settings/ai" className="underline font-semibold">Configuración → IA</Link>.
+            </span>
+          </div>
+        )}
+
+        <textarea
+          value={aiKnowledgeBase}
+          onChange={(e) => setAiKnowledgeBase(e.target.value)}
+          maxLength={AI_KNOWLEDGE_MAX_LENGTH}
+          rows={8}
+          className="input w-full text-sm"
+          placeholder="Ej: Atendemos de lunes a sábado de 9am a 7pm. Hacemos reparaciones, cambio de batería y ajuste de correas. Tenemos sucursales en..."
+        />
+        <button
+          type="submit"
+          disabled={savingAi}
+          className="btn-primary text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {savingAi ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+          Guardar
+        </button>
+      </form>
 
       <form onSubmit={handleSaveConfig} className="card p-5 space-y-3">
         <label className="text-xs font-semibold text-ink-subtle flex items-center justify-between">

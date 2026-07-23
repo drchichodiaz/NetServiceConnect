@@ -124,7 +124,8 @@ export const settingsApi = {
 
 export const botConfigApi = {
   get: () => api.get('/bot-config').then((r) => r.data),
-  update: (data: { orderStatusApiUrl?: string }) => api.patch('/bot-config', data).then((r) => r.data),
+  update: (data: { orderStatusApiUrl?: string; aiKnowledgeBase?: string }) =>
+    api.patch('/bot-config', data).then((r) => r.data),
 };
 
 export const botStatsApi = {
@@ -136,7 +137,7 @@ export const botStatsApi = {
 
 export interface MenuNodeInput {
   parentId?: string | null;
-  type?: 'MENU' | 'TEXT' | 'ORDER_LOOKUP' | 'AGENT';
+  type?: 'MENU' | 'TEXT' | 'ORDER_LOOKUP' | 'AGENT' | 'AI_CHAT';
   title: string;
   subtitle?: string;
   bodyText?: string;

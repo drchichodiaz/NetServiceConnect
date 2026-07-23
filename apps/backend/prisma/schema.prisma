@@ -178,6 +178,8 @@ enum ConversationBotState {
   // Generalizan BRANCH_MENU/AWAITING_BRANCH_QUERY/AWAITING_BRANCH_FOLLOWUP/AWAITING_RESOLUTION_CONFIRMATION.
   AWAITING_QUERY
   AWAITING_POST_REPLY
+  // Chat libre con OpenAI (nodo tipo AI_CHAT) hasta que el cliente sale por palabra clave.
+  AWAITING_AI_CHAT
 }
 
 // ─── Message ──────────────────────────────────────────────────────────────────
@@ -325,6 +327,9 @@ model TenantBotConfig {
   serviciosText     String?
   // Reservado para conectar una API de pedidos por tenant mas adelante; sin usar por ahora.
   orderStatusApiUrl String?
+  // Info de negocio (horarios, servicios, politicas, FAQs) que alimenta el prompt
+  // de cualquier nodo tipo AI_CHAT del arbol de menu. Tenant-wide, no por nodo.
+  aiKnowledgeBase   String?
   updatedAt         DateTime @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -383,6 +388,7 @@ enum MenuNodeType {
   TEXT
   ORDER_LOOKUP
   AGENT
+  AI_CHAT
 }
 
 // ─── System Config (global, singleton) ───────────────────────────────────────

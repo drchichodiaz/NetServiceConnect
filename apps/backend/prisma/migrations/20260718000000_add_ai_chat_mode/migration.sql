@@ -1,0 +1,6 @@
+-- AlterEnum
+ALTER TYPE "MenuNodeType" ADD VALUE IF NOT EXISTS 'AI_CHAT';
+ALTER TYPE "ConversationBotState" ADD VALUE IF NOT EXISTS 'AWAITING_AI_CHAT';
+
+-- AlterTable
+ALTER TABLE "TenantBotConfig" ADD COLUMN IF NOT EXISTS "aiKnowledgeBase" TEXT;

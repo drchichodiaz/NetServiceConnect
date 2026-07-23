@@ -1,38 +1,25 @@
 import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
+import { OpenAiClientService } from '../common/openai-client.service';
 import OpenAI from 'openai';
 
 @Injectable()
 export class AiService {
   private readonly logger = new Logger(AiService.name);
-  private readonly fallbackApiKey: string;
-  private readonly fallbackModel: string;
 
   constructor(
-    private config: ConfigService,
     private prisma: PrismaService,
-  ) {
-    this.fallbackApiKey = config.get('OPENAI_API_KEY') || '';
-    this.fallbackModel  = config.get('OPENAI_MODEL')   || 'gpt-4o-mini';
-  }
+    private openaiClient: OpenAiClientService,
+  ) {}
 
   private async getOpenAI(tenantId: string): Promise<{ client: OpenAI; model: string }> {
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { id: tenantId },
-      select: { openaiApiKey: true, openaiModel: true },
-    });
-
-    const apiKey = tenant?.openaiApiKey || this.fallbackApiKey;
-    const model  = tenant?.openaiModel  || this.fallbackModel;
-
-    if (!apiKey) {
+    const resolved = await this.openaiClient.getClient(tenantId);
+    if (!resolved) {
       throw new BadRequestException(
         'No hay una clave de OpenAI configurada. Agrégala en Configuración → IA.',
       );
     }
-
-    return { client: new OpenAI({ apiKey }), model };
+    return resolved;
   }
 
   async suggestReply(tenantId: string, conversationId: string) {

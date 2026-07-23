@@ -15,12 +15,16 @@ export class BotConfigService {
 
   async getConfig(tenantId: string) {
     const config = await this.prisma.tenantBotConfig.findUnique({ where: { tenantId } });
-    return { orderStatusApiUrl: config?.orderStatusApiUrl ?? '' };
+    return {
+      orderStatusApiUrl: config?.orderStatusApiUrl ?? '',
+      aiKnowledgeBase: config?.aiKnowledgeBase ?? '',
+    };
   }
 
-  async updateConfig(tenantId: string, dto: { orderStatusApiUrl?: string }) {
+  async updateConfig(tenantId: string, dto: { orderStatusApiUrl?: string; aiKnowledgeBase?: string }) {
     const data: any = {};
     if (dto.orderStatusApiUrl !== undefined) data.orderStatusApiUrl = dto.orderStatusApiUrl.trim() || null;
+    if (dto.aiKnowledgeBase !== undefined) data.aiKnowledgeBase = dto.aiKnowledgeBase.trim() || null;
 
     await this.prisma.tenantBotConfig.upsert({
       where: { tenantId },

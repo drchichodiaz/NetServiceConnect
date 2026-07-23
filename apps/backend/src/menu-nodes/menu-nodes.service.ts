@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
-const NODE_TYPES = ['MENU', 'TEXT', 'ORDER_LOOKUP', 'AGENT'] as const;
+const NODE_TYPES = ['MENU', 'TEXT', 'ORDER_LOOKUP', 'AGENT', 'AI_CHAT'] as const;
 type NodeType = (typeof NODE_TYPES)[number];
 
 export interface MenuNodeDto {
