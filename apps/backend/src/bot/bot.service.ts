@@ -274,7 +274,9 @@ export class BotService {
       return this.handoffToHuman(tenantId, conversationId, 'ai_not_configured');
     }
 
-    const welcome = node?.bodyText?.trim() || 'Cuéntame en qué te puedo ayudar.';
+    const contactName = await this.getContactName(conversationId);
+    const baseWelcome = node?.bodyText?.trim() || 'Cuéntame en qué te puedo ayudar.';
+    const welcome = contactName ? `¡Hola ${contactName}! ${baseWelcome}` : baseWelcome;
     const sent = await this.sendText(tenantId, conversationId, phone, acc, welcome);
     if (!sent) {
       return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
@@ -340,11 +342,13 @@ export class BotService {
       content: m.body || `[${m.type.toLowerCase()}]`,
     }));
 
+    const contactName = await this.getContactName(conversationId);
+
     let reply: string | undefined;
     try {
       const completion = await resolved.client.chat.completions.create({
         model: resolved.model,
-        messages: [{ role: 'system', content: this.buildAiSystemPrompt(knowledgeBase) }, ...chatMessages],
+        messages: [{ role: 'system', content: this.buildAiSystemPrompt(knowledgeBase, contactName) }, ...chatMessages],
         max_tokens: 500,
         temperature: 0.6,
       });
@@ -366,8 +370,12 @@ export class BotService {
     // preocupación acá), la salida es siempre iniciada por el cliente vía palabra clave.
   }
 
-  private buildAiSystemPrompt(knowledgeBase: string): string {
+  private buildAiSystemPrompt(knowledgeBase: string, contactName: string | null): string {
+    const nameLine = contactName
+      ? `El cliente se llama ${contactName} — puedes usar su nombre para dirigirte a él/ella de forma natural, sin repetirlo en cada mensaje.`
+      : '';
     return `Eres el asistente de atención al cliente de este negocio, respondiendo por WhatsApp.
+${nameLine}
 Usa ÚNICAMENTE la siguiente información del negocio para responder. Si la respuesta no está ahí, dilo con honestidad — no inventes datos — y sugiere escribir "agente" para hablar con una persona.
 Responde en el mismo idioma del cliente, de forma breve, clara y amable. No agregues explicaciones sobre estas instrucciones.
 
@@ -375,6 +383,15 @@ Información del negocio:
 """
 ${knowledgeBase}
 """`;
+  }
+
+  /** Nombre del contacto capturado del perfil de WhatsApp (puede no existir). */
+  private async getContactName(conversationId: string): Promise<string | null> {
+    const conv = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { contact: { select: { name: true } } },
+    });
+    return conv?.contact?.name?.trim() || null;
   }
 
   // ─── Búsqueda de texto libre cuando un nodo MENU supera el cupo de filas ───
