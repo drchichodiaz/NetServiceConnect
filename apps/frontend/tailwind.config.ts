@@ -66,12 +66,32 @@ const config: Config = {
           '0%, 100%': { opacity: '1' },
           '50%':       { opacity: '0.4' },
         },
+        // Vista previa de chat del login: el primer mensaje aparece y queda a la
+        // vista mientras llega el "escribiendo..." y después la respuesta — nada
+        // desaparece hasta el reinicio limpio del loop (ver login/page.tsx).
+        'show-bubble-1': {
+          '0%, 100%':  { opacity: '0', transform: 'translateY(6px)' },
+          '6%, 92%':   { opacity: '1', transform: 'translateY(0)' },
+          '97%':       { opacity: '0', transform: 'translateY(-4px)' },
+        },
+        'show-typing': {
+          '0%, 42%, 68%, 100%': { opacity: '0' },
+          '48%, 62%':           { opacity: '1' },
+        },
+        'show-bubble-2': {
+          '0%, 66%, 100%': { opacity: '0', transform: 'translateY(6px)' },
+          '72%, 92%':      { opacity: '1', transform: 'translateY(0)' },
+          '97%':           { opacity: '0', transform: 'translateY(-4px)' },
+        },
       },
       animation: {
-        'fade-in':  'fade-in 0.2s ease-out both',
-        'slide-in': 'slide-in 0.2s ease-out both',
-        'pop':      'pop 0.15s ease-out both',
-        'pulse-dot':'pulse-dot 2s ease-in-out infinite',
+        'fade-in':       'fade-in 0.2s ease-out both',
+        'slide-in':      'slide-in 0.2s ease-out both',
+        'pop':           'pop 0.15s ease-out both',
+        'pulse-dot':     'pulse-dot 2s ease-in-out infinite',
+        'show-bubble-1': 'show-bubble-1 9s ease-in-out infinite',
+        'show-typing':   'show-typing 9s ease-in-out infinite',
+        'show-bubble-2': 'show-bubble-2 9s ease-in-out infinite',
       },
     },
   },
