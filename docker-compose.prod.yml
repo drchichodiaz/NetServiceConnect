@@ -1,0 +1,60 @@
+# Deploy alternativo containerizado (para un servidor que ya usa Docker para otras
+# apps, ej. un droplet compartido). El backend/frontend NO exponen puertos al host —
+# los alcanza el nginx que ya esté corriendo en la máquina, agregándolo a esta misma
+# red (`docker network connect netservice_default <contenedor-nginx>`) y haciéndole
+# proxy_pass por nombre de contenedor. Ver DEPLOY-DOCKER.md.
+#
+# Uso: docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: netservice_db
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - netservice_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${DB_USER} -d ${DB_NAME}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    container_name: netservice_backend
+    env_file: .env.production
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
+    volumes:
+      - netservice_media:/repo/apps/backend/media
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+        NEXT_PUBLIC_META_APP_ID: ${META_APP_ID}
+        NEXT_PUBLIC_META_CONFIG_ID: ${META_CONFIG_ID}
+        NEXT_PUBLIC_BRAND_NAME: ${BRAND_NAME}
+        NEXT_PUBLIC_BRAND_TAGLINE: ${BRAND_TAGLINE}
+        NEXT_PUBLIC_ENABLE_NETSERVICE_PANEL: ${ENABLE_NETSERVICE_PANEL}
+    container_name: netservice_frontend
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  netservice_postgres_data:
+  netservice_media:
