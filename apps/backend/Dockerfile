@@ -1,7 +1,11 @@
 # Build context: raíz del repo (es un monorepo con npm workspaces).
 # docker build -f apps/backend/Dockerfile .
 
+# openssl: sin el paquete instalado, Prisma no puede detectar la version de OpenSSL
+# de Alpine y por defecto intenta cargar el motor de OpenSSL 1.1 (que no existe acá),
+# aunque el binary target correcto ya este generado. Ver schema.prisma binaryTargets.
 FROM node:20-alpine AS builder
+RUN apk add --no-cache openssl
 WORKDIR /repo
 COPY package.json package-lock.json ./
 COPY apps/backend/package.json apps/backend/package.json
@@ -12,6 +16,7 @@ RUN npx prisma generate
 RUN npm run build
 
 FROM node:20-alpine
+RUN apk add --no-cache openssl
 WORKDIR /repo
 COPY package.json package-lock.json ./
 COPY apps/backend/package.json apps/backend/package.json
