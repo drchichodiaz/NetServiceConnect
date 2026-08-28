@@ -1,5 +1,11 @@
 generator client {
   provider = "prisma-client-js"
+  // "native" = el binario del entorno donde corre `prisma generate` (Windows en el
+  // deploy pm2 de siempre). "linux-musl-openssl-3.0.x" = motor para Alpine con
+  // OpenSSL 3 (imagen node:20-alpine del deploy Docker) — sin esto, Prisma detecta
+  // mal la versión de OpenSSL en musl y el backend crashea al arrancar buscando
+  // libssl.so.1.1, que no existe en Alpine moderno.
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
