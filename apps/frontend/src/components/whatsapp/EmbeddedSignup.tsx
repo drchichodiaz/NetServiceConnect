@@ -4,6 +4,7 @@ import { whatsappApi, systemConfigApi } from '@/lib/api';
 import { WhatsAppAccount } from '@/types';
 import { MessageSquare, Loader2, AlertCircle, ArrowRight, KeyRound } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { BRAND } from '@/lib/brand';
 
 interface Props {
   onConnected: (account: WhatsAppAccount) => void;
@@ -292,7 +293,7 @@ export default function EmbeddedSignup({ onConnected }: Props) {
       )}
 
       <p className="text-xs text-gray-400 text-center mt-4">
-        Al conectar, autorizas a NetService Connect a enviar y recibir mensajes en nombre de tu cuenta de WhatsApp Business.
+        Al conectar, autorizas a {BRAND.name} a enviar y recibir mensajes en nombre de tu cuenta de WhatsApp Business.
       </p>
     </div>
   );

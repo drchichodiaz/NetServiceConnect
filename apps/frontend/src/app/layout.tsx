@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { DM_Sans, DM_Mono } from 'next/font/google';
 import { Toaster } from 'react-hot-toast';
+import { BRAND } from '@/lib/brand';
 import './globals.css';
 
 const dmSans = DM_Sans({
@@ -16,8 +17,8 @@ const dmMono = DM_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'NetService Connect',
-  description: 'Plataforma SaaS multiagente para atención al cliente por WhatsApp',
+  title: BRAND.name,
+  description: BRAND.tagline,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

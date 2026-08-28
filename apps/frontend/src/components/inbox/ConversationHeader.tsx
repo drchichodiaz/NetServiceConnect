@@ -7,6 +7,7 @@ import { usersApi } from '@/lib/api';
 import toast from 'react-hot-toast';
 import InternalNoteModal from './InternalNoteModal';
 import NetServicePanel from './NetServicePanel';
+import { BRAND } from '@/lib/brand';
 import clsx from 'clsx';
 
 interface Props {
@@ -170,8 +171,8 @@ export default function ConversationHeader({ conversation, sidebarOpen, onToggle
             <StickyNote className="w-3.5 h-3.5" />
           </button>
 
-          {/* NetService integration actions */}
-          <NetServicePanel conversation={conversation} />
+          {/* NetService integration actions — solo en el deploy de esa marca, ver lib/brand.ts */}
+          {BRAND.showNetServicePanel && <NetServicePanel conversation={conversation} />}
 
           {/* Contact sidebar toggle */}
           {onToggleSidebar && (

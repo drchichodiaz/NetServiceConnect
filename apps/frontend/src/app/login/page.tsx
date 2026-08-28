@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { useAuthStore } from '@/store/auth.store';
 import { Loader2, MessageSquare, Users, Zap, ShieldCheck } from 'lucide-react';
 import dynamic from 'next/dynamic';
+import { BRAND } from '@/lib/brand';
 
 // Carga dinámica para evitar SSR con framer-motion
 const LoginAnimation = dynamic(
@@ -59,7 +60,7 @@ export default function LoginPage() {
           >
             <MessageSquare className="w-4 h-4 text-white" />
           </div>
-          <span className="text-white font-semibold tracking-tight">NetService Connect</span>
+          <span className="text-white font-semibold tracking-tight">{BRAND.name}</span>
         </div>
 
         {/* Animación orbital — centro */}
@@ -106,7 +107,7 @@ export default function LoginPage() {
             <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: '#25D366' }}>
               <MessageSquare className="w-4 h-4 text-white" />
             </div>
-            <span className="font-semibold text-ink">NetService Connect</span>
+            <span className="font-semibold text-ink">{BRAND.name}</span>
           </div>
 
           <div className="mb-8">

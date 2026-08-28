@@ -1,6 +1,7 @@
 'use client';
 import { motion } from 'framer-motion';
 import { MessageSquare, Bot } from 'lucide-react';
+import { BRAND } from '@/lib/brand';
 
 // SVG inline del logo WhatsApp (lucide-react no lo incluye)
 function WhatsAppSVG({ className, style }: { className?: string; style?: React.CSSProperties }) {
@@ -195,7 +196,7 @@ export default function LoginAnimation() {
           className="text-xs font-semibold tracking-wide"
           style={{ color: 'rgba(255,255,255,0.4)' }}
         >
-          NetService Connect
+          {BRAND.name}
         </span>
       </div>
     </div>
