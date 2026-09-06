@@ -6,17 +6,29 @@ import { UpdateConversationDto } from './dto/update-conversation.dto';
 export class ConversationsService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll(tenantId: string, requester: any, status?: string, assignedUserId?: string, search?: string, contactId?: string) {
+  async findAll(
+    tenantId: string,
+    requester: any,
+    status?: string,
+    assignedUserId?: string,
+    search?: string,
+    contactId?: string,
+    whatsappAccountId?: string,
+  ) {
     // Un AGENTE solo puede ver sus propias conversaciones asignadas, sin importar
     // qué assignedUserId pida por query — ADMIN/SUPERVISOR ven todo el tenant.
     const effectiveAssignedUserId = requester?.role === 'AGENT' ? requester.id : assignedUserId;
 
+    // El filtro por línea (sucursal) es una vista, no un permiso: el pool de agentes
+    // es compartido y todos ven todas las líneas. Si más adelante se pide limitar
+    // qué líneas ve cada agente, el filtro forzado va acá, al lado del de AGENT.
     return this.prisma.conversation.findMany({
       where: {
         tenantId,
         ...(status && { status: status as any }),
         ...(effectiveAssignedUserId && { assignedUserId: effectiveAssignedUserId }),
         ...(contactId && { contactId }),
+        ...(whatsappAccountId && { whatsappAccountId }),
         ...(search && {
           contact: {
             OR: [
@@ -29,6 +41,7 @@ export class ConversationsService {
       orderBy: { lastMessageAt: 'desc' },
       include: {
         contact: { select: { id: true, name: true, phone: true, avatarUrl: true } },
+        whatsappAccount: { select: { id: true, label: true, phoneNumber: true } },
         assignedUser: { select: { id: true, name: true } },
         tags: { include: { tag: true } },
         _count: { select: { messages: true, notes: true } },
@@ -41,6 +54,7 @@ export class ConversationsService {
       where: { id, tenantId },
       include: {
         contact: true,
+        whatsappAccount: { select: { id: true, label: true, phoneNumber: true } },
         assignedUser: { select: { id: true, name: true, email: true } },
         tags: { include: { tag: true } },
         _count: { select: { messages: true, notes: true } },

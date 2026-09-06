@@ -1,7 +1,8 @@
 'use client';
 import { useState } from 'react';
-import { Search, RotateCcw, MessageSquare } from 'lucide-react';
+import { Search, RotateCcw, MessageSquare, Phone, Check, ChevronDown } from 'lucide-react';
 import { useInboxStore } from '@/store/inbox.store';
+import { accountLabel } from '@/types';
 import ConversationItem from './ConversationItem';
 import clsx from 'clsx';
 
@@ -14,13 +15,23 @@ const STATUS_TABS = [
 export default function ConversationList() {
   const {
     conversations, selectedConversationId, selectConversation,
-    setFilter, filter, isLoadingConversations, loadConversations,
+    setFilter, filter, isLoadingConversations, loadConversations, accounts,
   } = useInboxStore();
 
   const [search, setSearch] = useState('');
+  const [showLineMenu, setShowLineMenu] = useState(false);
+
+  // Con una sola línea el filtro no aporta nada: es el caso de un tenant común.
+  const showLineFilter = accounts.length > 1;
+  const activeLine = accounts.find((a) => a.id === filter.whatsappAccountId);
 
   function handleStatusChange(status: string) {
     setFilter({ ...filter, status });
+  }
+
+  function handleLineChange(whatsappAccountId?: string) {
+    setShowLineMenu(false);
+    setFilter({ ...filter, whatsappAccountId });
   }
 
   function handleSearch(e: React.ChangeEvent<HTMLInputElement>) {
@@ -66,6 +77,52 @@ export default function ConversationList() {
                        transition-all duration-150"
           />
         </div>
+
+        {/* Filtro por línea/sucursal — solo si el tenant tiene más de un número */}
+        {showLineFilter && (
+          <div className="relative mt-2">
+            <button
+              onClick={() => setShowLineMenu(!showLineMenu)}
+              className={clsx(
+                'w-full flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border transition-all duration-150',
+                activeLine
+                  ? 'border-green-500/40 bg-green-50 text-ink'
+                  : 'border-border bg-surface-muted text-ink-muted hover:text-ink',
+              )}
+            >
+              <Phone className="w-3.5 h-3.5 shrink-0 opacity-70" />
+              <span className="flex-1 text-left truncate font-medium">
+                {activeLine ? accountLabel(activeLine) : 'Todas las líneas'}
+              </span>
+              <ChevronDown className="w-3 h-3 opacity-60 shrink-0" />
+            </button>
+
+            {showLineMenu && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setShowLineMenu(false)} />
+                <div
+                  className="absolute left-0 right-0 top-full mt-1 bg-white rounded-xl shadow-float z-20 overflow-hidden animate-pop"
+                  style={{ border: '1px solid var(--border)', maxHeight: '260px', overflowY: 'auto' }}
+                >
+                  <LineOption
+                    label="Todas las líneas"
+                    selected={!filter.whatsappAccountId}
+                    onClick={() => handleLineChange(undefined)}
+                  />
+                  {accounts.map((acc) => (
+                    <LineOption
+                      key={acc.id}
+                      label={accountLabel(acc)}
+                      hint={acc.label ? acc.phoneNumber ?? undefined : undefined}
+                      selected={filter.whatsappAccountId === acc.id}
+                      onClick={() => handleLineChange(acc.id)}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Status tabs */}
@@ -108,7 +165,11 @@ export default function ConversationList() {
           <div className="flex flex-col items-center justify-center h-40 gap-2 px-6 text-center">
             <MessageSquare className="w-8 h-8 text-ink-ghost" />
             <p className="text-xs text-ink-subtle">
-              {search ? 'Sin resultados para tu búsqueda' : `Sin conversaciones ${activeTab.label.toLowerCase()}`}
+              {search
+                ? 'Sin resultados para tu búsqueda'
+                : activeLine
+                  ? `Sin conversaciones ${activeTab.label.toLowerCase()} en ${accountLabel(activeLine)}`
+                  : `Sin conversaciones ${activeTab.label.toLowerCase()}`}
             </p>
           </div>
         ) : (
@@ -126,5 +187,24 @@ export default function ConversationList() {
         )}
       </div>
     </div>
+  );
+}
+
+// ─── Opción del selector de línea ─────────────────────────────────────────────
+
+function LineOption({
+  label, hint, selected, onClick,
+}: { label: string; hint?: string; selected: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex items-center gap-2 w-full px-3.5 py-2.5 text-xs hover:bg-surface-muted transition-colors text-left"
+    >
+      <div className="flex-1 min-w-0">
+        <span className="text-ink block truncate">{label}</span>
+        {hint && <span className="text-[10px] text-ink-subtle block truncate">{hint}</span>}
+      </div>
+      {selected && <Check className="w-3.5 h-3.5 shrink-0" style={{ color: '#25D366' }} />}
+    </button>
   );
 }

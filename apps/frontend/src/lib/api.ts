@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { WhatsAppAccount } from '@/types';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
@@ -35,7 +36,7 @@ export const authApi = {
 // ─── Conversations ─────────────────────────────────────────────────────────────
 
 export const conversationsApi = {
-  list: (params?: { status?: string; assignedUserId?: string; search?: string; contactId?: string }) =>
+  list: (params?: { status?: string; assignedUserId?: string; search?: string; contactId?: string; whatsappAccountId?: string }) =>
     api.get('/conversations', { params }).then((r) => r.data),
   get: (id: string) => api.get(`/conversations/${id}`).then((r) => r.data),
   update: (id: string, data: any) =>
@@ -73,17 +74,33 @@ export const whatsappApi = {
     name?: string;
     templateId: string;
     variables?: string[];
+    whatsappAccountId?: string;
   }) => api.post('/whatsapp/start-conversation', data).then((r) => r.data),
-  getAccount: () => api.get('/whatsapp/account').then((r) => r.data),
+
+  // ── Líneas (una por sucursal) ──────────────────────────────────────────────
+  listAccounts: (): Promise<WhatsAppAccount[]> =>
+    api.get('/whatsapp/accounts').then((r) => r.data),
+  // Solo las operativas — es lo que alimenta el filtro y el badge del inbox
+  listActiveAccounts: (): Promise<WhatsAppAccount[]> =>
+    api.get('/whatsapp/accounts/active').then((r) => r.data),
+  // Importa el resto de los números del WABA ya conectado (evita repetir el signup por sucursal)
+  syncAccounts: (): Promise<{ ok: boolean; imported: number; failedWabas: string[] }> =>
+    api.post('/whatsapp/accounts/sync').then((r) => r.data),
+  updateAccount: (id: string, data: { label?: string; sortOrder?: number }) =>
+    api.patch(`/whatsapp/accounts/${id}`, data).then((r) => r.data),
+  setDefaultAccount: (id: string): Promise<WhatsAppAccount[]> =>
+    api.post(`/whatsapp/accounts/${id}/default`).then((r) => r.data),
+  disconnectAccount: (id: string): Promise<WhatsAppAccount[]> =>
+    api.delete(`/whatsapp/accounts/${id}`).then((r) => r.data),
+
   // Embedded Signup: envía el code OAuth + session info — el backend hace el intercambio
   embeddedSignup: (data: { code: string; wabaId?: string; phoneNumberId?: string }) =>
     api.post('/whatsapp/embedded-signup', data).then((r) => r.data),
   // Activar número con PIN de 2FA si el signup lo requirió
-  registerPhoneWithPin: (pin: string) =>
-    api.post('/whatsapp/register-phone', { pin }).then((r) => r.data),
+  registerPhoneWithPin: (pin: string, accountId?: string) =>
+    api.post('/whatsapp/register-phone', { pin, accountId }).then((r) => r.data),
   connectDirect: (data: { accessToken: string; phoneNumberId: string; wabaId?: string }) =>
     api.post('/whatsapp/connect-direct', data).then((r) => r.data),
-  disconnect: () => api.delete('/whatsapp/account').then((r) => r.data),
 };
 
 // ─── Notes ────────────────────────────────────────────────────────────────────

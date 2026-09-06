@@ -45,6 +45,8 @@ export interface Conversation {
   tenantId: string;
   contactId: string;
   contact: Contact;
+  whatsappAccountId?: string | null;
+  whatsappAccount?: ConversationAccount | null;
   assignedUserId?: string;
   assignedUser?: { id: string; name: string };
   status: ConversationStatus;
@@ -86,17 +88,37 @@ export interface InternalNote {
   createdAt: string;
 }
 
+/** Una linea de WhatsApp del tenant. Con multi-numero hay una por sucursal. */
 export interface WhatsAppAccount {
   id: string;
   wabaId: string;
+  phoneNumberId?: string;
   phoneNumber?: string;
   displayName?: string;
   businessName?: string;
+  /** Nombre operativo que le pone el admin, ej: "Sucursal Palermo". */
+  label?: string | null;
+  /** Linea usada para plantillas y para conversaciones salientes sin linea elegida. */
+  isDefault?: boolean;
+  sortOrder?: number;
   signupStatus: 'PENDING' | 'CONNECTED' | 'FAILED' | 'DISCONNECTED';
   isActive: boolean;
   webhookVerifyToken: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Lo que trae una conversacion sobre su linea — alcanza para el badge del inbox. */
+export interface ConversationAccount {
+  id: string;
+  label?: string | null;
+  phoneNumber?: string | null;
+}
+
+/** Etiqueta a mostrar para una linea: el nombre que puso el admin, o el numero. */
+export function accountLabel(account?: ConversationAccount | WhatsAppAccount | null): string {
+  if (!account) return 'Sin línea';
+  return account.label?.trim() || account.phoneNumber || 'Sin línea';
 }
 
 export interface AuthState {

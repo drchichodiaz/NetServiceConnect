@@ -7,9 +7,10 @@ import { SystemConfigModule } from '../system-config/system-config.module';
 import { MediaModule } from '../media/media.module';
 import { TemplatesModule } from '../templates/templates.module';
 import { BotModule } from '../bot/bot.module';
+import { WhatsAppAccountsModule } from './accounts.module';
 
 @Module({
-  imports: [SystemConfigModule, MediaModule, TemplatesModule, BotModule],
+  imports: [SystemConfigModule, MediaModule, TemplatesModule, BotModule, WhatsAppAccountsModule],
   controllers: [WhatsAppController],
   providers: [WhatsAppService, EmbeddedSignupService, WebhookService],
   exports: [WhatsAppService],

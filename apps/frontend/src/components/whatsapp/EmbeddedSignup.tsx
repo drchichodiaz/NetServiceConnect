@@ -1,13 +1,13 @@
 'use client';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { whatsappApi, systemConfigApi } from '@/lib/api';
-import { WhatsAppAccount } from '@/types';
 import { MessageSquare, Loader2, AlertCircle, ArrowRight, KeyRound } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { BRAND } from '@/lib/brand';
 
 interface Props {
-  onConnected: (account: WhatsAppAccount) => void;
+  /** El tenant puede tener varias lineas — la pagina recarga la lista, no recibe una cuenta. */
+  onConnected: () => void;
 }
 
 type Step = 'idle' | 'waiting_fb' | 'saving' | 'needs_pin' | 'error';
@@ -157,7 +157,7 @@ export default function EmbeddedSignup({ onConnected }: Props) {
       }
 
       setStep('idle');
-      onConnected(result as WhatsAppAccount);
+      onConnected();
     } catch (err: any) {
       setStep('error');
       const msg = err?.response?.data?.message || err?.message || 'Error al conectar con Meta';
@@ -176,8 +176,7 @@ export default function EmbeddedSignup({ onConnected }: Props) {
       await whatsappApi.registerPhoneWithPin(pin);
       toast.success('Número registrado correctamente');
       setStep('idle');
-      const account = await import('@/lib/api').then((m) => m.whatsappApi.getAccount());
-      onConnected(account as WhatsAppAccount);
+      onConnected();
     } catch (err: any) {
       toast.error(err?.response?.data?.message || 'PIN incorrecto');
     } finally {

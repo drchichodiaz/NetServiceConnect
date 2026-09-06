@@ -1,11 +1,11 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { whatsappApi } from '@/lib/api';
-import { WhatsAppAccount } from '@/types';
+import { WhatsAppAccount, accountLabel } from '@/types';
 import EmbeddedSignup from '@/components/whatsapp/EmbeddedSignup';
 import {
-  CheckCircle, XCircle, Copy, Eye, EyeOff, Wifi, WifiOff,
-  KeyRound, Loader2, AlertCircle, Zap,
+  CheckCircle, Copy, Eye, EyeOff, Wifi, WifiOff, Plus, Star,
+  KeyRound, Loader2, AlertCircle, Zap, Pencil, RefreshCw, Phone, X, Check,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
@@ -13,29 +13,54 @@ import clsx from 'clsx';
 type ConnectTab = 'embedded' | 'token';
 
 export default function WhatsAppSettingsPage() {
-  const [account,   setAccount]   = useState<WhatsAppAccount | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [tab,       setTab]       = useState<ConnectTab>('embedded');
+  const [accounts,    setAccounts]    = useState<WhatsAppAccount[]>([]);
+  const [isLoading,   setIsLoading]   = useState(true);
+  const [tab,         setTab]         = useState<ConnectTab>('embedded');
+  const [showConnect, setShowConnect] = useState(false);
+  const [isSyncing,   setIsSyncing]   = useState(false);
 
-  useEffect(() => {
-    whatsappApi.getAccount()
-      .then(setAccount)
-      .catch(() => setAccount(null))
-      .finally(() => setIsLoading(false));
+  const load = useCallback(async () => {
+    try {
+      setAccounts(await whatsappApi.listAccounts());
+    } catch {
+      setAccounts([]);
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
-  async function handleDisconnect() {
-    if (!confirm('Desconectar desactivará la recepción de mensajes. ¿Continuar?')) return;
-    try {
-      await whatsappApi.disconnect();
-      setAccount(null);
-      toast.success('Cuenta desconectada');
-    } catch {
-      toast.error('Error al desconectar');
-    }
+  useEffect(() => { load(); }, [load]);
+
+  const connected = accounts.filter((a) => a.isActive);
+  const hasAny    = accounts.length > 0;
+
+  function handleConnected() {
+    setShowConnect(false);
+    load();
+    toast.success('Línea conectada');
   }
 
-  const isConnected = account?.signupStatus === 'CONNECTED' && account?.isActive;
+  // Trae el resto de los números del WABA ya conectado — es lo que evita repetir el
+  // Embedded Signup una vez por sucursal cuando la empresa tiene 10 o 15 líneas.
+  async function handleSync() {
+    setIsSyncing(true);
+    try {
+      const res = await whatsappApi.syncAccounts();
+      await load();
+      if (res.imported > 0) {
+        toast.success(`${res.imported} línea(s) nueva(s) importada(s) desde Meta`);
+      } else if (res.ok) {
+        toast('No hay números nuevos para importar');
+      }
+      if (res.failedWabas.length > 0) {
+        toast.error(`No se pudieron leer los números de ${res.failedWabas.length} cuenta(s) de Meta`);
+      }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Error al sincronizar');
+    } finally {
+      setIsSyncing(false);
+    }
+  }
 
   if (isLoading) {
     return (
@@ -46,97 +71,69 @@ export default function WhatsAppSettingsPage() {
   }
 
   return (
-    <div className="max-w-xl mx-auto py-10 px-6 animate-fade-in">
+    <div className="max-w-2xl mx-auto py-10 px-6 animate-fade-in">
       <div className="mb-8">
         <h1 className="text-xl font-bold text-ink mb-1" style={{ letterSpacing: '-0.02em' }}>
-          Configuración de WhatsApp
+          Líneas de WhatsApp
         </h1>
         <p className="text-sm text-ink-muted">
-          Conecta tu cuenta de WhatsApp Business para recibir y enviar mensajes.
+          Cada línea es un número de WhatsApp Business. Podés conectar una por sucursal:
+          las conversaciones quedan separadas por línea y cada respuesta sale por el número
+          al que escribió el cliente.
         </p>
       </div>
 
-      {isConnected && account ? (
-        <div className="space-y-4">
-          {/* Status card */}
-          <div
-            className="card p-5 flex items-start gap-4"
-            style={{ border: '1px solid #BBF7D8' }}
-          >
-            <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-              style={{ background: '#E8FBF0' }}
-            >
-              <Wifi className="w-5 h-5" style={{ color: '#25D366' }} />
-            </div>
-            <div>
-              <div className="flex items-center gap-2 mb-0.5">
-                <p className="font-semibold text-ink text-sm">Conectado</p>
-                <span
-                  className="text-[10px] font-semibold rounded-full px-2 py-0.5"
-                  style={{ background: '#E8FBF0', color: '#128C7E' }}
-                >
-                  Activo
+      {hasAny && (
+        <div className="space-y-4 mb-8">
+          {/* Resumen + acciones */}
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs font-semibold text-ink-muted uppercase tracking-wider">
+              {connected.length} {connected.length === 1 ? 'línea activa' : 'líneas activas'}
+              {accounts.length > connected.length && (
+                <span className="text-ink-subtle normal-case font-medium">
+                  {' '}· {accounts.length - connected.length} desconectada(s)
                 </span>
-              </div>
-              <p className="text-xs text-ink-muted">
-                {account.displayName || account.businessName || 'WhatsApp Business'} &mdash; {account.phoneNumber}
-              </p>
-            </div>
-          </div>
-
-          {/* Details */}
-          <div className="card overflow-hidden">
-            <div className="px-5 py-3.5" style={{ borderBottom: '1px solid var(--border)' }}>
-              <p className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Detalles de la cuenta</p>
-            </div>
-            <div className="divide-y divide-border">
-              <AccountRow label="Número de teléfono"   value={account.phoneNumber} />
-              <AccountRow label="Nombre"                value={account.displayName} />
-              <AccountRow label="Empresa"               value={account.businessName} />
-              <AccountRow label="WABA ID"               value={account.wabaId}    mono />
-              <AccountRow label="Webhook Verify Token"  value={account.webhookVerifyToken} mono secret />
-            </div>
-          </div>
-
-          {/* Webhook URL */}
-          <div className="card p-5">
-            <p className="text-xs font-semibold text-ink-muted uppercase tracking-wider mb-2">
-              URL del Webhook (configurar en Meta)
+              )}
             </p>
-            <div
-              className="flex items-center gap-2 rounded-lg px-3 py-2.5 font-mono text-xs text-ink-muted"
-              style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)' }}
-            >
-              <span className="flex-1 truncate">
-                {typeof window !== 'undefined'
-                  ? `${window.location.protocol}//${window.location.hostname.replace(':3000', '')}:3001/api/whatsapp/webhook`
-                  : 'https://tudominio.com/api/whatsapp/webhook'}
-              </span>
+            <div className="flex items-center gap-2">
               <button
-                onClick={() => {
-                  const url = `${window.location.protocol}//${window.location.hostname.replace(':3000', '')}:3001/api/whatsapp/webhook`;
-                  navigator.clipboard.writeText(url);
-                  toast.success('URL copiada');
-                }}
-                className="shrink-0 text-ink-subtle hover:text-ink transition-colors"
+                onClick={handleSync}
+                disabled={isSyncing}
+                className="btn-ghost flex items-center gap-1.5 text-xs px-2.5 py-1.5"
+                title="Importar el resto de los números de tu cuenta de Meta"
               >
-                <Copy className="w-3.5 h-3.5" />
+                <RefreshCw className={clsx('w-3.5 h-3.5', isSyncing && 'animate-spin')} />
+                Sincronizar con Meta
+              </button>
+              <button
+                onClick={() => setShowConnect(!showConnect)}
+                className="btn-ghost flex items-center gap-1.5 text-xs px-2.5 py-1.5"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Conectar línea
               </button>
             </div>
           </div>
 
-          {/* Disconnect */}
-          <button
-            onClick={handleDisconnect}
-            className="flex items-center gap-2 text-sm text-red-500 hover:text-red-600 font-medium transition-colors"
-          >
-            <WifiOff className="w-4 h-4" />
-            Desconectar cuenta
-          </button>
+          {accounts.map((account) => (
+            <AccountCard key={account.id} account={account} onChanged={setAccounts} />
+          ))}
         </div>
-      ) : (
+      )}
+
+      {(showConnect || !hasAny) && (
         <div className="space-y-4">
+          {hasAny && (
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold text-ink-muted uppercase tracking-wider">
+                Conectar una línea nueva
+              </p>
+              <button onClick={() => setShowConnect(false)} className="btn-ghost w-7 h-7 p-0">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           {/* Tab switcher */}
           <div
             className="flex rounded-xl p-1 gap-1"
@@ -152,19 +149,212 @@ export default function WhatsAppSettingsPage() {
             </TabBtn>
           </div>
 
-          {tab === 'embedded' && (
-            <EmbeddedSignup
-              onConnected={(acc) => { setAccount(acc); toast.success('WhatsApp conectado'); }}
-            />
-          )}
+          {tab === 'embedded' && <EmbeddedSignup onConnected={handleConnected} />}
+          {tab === 'token'    && <DirectTokenForm onConnected={handleConnected} />}
 
-          {tab === 'token' && (
-            <DirectTokenForm
-              onConnected={(acc) => { setAccount(acc); toast.success('WhatsApp conectado'); }}
-            />
+          {hasAny && (
+            <p className="text-[11px] text-ink-subtle">
+              Si tus números ya están en la misma cuenta de WhatsApp Business, usá
+              <strong className="text-ink-muted"> Sincronizar con Meta</strong> en vez de repetir
+              este proceso por cada uno.
+            </p>
           )}
         </div>
       )}
+
+      <WebhookUrlCard />
+    </div>
+  );
+}
+
+// ─── Tarjeta de una línea ─────────────────────────────────────────────────────
+
+function AccountCard({
+  account, onChanged,
+}: { account: WhatsAppAccount; onChanged: (accounts: WhatsAppAccount[]) => void }) {
+  const [editing,  setEditing]  = useState(false);
+  const [draft,    setDraft]    = useState(account.label ?? '');
+  const [saving,   setSaving]   = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  const isConnected = account.signupStatus === 'CONNECTED' && account.isActive;
+
+  async function saveLabel() {
+    setSaving(true);
+    try {
+      await whatsappApi.updateAccount(account.id, { label: draft.trim() });
+      onChanged(await whatsappApi.listAccounts());
+      setEditing(false);
+      toast.success('Nombre actualizado');
+    } catch {
+      toast.error('Error al guardar el nombre');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function makeDefault() {
+    try {
+      onChanged(await whatsappApi.setDefaultAccount(account.id));
+      toast.success('Línea predeterminada actualizada');
+    } catch {
+      toast.error('Error al cambiar la línea predeterminada');
+    }
+  }
+
+  async function disconnect() {
+    const ok = confirm(
+      `Desconectar "${accountLabel(account)}" deja de recibir mensajes en ese número. El historial se conserva. ¿Continuar?`,
+    );
+    if (!ok) return;
+    try {
+      onChanged(await whatsappApi.disconnectAccount(account.id));
+      toast.success('Línea desconectada');
+    } catch {
+      toast.error('Error al desconectar');
+    }
+  }
+
+  return (
+    <div className="card overflow-hidden" style={isConnected ? { border: '1px solid #BBF7D8' } : undefined}>
+      <div className="p-4 flex items-start gap-3">
+        <div
+          className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+          style={{ background: isConnected ? '#E8FBF0' : 'var(--surface-muted)' }}
+        >
+          {isConnected
+            ? <Wifi className="w-4 h-4" style={{ color: '#25D366' }} />
+            : <WifiOff className="w-4 h-4 text-ink-subtle" />}
+        </div>
+
+        <div className="flex-1 min-w-0">
+          {editing ? (
+            <div className="flex items-center gap-1.5">
+              <input
+                autoFocus
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter')  saveLabel();
+                  if (e.key === 'Escape') { setDraft(account.label ?? ''); setEditing(false); }
+                }}
+                placeholder="Ej: Sucursal Palermo"
+                maxLength={60}
+                className="input flex-1 text-sm py-1"
+              />
+              <button onClick={saveLabel} disabled={saving} className="btn-ghost w-7 h-7 p-0">
+                {saving
+                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  : <Check className="w-3.5 h-3.5" style={{ color: '#25D366' }} />}
+              </button>
+              <button
+                onClick={() => { setDraft(account.label ?? ''); setEditing(false); }}
+                className="btn-ghost w-7 h-7 p-0"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 flex-wrap">
+              <p className="font-semibold text-ink text-sm">{accountLabel(account)}</p>
+              <button
+                onClick={() => setEditing(true)}
+                className="text-ink-subtle hover:text-ink transition-colors"
+                title="Renombrar la línea"
+              >
+                <Pencil className="w-3 h-3" />
+              </button>
+              {account.isDefault && (
+                <span
+                  className="flex items-center gap-1 text-[10px] font-semibold rounded-full px-2 py-0.5"
+                  style={{ background: '#EEF2FF', color: '#4F46E5' }}
+                  title="Se usa para dar de alta plantillas y para conversaciones salientes sin línea elegida"
+                >
+                  <Star className="w-2.5 h-2.5" />
+                  Predeterminada
+                </span>
+              )}
+              {!isConnected && (
+                <span
+                  className="text-[10px] font-semibold rounded-full px-2 py-0.5"
+                  style={{ background: '#F3F4F6', color: '#6B7280' }}
+                >
+                  Desconectada
+                </span>
+              )}
+            </div>
+          )}
+
+          <p className="text-xs text-ink-muted mt-0.5 flex items-center gap-1.5">
+            <Phone className="w-3 h-3 opacity-60" />
+            {account.phoneNumber || 'Número no disponible'}
+            {account.displayName && <span className="text-ink-subtle">· {account.displayName}</span>}
+          </p>
+
+          <div className="flex items-center gap-3 mt-2">
+            <button
+              onClick={() => setExpanded(!expanded)}
+              className="text-[11px] text-ink-subtle hover:text-ink transition-colors"
+            >
+              {expanded ? 'Ocultar detalles' : 'Ver detalles'}
+            </button>
+            {isConnected && !account.isDefault && (
+              <button onClick={makeDefault} className="text-[11px] text-ink-subtle hover:text-ink transition-colors">
+                Marcar como predeterminada
+              </button>
+            )}
+            {account.isActive && (
+              <button onClick={disconnect} className="text-[11px] text-red-500 hover:text-red-600 transition-colors">
+                Desconectar
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="divide-y divide-border" style={{ borderTop: '1px solid var(--border)' }}>
+          <AccountRow label="Número de teléfono"   value={account.phoneNumber} />
+          <AccountRow label="Nombre"               value={account.displayName} />
+          <AccountRow label="Empresa"              value={account.businessName} />
+          <AccountRow label="Phone Number ID"      value={account.phoneNumberId} mono />
+          <AccountRow label="WABA ID"              value={account.wabaId} mono />
+          <AccountRow label="Webhook Verify Token" value={account.webhookVerifyToken} mono secret />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── URL del webhook (una sola para todas las líneas) ─────────────────────────
+
+function WebhookUrlCard() {
+  function webhookUrl() {
+    return `${window.location.protocol}//${window.location.hostname.replace(':3000', '')}:3001/api/whatsapp/webhook`;
+  }
+
+  return (
+    <div className="card p-5 mt-8">
+      <p className="text-xs font-semibold text-ink-muted uppercase tracking-wider mb-2">
+        URL del Webhook (configurar en Meta)
+      </p>
+      <p className="text-[11px] text-ink-subtle mb-2.5">
+        Es la misma para todas las líneas — Meta indica en cada mensaje por qué número entró.
+      </p>
+      <div
+        className="flex items-center gap-2 rounded-lg px-3 py-2.5 font-mono text-xs text-ink-muted"
+        style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)' }}
+      >
+        <span className="flex-1 truncate">
+          {typeof window !== 'undefined' ? webhookUrl() : 'https://tudominio.com/api/whatsapp/webhook'}
+        </span>
+        <button
+          onClick={() => { navigator.clipboard.writeText(webhookUrl()); toast.success('URL copiada'); }}
+          className="shrink-0 text-ink-subtle hover:text-ink transition-colors"
+        >
+          <Copy className="w-3.5 h-3.5" />
+        </button>
+      </div>
     </div>
   );
 }
@@ -179,9 +369,7 @@ function TabBtn({
       onClick={onClick}
       className={clsx(
         'flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold py-2 px-3 rounded-lg transition-all',
-        active
-          ? 'bg-white text-ink shadow-sm'
-          : 'text-ink-muted hover:text-ink',
+        active ? 'bg-white text-ink shadow-sm' : 'text-ink-muted hover:text-ink',
       )}
     >
       {children}
@@ -191,7 +379,7 @@ function TabBtn({
 
 // ─── Direct Token Form ────────────────────────────────────────────────────────
 
-function DirectTokenForm({ onConnected }: { onConnected: (acc: WhatsAppAccount) => void }) {
+function DirectTokenForm({ onConnected }: { onConnected: () => void }) {
   const [accessToken,   setAccessToken]   = useState('');
   const [phoneNumberId, setPhoneNumberId] = useState('');
   const [wabaId,        setWabaId]        = useState('');
@@ -213,9 +401,10 @@ function DirectTokenForm({ onConnected }: { onConnected: (acc: WhatsAppAccount) 
         phoneNumberId: phoneNumberId.trim(),
         wabaId: wabaId.trim() || undefined,
       });
-      // Fetch del account completo para obtener signupStatus, isActive, etc.
-      const account = await whatsappApi.getAccount();
-      onConnected(account as WhatsAppAccount);
+      setAccessToken('');
+      setPhoneNumberId('');
+      setWabaId('');
+      onConnected();
     } catch (err: any) {
       const msg = err?.response?.data?.message || err?.message || 'Error al conectar';
       setErrorMsg(Array.isArray(msg) ? msg.join(', ') : msg);
@@ -311,7 +500,7 @@ function DirectTokenForm({ onConnected }: { onConnected: (acc: WhatsAppAccount) 
           ) : (
             <>
               <Zap className="w-4 h-4" />
-              Conectar cuenta
+              Conectar línea
             </>
           )}
         </button>

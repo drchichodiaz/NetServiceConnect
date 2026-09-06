@@ -27,7 +27,7 @@ model Tenant {
   updatedAt DateTime @updatedAt
 
   users            User[]
-  whatsappAccount  WhatsAppAccount?
+  whatsappAccounts WhatsAppAccount[]
   contacts         Contact[]
   conversations    Conversation[]
   messages         Message[]
@@ -75,9 +75,13 @@ enum UserRole {
 
 // ─── WhatsApp Account ─────────────────────────────────────────────────────────
 
+// Un tenant puede tener varias lineas (ej: una por sucursal). El webhook ya rutea
+// por phoneNumberId, asi que lo que separa a una linea de otra es esta fila; la
+// conversacion guarda por cual entro (Conversation.whatsappAccountId) y todo lo que
+// sale — bot incluido — se manda por esa misma linea.
 model WhatsAppAccount {
   id                 String               @id @default(cuid())
-  tenantId           String               @unique
+  tenantId           String
   wabaId             String
   phoneNumberId      String
   accessToken        String
@@ -85,6 +89,13 @@ model WhatsAppAccount {
   displayName        String?
   businessName       String?
   businessId         String?
+  // Nombre operativo de la linea, editable por el admin (ej: "Sucursal Palermo").
+  // phoneNumber/displayName los define Meta y no se pueden cambiar desde aca.
+  label              String?
+  // Linea que se usa cuando no hay una conversacion de la cual deducirla: alta de
+  // plantillas (se crean contra el WABA) y conversaciones salientes sin linea elegida.
+  isDefault          Boolean              @default(false)
+  sortOrder          Int                  @default(0)
   webhookVerifyToken String               @default(cuid())
   isActive           Boolean              @default(true)
   signupStatus       EmbeddedSignupStatus @default(PENDING)
@@ -92,7 +103,12 @@ model WhatsAppAccount {
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+
+  @@unique([tenantId, phoneNumberId])
+  @@index([tenantId])
+  @@index([phoneNumberId])
 }
 
 enum EmbeddedSignupStatus {
@@ -129,6 +145,10 @@ model Conversation {
   id              String             @id @default(cuid())
   tenantId        String
   contactId       String
+  // Linea de WhatsApp por la que entro (o por la que salio, si la inicio un agente).
+  // Nullable por las conversaciones anteriores al multi-numero y para no perder el
+  // historial si se borra la linea. Todo envio la resuelve desde aca.
+  whatsappAccountId String?
   assignedUserId  String?
   status          ConversationStatus @default(OPEN)
   // Modo del bot de menu (Fase D). Default AGENT a proposito: las conversaciones
@@ -147,9 +167,10 @@ model Conversation {
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
 
-  tenant       Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  contact      Contact           @relation(fields: [contactId], references: [id])
-  assignedUser User?             @relation("AssignedAgent", fields: [assignedUserId], references: [id])
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact         Contact          @relation(fields: [contactId], references: [id])
+  whatsappAccount WhatsAppAccount? @relation(fields: [whatsappAccountId], references: [id], onDelete: SetNull)
+  assignedUser    User?            @relation("AssignedAgent", fields: [assignedUserId], references: [id])
   messages     Message[]
   notes        InternalNote[]
   tags         ConversationTag[]
@@ -157,6 +178,7 @@ model Conversation {
 
   @@index([tenantId, status])
   @@index([tenantId, lastMessageAt])
+  @@index([tenantId, whatsappAccountId])
 }
 
 enum ConversationStatus {

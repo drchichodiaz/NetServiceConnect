@@ -2,7 +2,9 @@
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
 import clsx from 'clsx';
-import { Conversation } from '@/types';
+import { Phone } from 'lucide-react';
+import { Conversation, accountLabel } from '@/types';
+import { useInboxStore } from '@/store/inbox.store';
 
 interface Props {
   conversation: Conversation;
@@ -58,11 +60,16 @@ function SLABadge({ lastInboundAt }: { lastInboundAt: string }) {
 }
 
 export default function ConversationItem({ conversation, isSelected, onClick }: Props) {
-  const { contact, lastMessageText, lastMessageAt, lastInboundAt, unreadCount, tags, assignedUser, status } = conversation;
+  const { contact, lastMessageText, lastMessageAt, lastInboundAt, unreadCount, tags, assignedUser, status, whatsappAccount } = conversation;
   const name = contact.name || contact.phone;
 
   // Mostrar SLA solo en conversaciones abiertas/pendientes con mensajes entrantes sin responder
   const showSLA = status !== 'CLOSED' && !!lastInboundAt && unreadCount > 0;
+
+  // El badge de línea solo tiene sentido si el tenant tiene más de un número: con
+  // uno solo sería la misma etiqueta repetida en cada fila.
+  const isMultiLine = useInboxStore((s) => s.accounts.length > 1);
+  const showLine = isMultiLine && !!whatsappAccount;
 
   return (
     <button
@@ -111,9 +118,19 @@ export default function ConversationItem({ conversation, isSelected, onClick }: 
           )}
         </div>
 
-        {/* Row 3: tags + assignee + SLA */}
-        {(tags.length > 0 || assignedUser || showSLA) && (
+        {/* Row 3: línea + tags + assignee + SLA */}
+        {(tags.length > 0 || assignedUser || showSLA || showLine) && (
           <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+            {showLine && (
+              <span
+                className="flex items-center gap-1 text-[10px] rounded-full pl-1.5 pr-2 py-0.5 font-semibold max-w-[140px]"
+                style={{ background: '#EEF2FF', color: '#4F46E5' }}
+                title={`Entró por ${accountLabel(whatsappAccount)}`}
+              >
+                <Phone className="w-2.5 h-2.5 shrink-0" />
+                <span className="truncate">{accountLabel(whatsappAccount)}</span>
+              </span>
+            )}
             {showSLA && <SLABadge lastInboundAt={lastInboundAt!} />}
             {assignedUser && (
               <span className="text-[10px] text-ink-subtle bg-surface-subtle rounded-full px-2 py-0.5 font-medium">

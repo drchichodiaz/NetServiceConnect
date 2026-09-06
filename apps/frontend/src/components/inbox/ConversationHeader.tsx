@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
-import { ChevronDown, UserPlus, StickyNote, CheckCircle, Clock, XCircle, PanelRight } from 'lucide-react';
-import { Conversation } from '@/types';
+import { ChevronDown, UserPlus, StickyNote, CheckCircle, Clock, XCircle, PanelRight, Phone } from 'lucide-react';
+import { Conversation, accountLabel } from '@/types';
 import { useInboxStore } from '@/store/inbox.store';
 import { usersApi } from '@/lib/api';
 import toast from 'react-hot-toast';
@@ -30,8 +30,13 @@ export default function ConversationHeader({ conversation, sidebarOpen, onToggle
   const [users,           setUsers]           = useState<any[]>([]);
 
   const current = STATUS_OPTIONS.find((s) => s.value === conversation.status) ?? STATUS_OPTIONS[0];
-  const { contact } = conversation;
+  const { contact, whatsappAccount } = conversation;
   const displayName = contact.name || contact.phone;
+
+  // Con varias líneas, el agente necesita ver por cuál sucursal le está escribiendo
+  // el cliente antes de responder — la respuesta sale por esa misma línea.
+  const isMultiLine = useInboxStore((s) => s.accounts.length > 1);
+  const showLine = isMultiLine && !!whatsappAccount;
 
   async function handleStatusChange(status: string) {
     setShowStatusMenu(false);
@@ -76,7 +81,19 @@ export default function ConversationHeader({ conversation, sidebarOpen, onToggle
 
         <div className="flex-1 min-w-0">
           <p className="font-semibold text-ink text-sm leading-tight truncate">{displayName}</p>
-          <p className="text-xs text-ink-subtle">{contact.phone}</p>
+          <div className="flex items-center gap-2 min-w-0">
+            <p className="text-xs text-ink-subtle shrink-0">{contact.phone}</p>
+            {showLine && (
+              <span
+                className="flex items-center gap-1 text-[10px] rounded-full pl-1.5 pr-2 py-0.5 font-semibold min-w-0"
+                style={{ background: '#EEF2FF', color: '#4F46E5' }}
+                title={`Esta conversación entró por ${accountLabel(whatsappAccount)} — tu respuesta sale por esa línea`}
+              >
+                <Phone className="w-2.5 h-2.5 shrink-0" />
+                <span className="truncate">{accountLabel(whatsappAccount)}</span>
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Actions */}

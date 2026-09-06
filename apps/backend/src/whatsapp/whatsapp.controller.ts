@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Delete,
   Body,
   Query,
@@ -20,6 +21,7 @@ import { memoryStorage } from 'multer';
 import { Response } from 'express';
 import { WhatsAppService } from './whatsapp.service';
 import { EmbeddedSignupService } from './embedded-signup.service';
+import { WhatsAppAccountsService } from './accounts.service';
 import { WebhookService } from './webhook.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -30,6 +32,7 @@ import { SendMessageDto } from './dto/send-message.dto';
 import { SendMediaDto } from './dto/send-media.dto';
 import { StartConversationDto } from './dto/start-conversation.dto';
 import { EmbeddedSignupDto, RegisterPhoneWithPinDto, ConnectDirectDto } from './dto/embedded-signup.dto';
+import { UpdateAccountDto } from './dto/update-account.dto';
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024; // 25MB, generoso para imagen/audio/doc corto de WhatsApp
 
@@ -41,6 +44,7 @@ export class WhatsAppController {
     private waService: WhatsAppService,
     private signupService: EmbeddedSignupService,
     private webhookService: WebhookService,
+    private accountsService: WhatsAppAccountsService,
     private systemConfig: SystemConfigService,
   ) {}
 
@@ -92,7 +96,7 @@ export class WhatsAppController {
   @Roles('ADMIN' as any, 'SUPERVISOR' as any)
   @Post('register-phone')
   registerPhone(@CurrentUser() user: any, @Body() dto: RegisterPhoneWithPinDto) {
-    return this.signupService.registerPhoneWithPin(user.tenantId, dto.pin);
+    return this.signupService.registerPhoneWithPin(user.tenantId, dto.pin, dto.accountId);
   }
 
   // Conexión manual con token temporal (API Setup de Meta — para desarrollo)
@@ -108,18 +112,51 @@ export class WhatsAppController {
     );
   }
 
+  // ─── Líneas de WhatsApp (una por sucursal) ────────────────────────────────
+
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN' as any, 'SUPERVISOR' as any)
-  @Get('account')
-  getAccount(@CurrentUser() user: any) {
-    return this.signupService.getAccount(user.tenantId);
+  @Get('accounts')
+  listAccounts(@CurrentUser() user: any) {
+    return this.accountsService.listForTenant(user.tenantId);
+  }
+
+  // Las lineas activas alimentan el filtro y el badge del inbox, asi que las puede
+  // leer cualquier agente — solo nombre y numero, nunca el token.
+  @UseGuards(JwtAuthGuard)
+  @Get('accounts/active')
+  listActiveAccounts(@CurrentUser() user: any) {
+    return this.accountsService.listActiveForTenant(user.tenantId);
+  }
+
+  // Importa el resto de los numeros del WABA ya conectado, para no repetir el
+  // signup una vez por sucursal.
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN' as any, 'SUPERVISOR' as any)
+  @Post('accounts/sync')
+  syncAccounts(@CurrentUser() user: any) {
+    return this.signupService.syncNumbers(user.tenantId);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN' as any, 'SUPERVISOR' as any)
-  @Delete('account')
-  disconnect(@CurrentUser() user: any) {
-    return this.signupService.disconnect(user.tenantId);
+  @Patch('accounts/:id')
+  updateAccount(@CurrentUser() user: any, @Param('id') id: string, @Body() dto: UpdateAccountDto) {
+    return this.accountsService.update(user.tenantId, id, dto);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN' as any, 'SUPERVISOR' as any)
+  @Post('accounts/:id/default')
+  setDefaultAccount(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.accountsService.setDefault(user.tenantId, id);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN' as any, 'SUPERVISOR' as any)
+  @Delete('accounts/:id')
+  disconnectAccount(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.accountsService.disconnect(user.tenantId, id);
   }
 
   // ─── Send Message ──────────────────────────────────────────────────────────

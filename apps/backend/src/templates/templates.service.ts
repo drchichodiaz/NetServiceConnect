@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, ConflictException, 
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTemplateDto } from './dto/create-template.dto';
+import { WhatsAppAccountsService } from '../whatsapp/accounts.service';
 import axios from 'axios';
 
 @Injectable()
@@ -12,6 +13,7 @@ export class TemplatesService {
   constructor(
     private prisma: PrismaService,
     private config: ConfigService,
+    private accounts: WhatsAppAccountsService,
   ) {
     this.apiVersion = config.get('META_API_VERSION') || 'v19.0';
   }
@@ -22,8 +24,11 @@ export class TemplatesService {
   }
 
   async create(tenantId: string, dto: CreateTemplateDto) {
-    const account = await this.prisma.whatsAppAccount.findUnique({ where: { tenantId } });
-    if (!account || !account.isActive) {
+    // Las plantillas se dan de alta contra el WABA, no contra un numero — con varias
+    // lineas bajo el mismo WABA se crean una vez desde la linea por defecto y quedan
+    // disponibles para todas.
+    const account = await this.accounts.getDefault(tenantId);
+    if (!account) {
       throw new BadRequestException('No active WhatsApp account found for this tenant');
     }
 
@@ -91,7 +96,7 @@ export class TemplatesService {
     const template = await this.findOneOrThrow(tenantId, id);
     if (!template.metaTemplateId) return template;
 
-    const account = await this.prisma.whatsAppAccount.findUnique({ where: { tenantId } });
+    const account = await this.accounts.getDefault(tenantId);
     if (!account) throw new BadRequestException('No active WhatsApp account found for this tenant');
 
     try {
@@ -112,7 +117,7 @@ export class TemplatesService {
 
   async remove(tenantId: string, id: string) {
     const template = await this.findOneOrThrow(tenantId, id);
-    const account = await this.prisma.whatsAppAccount.findUnique({ where: { tenantId } });
+    const account = await this.accounts.getDefault(tenantId);
 
     if (account && template.metaTemplateId) {
       try {

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { Conversation, Message, InternalNote } from '@/types';
-import { conversationsApi, messagesApi, notesApi } from '@/lib/api';
+import { Conversation, Message, InternalNote, WhatsAppAccount } from '@/types';
+import { conversationsApi, messagesApi, notesApi, whatsappApi } from '@/lib/api';
 
 interface InboxStore {
   conversations: Conversation[];
@@ -9,11 +9,15 @@ interface InboxStore {
   notes: InternalNote[];
   isLoadingConversations: boolean;
   isLoadingMessages: boolean;
-  filter: { status?: string; search?: string };
+  // Lineas activas del tenant (una por sucursal) — alimentan el filtro del inbox.
+  // Vacio o de largo 1 significa que no hay nada que filtrar y el selector se oculta.
+  accounts: WhatsAppAccount[];
+  filter: { status?: string; search?: string; whatsappAccountId?: string };
 
   loadConversations: () => Promise<void>;
+  loadAccounts: () => Promise<void>;
   selectConversation: (id: string) => Promise<void>;
-  setFilter: (filter: { status?: string; search?: string }) => void;
+  setFilter: (filter: { status?: string; search?: string; whatsappAccountId?: string }) => void;
   updateConversation: (id: string, data: any) => Promise<void>;
   addMessage: (message: Message) => void;
   addNote: (note: InternalNote) => void;
@@ -34,6 +38,7 @@ export const useInboxStore = create<InboxStore>((set, get) => ({
   notes: [],
   isLoadingConversations: false,
   isLoadingMessages: false,
+  accounts: [],
   filter: { status: 'OPEN' },
 
   loadConversations: async () => {
@@ -44,6 +49,16 @@ export const useInboxStore = create<InboxStore>((set, get) => ({
       set({ conversations: data });
     } finally {
       set({ isLoadingConversations: false });
+    }
+  },
+
+  // Falla en silencio a proposito: si no se pueden leer las lineas el inbox sigue
+  // funcionando, solo que sin filtro por sucursal.
+  loadAccounts: async () => {
+    try {
+      set({ accounts: await whatsappApi.listActiveAccounts() });
+    } catch {
+      set({ accounts: [] });
     }
   },
 

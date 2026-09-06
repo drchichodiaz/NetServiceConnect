@@ -6,11 +6,12 @@ import MessagePanel from '@/components/inbox/MessagePanel';
 import EmptyState from '@/components/inbox/EmptyState';
 
 export default function InboxPage() {
-  const { loadConversations, selectedConversationId } = useInboxStore();
+  const { loadConversations, loadAccounts, selectedConversationId } = useInboxStore();
 
   useEffect(() => {
     loadConversations();
-  }, [loadConversations]);
+    loadAccounts();
+  }, [loadConversations, loadAccounts]);
 
   return (
     <div className="flex h-full">

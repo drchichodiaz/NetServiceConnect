@@ -40,16 +40,16 @@ export class WebhookService {
           continue;
         }
 
-        await this.processMessages(account.tenantId, account.accessToken, value);
+        await this.processMessages(account.tenantId, account.id, account.accessToken, value);
         await this.processStatuses(account.tenantId, value);
       }
     }
   }
 
-  private async processMessages(tenantId: string, accessToken: string, value: any) {
+  private async processMessages(tenantId: string, accountId: string, accessToken: string, value: any) {
     for (const msg of value.messages ?? []) {
       try {
-        await this.handleInboundMessage(tenantId, accessToken, msg, value.contacts?.[0]);
+        await this.handleInboundMessage(tenantId, accountId, accessToken, msg, value.contacts?.[0]);
       } catch (err) {
         this.logger.error(`Error procesando mensaje ${msg.id}`, err);
       }
@@ -81,7 +81,7 @@ export class WebhookService {
     }
   }
 
-  private async handleInboundMessage(tenantId: string, accessToken: string, msg: any, contactInfo: any) {
+  private async handleInboundMessage(tenantId: string, accountId: string, accessToken: string, msg: any, contactInfo: any) {
     // Extraer texto del mensaje según su tipo
     const body = this.extractBody(msg);
     const type = this.mapType(msg.type);
@@ -111,9 +111,12 @@ export class WebhookService {
       create: { tenantId, phone, name: contactName },
     });
 
-    // Buscar conversación abierta o pendiente existente
+    // Buscar conversación abierta o pendiente existente EN ESTA LÍNEA. El contacto
+    // es uno solo por tenant a propósito (el agente ve la ficha completa del cliente),
+    // pero la conversación se separa por línea: si el mismo cliente le escribe a dos
+    // sucursales, son dos hilos distintos y cada respuesta sale por su propio número.
     let conversation = await this.prisma.conversation.findFirst({
-      where: { tenantId, contactId: contact.id, status: { not: 'CLOSED' } },
+      where: { tenantId, contactId: contact.id, whatsappAccountId: accountId, status: { not: 'CLOSED' } },
       orderBy: { createdAt: 'desc' },
     });
 
@@ -128,6 +131,7 @@ export class WebhookService {
         data: {
           tenantId,
           contactId: contact.id,
+          whatsappAccountId: accountId,
           status: 'OPEN',
           mode: 'BOT',
           botState: 'MENU',

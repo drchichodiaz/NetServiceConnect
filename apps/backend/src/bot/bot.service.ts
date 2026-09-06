@@ -4,12 +4,8 @@ import axios from 'axios';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventBusService } from '../events/event-bus.service';
 import { AssignmentService } from '../whatsapp/assignment.service';
+import { WhatsAppAccountsService, WhatsAppAccountCreds } from '../whatsapp/accounts.service';
 import { OpenAiClientService } from '../common/openai-client.service';
-
-interface WhatsAppAccountCreds {
-  phoneNumberId: string;
-  accessToken: string;
-}
 
 type MenuNodeType = 'MENU' | 'TEXT' | 'ORDER_LOOKUP' | 'AGENT' | 'AI_CHAT';
 
@@ -67,6 +63,7 @@ export class BotService {
     private prisma: PrismaService,
     private eventBus: EventBusService,
     private assignmentService: AssignmentService,
+    private accounts: WhatsAppAccountsService,
     private openaiClient: OpenAiClientService,
     config: ConfigService,
   ) {
@@ -84,7 +81,7 @@ export class BotService {
 
   /** Rutea la respuesta de un cliente cuando la conversación sigue en modo BOT. */
   async handleBotReply(tenantId: string, conversationId: string, botState: string | null, phone: string, msg: any) {
-    const account = await this.getAccount(tenantId);
+    const account = await this.accounts.getForConversation(conversationId);
     if (!account) {
       return this.handoffToHuman(tenantId, conversationId, 'whatsapp_account_unavailable');
     }
@@ -123,7 +120,7 @@ export class BotService {
     nodeId: string | null,
     account?: WhatsAppAccountCreds,
   ) {
-    const acc = account ?? (await this.getAccount(tenantId));
+    const acc = account ?? (await this.accounts.getForConversation(conversationId));
     if (!acc) {
       return this.handoffToHuman(tenantId, conversationId, 'whatsapp_account_unavailable');
     }
@@ -259,7 +256,7 @@ export class BotService {
     node: MenuNode | null,
     account?: WhatsAppAccountCreds,
   ) {
-    const acc = account ?? (await this.getAccount(tenantId));
+    const acc = account ?? (await this.accounts.getForConversation(conversationId));
     if (!acc) {
       return this.handoffToHuman(tenantId, conversationId, 'whatsapp_account_unavailable');
     }
@@ -682,15 +679,6 @@ ${knowledgeBase}
       .normalize('NFD')
       .replace(/\p{Diacritic}/gu, '')
       .trim();
-  }
-
-  private async getAccount(tenantId: string): Promise<WhatsAppAccountCreds | null> {
-    const account = await this.prisma.whatsAppAccount.findUnique({ where: { tenantId } });
-    if (!account || !account.isActive) {
-      this.logger.warn(`No hay cuenta activa de WhatsApp para tenant ${tenantId}, el bot no puede responder`);
-      return null;
-    }
-    return { phoneNumberId: account.phoneNumberId, accessToken: account.accessToken };
   }
 
   private async sendText(

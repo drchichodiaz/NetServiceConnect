@@ -20,6 +20,12 @@ export class EmbeddedSignupDto {
 export class RegisterPhoneWithPinDto {
   @IsString()
   pin: string;
+
+  // Linea a activar. Opcional: sin esto se toma la mas recien conectada, que es el
+  // caso normal (el PIN se pide justo despues del signup de ese numero).
+  @IsOptional()
+  @IsString()
+  accountId?: string;
 }
 
 // Conexión manual con token de la página API Setup de Meta (para desarrollo/pruebas)

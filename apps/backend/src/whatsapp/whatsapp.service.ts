@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EventBusService } from '../events/event-bus.service';
 import { MediaService } from '../media/media.service';
 import { TemplatesService } from '../templates/templates.service';
+import { WhatsAppAccountsService } from './accounts.service';
 import { SendMessageDto } from './dto/send-message.dto';
 import { SendMediaDto } from './dto/send-media.dto';
 import { StartConversationDto } from './dto/start-conversation.dto';
@@ -24,24 +25,26 @@ export class WhatsAppService {
     private eventBus: EventBusService,
     private mediaService: MediaService,
     private templatesService: TemplatesService,
+    private accounts: WhatsAppAccountsService,
   ) {
     this.apiVersion = config.get('META_API_VERSION') || 'v19.0';
   }
 
   async sendMessage(tenantId: string, senderId: string, dto: SendMessageDto) {
-    const account = await this.prisma.whatsAppAccount.findUnique({
-      where: { tenantId },
-    });
-
-    if (!account || !account.isActive) {
-      throw new BadRequestException('No active WhatsApp account found for this tenant');
-    }
-
     const conversation = await this.prisma.conversation.findFirst({
       where: { id: dto.conversationId, tenantId },
     });
 
     if (!conversation) throw new NotFoundException('Conversation not found');
+
+    // La respuesta sale SIEMPRE por la línea por la que entró la conversación —
+    // si no, el cliente que escribió a una sucursal recibiría la respuesta desde
+    // el número de otra.
+    const account = await this.accounts.getForConversation(conversation.id);
+    if (!account) {
+      throw new BadRequestException('No active WhatsApp account found for this tenant');
+    }
+
     await this.takeOverFromBot(tenantId, conversation, senderId);
 
     const payload = this.buildPayload(dto.to, dto);
@@ -104,18 +107,16 @@ export class WhatsAppService {
 
   /** Envia un archivo adjunto (imagen/audio/documento/video) subido por un agente desde el inbox. */
   async sendMediaMessage(tenantId: string, senderId: string, dto: SendMediaDto, file: Express.Multer.File) {
-    const account = await this.prisma.whatsAppAccount.findUnique({
-      where: { tenantId },
-    });
-
-    if (!account || !account.isActive) {
-      throw new BadRequestException('No active WhatsApp account found for this tenant');
-    }
-
     const conversation = await this.prisma.conversation.findFirst({
       where: { id: dto.conversationId, tenantId },
     });
     if (!conversation) throw new NotFoundException('Conversation not found');
+
+    const account = await this.accounts.getForConversation(conversation.id);
+    if (!account) {
+      throw new BadRequestException('No active WhatsApp account found for this tenant');
+    }
+
     await this.takeOverFromBot(tenantId, conversation, senderId);
 
     // 1. Subir el archivo a Meta para obtener un media id reutilizable en el mensaje
@@ -200,8 +201,12 @@ export class WhatsAppService {
    * de 24hs de servicio al cliente. Quien la inicia queda asignado como agente.
    */
   async startConversation(tenantId: string, senderId: string, dto: StartConversationDto) {
-    const account = await this.prisma.whatsAppAccount.findUnique({ where: { tenantId } });
-    if (!account || !account.isActive) {
+    // Acá no hay conversación de la cual deducir la línea, así que la elige el agente
+    // (o se usa la línea por defecto del tenant).
+    const account = dto.whatsappAccountId
+      ? await this.accounts.findActiveOrThrow(tenantId, dto.whatsappAccountId)
+      : await this.accounts.getDefault(tenantId);
+    if (!account) {
       throw new BadRequestException('No active WhatsApp account found for this tenant');
     }
 
@@ -221,8 +226,9 @@ export class WhatsAppService {
       });
     }
 
+    // Misma regla que el webhook: la identidad de un hilo es (contacto, línea).
     let conversation = await this.prisma.conversation.findFirst({
-      where: { tenantId, contactId: contact.id, status: { not: 'CLOSED' } },
+      where: { tenantId, contactId: contact.id, whatsappAccountId: account.id, status: { not: 'CLOSED' } },
       orderBy: { createdAt: 'desc' },
     });
 
@@ -235,6 +241,7 @@ export class WhatsAppService {
         data: {
           tenantId,
           contactId: contact.id,
+          whatsappAccountId: account.id,
           status: 'OPEN',
           assignedUserId: senderId,
           lastMessageAt: now,
