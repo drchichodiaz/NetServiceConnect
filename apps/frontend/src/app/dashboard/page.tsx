@@ -1,11 +1,11 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid,
+  AreaChart, Area, BarChart, Bar, LabelList, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer,
 } from 'recharts';
 import {
-  MessageSquare, Clock, Tag, Users, Bot,
+  MessageSquare, Clock, Tag, Users, Bot, Phone,
   TrendingUp, TrendingDown, ChevronDown, RefreshCw,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/auth.store';
@@ -63,6 +63,36 @@ function MetricCard({
   );
 }
 
+// Una sola serie = un solo color para todas las barras. Pintar cada sucursal de un
+// color distinto duplicaria en el color lo que ya dice el largo de la barra, y con 15
+// sucursales los tonos dejan de distinguirse. El nombre en el eje es quien identifica.
+// Verde de marca corrido a un paso mas oscuro para pasar contraste 3:1 sobre la tarjeta.
+const LINE_BAR_COLOR = '#0F9D76';
+
+function LineTooltip({ active, payload }: any) {
+  if (!active || !payload?.length) return null;
+  const d = payload[0].payload;
+  return (
+    <div className="bg-white rounded-xl shadow-float px-3.5 py-3 text-xs" style={{ border: '1px solid var(--border)' }}>
+      <p className="font-semibold text-ink mb-2">{d.name}</p>
+      <Row label="Conversaciones" value={d.conversations} />
+      <Row label="Abiertas"       value={d.open} />
+      <Row label="Resueltas por bot" value={`${d.botResolved} (${d.botRate}%)`} />
+      <Row label="Entrantes"      value={d.inbound} />
+      <Row label="Salientes"      value={d.outbound} />
+    </div>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="flex items-center gap-4 mb-1 last:mb-0">
+      <span className="text-ink-muted">{label}:</span>
+      <span className="font-semibold text-ink ml-auto tabular-nums">{value}</span>
+    </div>
+  );
+}
+
 function CustomTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   return (
@@ -110,6 +140,12 @@ export default function DashboardPage() {
   const chart = stats?.chart ?? [];
   const agents = stats?.agents ?? [];
   const tags  = stats?.tags ?? [];
+  const lines: any[] = stats?.lines ?? [];
+  // Con una sola linea no hay nada que comparar — misma regla que el badge del inbox.
+  const showLines = lines.length > 1;
+  // La altura incluye la banda del eje X: si se fija solo el area de barras, las
+  // etiquetas del eje quedan afuera y la tarjeta se llena de scroll interno.
+  const linesChartHeight = Math.max(220, lines.length * 34 + 48);
   const maxTagCount = tags[0]?.count ?? 1;
 
   const periodLabel = PERIODS.find((p) => p.key === period)?.label ?? '';
@@ -313,6 +349,109 @@ export default function DashboardPage() {
             </div>
           )}
         </div>
+
+        {/* ── Comparativa por línea (sucursal) ─────────────────────────────── */}
+        {showLines && (
+          <div className="card overflow-hidden animate-fade-in" style={{ animationDelay: '140ms' }}>
+            <div className="px-5 py-4 flex items-center gap-2.5" style={{ borderBottom: '1px solid var(--border)' }}>
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: '#E8FBF0' }}>
+                <Phone className="w-3.5 h-3.5" style={{ color: '#128C7E' }} />
+              </div>
+              <div>
+                <h2 className="font-semibold text-ink text-sm">Comparativa por línea</h2>
+                <p className="text-xs text-ink-muted mt-0.5">Conversaciones por sucursal — {periodLabel.toLowerCase()}</p>
+              </div>
+            </div>
+
+            {loading ? (
+              <div className="px-5 py-8 space-y-3">
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} className="h-8 rounded-lg bg-surface-muted animate-pulse" />
+                ))}
+              </div>
+            ) : lines.every((l) => l.conversations === 0) ? (
+              <div className="px-5 py-10 text-center text-sm text-ink-muted">
+                Sin conversaciones en ninguna línea en este período
+              </div>
+            ) : (
+              <>
+                <div className="px-5 pt-5 pb-1" style={{ height: linesChartHeight }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={lines}
+                      layout="vertical"
+                      margin={{ top: 0, right: 40, left: 0, bottom: 0 }}
+                      barCategoryGap="28%"
+                    >
+                      <CartesianGrid horizontal={false} stroke="#F0F1F5" />
+                      <XAxis
+                        type="number"
+                        tick={{ fontSize: 11, fill: '#9CA3AF', fontFamily: 'var(--font-dm-sans)' }}
+                        axisLine={false} tickLine={false} allowDecimals={false}
+                      />
+                      <YAxis
+                        type="category"
+                        dataKey="name"
+                        tick={{ fontSize: 11, fill: '#6B7280', fontFamily: 'var(--font-dm-sans)' }}
+                        axisLine={false} tickLine={false}
+                        // 170px + corte a 20 caracteres: verificado renderizando con 15
+                        // sucursales de nombre largo. Con el eje mas angosto, o cortando
+                        // mas tarde, Recharts parte la etiqueta en dos lineas y la fila
+                        // queda desalineada con su barra. El nombre completo vive en el
+                        // tooltip y en la tabla, asi que el recorte no esconde nada.
+                        width={170}
+                        tickFormatter={(v: string) => (v.length > 20 ? `${v.slice(0, 19)}…` : v)}
+                      />
+                      <Tooltip content={<LineTooltip />} cursor={{ fill: '#F7F8FA' }} />
+                      <Bar dataKey="conversations" fill={LINE_BAR_COLOR} barSize={16} radius={[0, 4, 4, 0]}>
+                        <LabelList
+                          dataKey="conversations"
+                          position="right"
+                          style={{ fontSize: 11, fill: '#6B7280', fontFamily: 'var(--font-dm-sans)' }}
+                        />
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* Detalle — el chart compara volumen, la tabla dice cómo le fue a cada una */}
+                <div className="divide-y divide-border" style={{ borderTop: '1px solid var(--border)' }}>
+                  <div className="grid grid-cols-12 px-5 py-2.5">
+                    <span className="col-span-4 text-[10px] font-semibold text-ink-subtle uppercase tracking-wider">Línea</span>
+                    <span className="col-span-2 text-[10px] font-semibold text-ink-subtle uppercase tracking-wider text-center">Conv.</span>
+                    <span className="col-span-2 text-[10px] font-semibold text-ink-subtle uppercase tracking-wider text-center">Abiertas</span>
+                    <span className="col-span-2 text-[10px] font-semibold text-ink-subtle uppercase tracking-wider text-center">Bot</span>
+                    <span className="col-span-1 text-[10px] font-semibold text-ink-subtle uppercase tracking-wider text-center">Entr.</span>
+                    <span className="col-span-1 text-[10px] font-semibold text-ink-subtle uppercase tracking-wider text-center">Sal.</span>
+                  </div>
+
+                  {lines.map((line: any) => (
+                    <div
+                      key={line.id}
+                      className="grid grid-cols-12 items-center px-5 py-2.5 hover:bg-surface-muted transition-colors"
+                    >
+                      <div className="col-span-4 min-w-0 flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full shrink-0" style={{ background: LINE_BAR_COLOR }} />
+                        <span className="text-sm text-ink truncate">{line.name}</span>
+                        {!line.isActive && (
+                          <span className="text-[10px] text-ink-subtle shrink-0">(desconectada)</span>
+                        )}
+                      </div>
+                      <span className="col-span-2 text-sm font-semibold text-ink text-center tabular-nums">{line.conversations}</span>
+                      <span className="col-span-2 text-sm text-ink-muted text-center tabular-nums">{line.open}</span>
+                      <span className="col-span-2 text-sm text-ink-muted text-center tabular-nums">
+                        {line.botResolved}
+                        <span className="text-ink-subtle text-xs"> ({line.botRate}%)</span>
+                      </span>
+                      <span className="col-span-1 text-sm text-ink-muted text-center tabular-nums">{line.inbound}</span>
+                      <span className="col-span-1 text-sm text-ink-muted text-center tabular-nums">{line.outbound}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         {/* ── Bottom row ───────────────────────────────────────────────────── */}
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">

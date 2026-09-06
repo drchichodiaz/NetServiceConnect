@@ -9,8 +9,18 @@ export class StatsService {
   async getStats(tenantId: string, period: StatsPeriod) {
     const since = getPeriodStart(period);
 
-    const [conversations, messages, chartMessages, agentData, tagData, users] =
-      await Promise.all([
+    const [
+      conversations,
+      messages,
+      chartMessages,
+      agentData,
+      tagData,
+      users,
+      lineConvData,
+      lineBotData,
+      lineMsgData,
+      accounts,
+    ] = await Promise.all([
         // Conversations summary
         this.prisma.conversation.findMany({
           where: { tenantId, createdAt: { gte: since } },
@@ -48,6 +58,37 @@ export class StatsService {
         this.prisma.user.findMany({
           where: { tenantId },
           select: { id: true, name: true },
+        }),
+
+        // ── Comparativa por linea (sucursal) ─────────────────────────────────
+        // Conversaciones del periodo por linea y estado.
+        this.prisma.conversation.groupBy({
+          by: ['whatsappAccountId', 'status'],
+          where: { tenantId, createdAt: { gte: since } },
+          _count: { _all: true },
+        }),
+
+        // Conversaciones que el bot cerro sin pasar por un humano.
+        this.prisma.conversation.groupBy({
+          by: ['whatsappAccountId'],
+          where: { tenantId, createdAt: { gte: since }, closedReason: 'BOT_RESOLVED' },
+          _count: { _all: true },
+        }),
+
+        // Mensajes por linea y direccion. Va en SQL crudo porque Message no guarda
+        // la linea (la tiene la conversacion) y Prisma no agrupa por campo de relacion.
+        this.prisma.$queryRaw<Array<{ accountId: string | null; direction: string; count: number }>>`
+          SELECT c."whatsappAccountId" AS "accountId", m."direction", COUNT(*)::int AS "count"
+          FROM "Message" m
+          JOIN "Conversation" c ON c."id" = m."conversationId"
+          WHERE m."tenantId" = ${tenantId} AND m."createdAt" >= ${since}
+          GROUP BY 1, 2
+        `,
+
+        this.prisma.whatsAppAccount.findMany({
+          where: { tenantId },
+          select: { id: true, label: true, phoneNumber: true, isActive: true },
+          orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
         }),
       ]);
 
@@ -127,6 +168,65 @@ export class StatsService {
       };
     });
 
+    // ── Comparativa por linea ────────────────────────────────────────────────
+    // Se incluye una fila "Sin linea" si quedaron conversaciones sin asignar (previas
+    // al multi-numero, o huerfanas al desconectar una linea): preferimos que los
+    // numeros cierren contra el total a que desaparezcan sin explicacion.
+    const lineRows = new Map<
+      string | null,
+      { conversations: number; open: number; closed: number; botResolved: number; inbound: number; outbound: number }
+    >();
+    const emptyRow = () => ({ conversations: 0, open: 0, closed: 0, botResolved: 0, inbound: 0, outbound: 0 });
+    const rowFor = (id: string | null) => {
+      if (!lineRows.has(id)) lineRows.set(id, emptyRow());
+      return lineRows.get(id)!;
+    };
+
+    for (const r of lineConvData) {
+      const row = rowFor(r.whatsappAccountId);
+      row.conversations += r._count._all;
+      if (r.status === 'OPEN') row.open += r._count._all;
+      if (r.status === 'CLOSED') row.closed += r._count._all;
+    }
+    for (const r of lineBotData) {
+      rowFor(r.whatsappAccountId).botResolved += r._count._all;
+    }
+    for (const r of lineMsgData) {
+      const row = rowFor(r.accountId);
+      if (r.direction === 'INBOUND') row.inbound += Number(r.count);
+      else if (r.direction === 'OUTBOUND') row.outbound += Number(r.count);
+    }
+
+    const lines = [...lineRows.entries()]
+      .map(([accountId, row]) => {
+        const account = accountId ? accounts.find((a) => a.id === accountId) : null;
+        return {
+          id: accountId ?? 'none',
+          name: account?.label?.trim() || account?.phoneNumber || 'Sin línea',
+          phoneNumber: account?.phoneNumber ?? null,
+          isActive: account?.isActive ?? false,
+          ...row,
+          // Que porcentaje de las conversaciones de esa linea resolvio el bot solo.
+          botRate: row.conversations > 0 ? Math.round((row.botResolved / row.conversations) * 100) : 0,
+        };
+      })
+      .sort((a, b) => b.conversations - a.conversations);
+
+    // Lineas activas sin nada de actividad en el periodo: se agregan en cero para que
+    // una sucursal muda se vea como tal en vez de faltar de la comparativa.
+    for (const account of accounts) {
+      if (!account.isActive) continue;
+      if (lines.some((l) => l.id === account.id)) continue;
+      lines.push({
+        id: account.id,
+        name: account.label?.trim() || account.phoneNumber || 'Sin nombre',
+        phoneNumber: account.phoneNumber ?? null,
+        isActive: true,
+        ...emptyRow(),
+        botRate: 0,
+      });
+    }
+
     return {
       period,
       conversations: convTotals,
@@ -134,6 +234,7 @@ export class StatsService {
       chart,
       agents,
       tags,
+      lines,
     };
   }
 }
