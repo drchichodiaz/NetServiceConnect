@@ -328,7 +328,7 @@ export default function DashboardPage() {
                       <stop offset="100%" stopColor="#3B82F6" stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#F0F1F5" vertical={false} />
+                  <CartesianGrid stroke="#F0F1F5" vertical={false} />
                   <XAxis
                     dataKey="dia"
                     tick={{ fontSize: 11, fill: '#9CA3AF', fontFamily: 'var(--font-dm-sans)' }}
