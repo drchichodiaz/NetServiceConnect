@@ -8,6 +8,12 @@ export class CreateTemplateDto {
   @IsString()
   language: string;
 
+  // WABA donde crear la plantilla. Opcional: sin esto va al WABA de la linea por
+  // defecto, que es el unico caso posible cuando el tenant tiene una sola cuenta.
+  @IsOptional()
+  @IsString()
+  wabaId?: string;
+
   @IsIn(['MARKETING', 'UTILITY', 'AUTHENTICATION'])
   category: string;
 

@@ -442,21 +442,39 @@ function NewConversationModal({ contact, onClose, onSent }: {
   const [variables, setVariables] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
 
-  // Se piden solo las utilizables por la línea que va a enviar: una plantilla de otro
-  // WABA no existe para ese número y Meta la rechaza con 132001.
+  // Línea desde la que sale el mensaje. Importa por dos motivos: el cliente recibe el
+  // mensaje desde ese número, y las plantillas disponibles son las del WABA de esa línea.
+  const [accounts, setAccounts] = useState<any[]>([]);
+  const [accountId, setAccountId] = useState('');
   const [hasOtherWabaTemplates, setHasOtherWabaTemplates] = useState(false);
 
   useEffect(() => {
-    Promise.all([templatesApi.list({ sendable: true }), templatesApi.list()])
-      .then(([sendable, all]: [Template[], Template[]]) => {
-        const usable = sendable.filter((t) => t.status === 'APPROVED');
+    whatsappApi.listActiveAccounts()
+      .then((accs) => {
+        setAccounts(accs);
+        // Arranca en la predeterminada — el comportamiento de antes de que existiera
+        // el selector, así que un tenant de una sola línea no nota ningún cambio.
+        setAccountId((accs.find((a: any) => a.isDefault) ?? accs[0])?.id ?? '');
+      })
+      .catch(() => setAccounts([]));
+  }, []);
+
+  // Las plantillas se recargan cada vez que cambia la línea: son las de su WABA.
+  useEffect(() => {
+    if (!accountId) return;
+    setLoadingTemplates(true);
+    setTemplateId('');
+    setVariables([]);
+    Promise.all([templatesApi.list({ whatsappAccountId: accountId }), templatesApi.list()])
+      .then(([forLine, all]: [Template[], Template[]]) => {
+        const usable = forLine.filter((t) => t.status === 'APPROVED');
         setTemplates(usable);
         // Para poder explicar una lista vacía en vez de mostrarla pelada.
         setHasOtherWabaTemplates(usable.length === 0 && all.some((t) => t.status === 'APPROVED'));
       })
       .catch(() => toast.error('Error al cargar plantillas'))
       .finally(() => setLoadingTemplates(false));
-  }, []);
+  }, [accountId]);
 
   const selectedTemplate = templates.find((t) => t.id === templateId) || null;
 
@@ -478,6 +496,7 @@ function NewConversationModal({ contact, onClose, onSent }: {
         name: contact ? undefined : (name.trim() || undefined),
         templateId,
         variables,
+        whatsappAccountId: accountId || undefined,
       });
       toast.success('Conversación iniciada');
       onSent(result.conversation.id);
@@ -514,6 +533,27 @@ function NewConversationModal({ contact, onClose, onSent }: {
             </>
           )}
 
+          {/* Selector de línea — oculto si hay una sola, no hay nada que elegir */}
+          {accounts.length > 1 && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-ink">Enviar desde</label>
+              <select
+                value={accountId}
+                onChange={(e) => setAccountId(e.target.value)}
+                className="input w-full"
+              >
+                {accounts.map((a: any) => (
+                  <option key={a.id} value={a.id}>
+                    {(a.label?.trim() || a.phoneNumber || 'Línea sin nombre') + (a.isDefault ? ' (predeterminada)' : '')}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-ink-subtle">
+                El cliente va a recibir el mensaje desde este número.
+              </p>
+            </div>
+          )}
+
           {loadingTemplates ? (
             <div className="flex items-center gap-2 text-sm text-ink-muted py-2">
               <Loader2 className="w-4 h-4 animate-spin" /> Cargando plantillas...
@@ -521,9 +561,9 @@ function NewConversationModal({ contact, onClose, onSent }: {
           ) : templates.length === 0 ? (
             hasOtherWabaTemplates ? (
               <p className="text-sm text-ink-muted py-2">
-                Tenés plantillas aprobadas, pero pertenecen a otra cuenta de WhatsApp Business y
-                no se pueden enviar desde esta línea. Meta guarda las plantillas por cuenta:
-                creá la misma plantilla en la cuenta de esta línea para poder usarla.
+                Esta línea no tiene plantillas aprobadas. Las que tenés pertenecen a otra cuenta
+                de WhatsApp Business y Meta no permite enviarlas desde acá. Elegí otra línea, o
+                creá la plantilla para esta cuenta en Configuración → Plantillas.
               </p>
             ) : (
               <p className="text-sm text-ink-muted py-2">

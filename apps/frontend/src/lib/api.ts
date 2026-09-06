@@ -220,12 +220,13 @@ export const tenantsApi = {
 // ─── Message Templates ─────────────────────────────────────────────────────────
 
 export const templatesApi = {
-  // sendable=true: solo las plantillas del WABA de la linea que envia. Meta guarda las
+  // Con whatsappAccountId: solo las plantillas del WABA de esa linea. Meta guarda las
   // plantillas por WABA, asi que ofrecer una de otro WABA termina en error 132001.
-  list: (opts?: { sendable?: boolean }) =>
-    api.get('/whatsapp/templates', { params: opts?.sendable ? { sendable: 'true' } : undefined })
-      .then((r) => r.data),
-  create: (data: { name: string; language: string; category: string; bodyText: string; exampleValues?: string[] }) =>
+  list: (opts?: { whatsappAccountId?: string }) =>
+    api.get('/whatsapp/templates', {
+      params: opts?.whatsappAccountId ? { whatsappAccountId: opts.whatsappAccountId } : undefined,
+    }).then((r) => r.data),
+  create: (data: { name: string; language: string; category: string; bodyText: string; wabaId?: string; exampleValues?: string[] }) =>
     api.post('/whatsapp/templates', data).then((r) => r.data),
   refresh: (id: string) => api.patch(`/whatsapp/templates/${id}/refresh`).then((r) => r.data),
   remove: (id: string) => api.delete(`/whatsapp/templates/${id}`).then((r) => r.data),

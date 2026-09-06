@@ -24,12 +24,14 @@ export class TemplatesService {
   }
 
   async create(tenantId: string, dto: CreateTemplateDto) {
-    // Las plantillas se dan de alta contra el WABA, no contra un numero — con varias
-    // lineas bajo el mismo WABA se crean una vez desde la linea por defecto y quedan
-    // disponibles para todas.
-    const account = await this.accounts.getDefault(tenantId);
+    // Las plantillas se dan de alta contra el WABA, no contra un numero: quedan
+    // disponibles para todas las lineas de ese WABA. Con varios WABA el alta elige
+    // en cual crearla; sin eleccion va a la de la linea por defecto.
+    const account = dto.wabaId
+      ? await this.accountForWabaOrThrow(tenantId, dto.wabaId)
+      : await this.accounts.getDefault(tenantId);
     if (!account) {
-      throw new BadRequestException('No active WhatsApp account found for this tenant');
+      throw new BadRequestException('No hay ninguna línea de WhatsApp activa en esta empresa');
     }
 
     const existing = await this.prisma.messageTemplate.findFirst({
@@ -89,20 +91,37 @@ export class TemplatesService {
   }
 
   /**
-   * `sendableOnly` deja solo las plantillas del WABA de la linea por defecto — las
-   * unicas que un envio puede usar hoy. El selector de "iniciar conversacion" pide
-   * asi, para no ofrecer plantillas que Meta va a rechazar con 132001.
+   * Con `whatsappAccountId` devuelve solo las plantillas del WABA de esa linea — las
+   * unicas que un envio por esa linea puede usar. El selector de "iniciar conversacion"
+   * pide asi, para no ofrecer plantillas que Meta rechazaria con 132001.
    */
-  async findAll(tenantId: string, sendableOnly = false) {
-    const account = await this.accounts.getDefault(tenantId);
+  async findAll(tenantId: string, whatsappAccountId?: string) {
+    let wabaFilter: string | undefined;
+    if (whatsappAccountId) {
+      const account = await this.prisma.whatsAppAccount.findFirst({
+        where: { id: whatsappAccountId, tenantId },
+        select: { wabaId: true },
+      });
+      // Linea inexistente: se filtra por un valor imposible en vez de devolver todo,
+      // para no ofrecer plantillas que no se van a poder enviar.
+      wabaFilter = account?.wabaId ?? '__linea_desconocida__';
+    }
 
     return this.prisma.messageTemplate.findMany({
-      where: {
-        tenantId,
-        ...(sendableOnly && { wabaId: account?.wabaId ?? '__sin_cuenta__' }),
-      },
+      where: { tenantId, ...(wabaFilter && { wabaId: wabaFilter }) },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  /** Una cuenta activa de ese WABA — la que presta el token para hablarle a Meta. */
+  private async accountForWabaOrThrow(tenantId: string, wabaId: string) {
+    const account = await this.prisma.whatsAppAccount.findFirst({
+      where: { tenantId, wabaId, isActive: true },
+    });
+    if (!account) {
+      throw new BadRequestException('Esa cuenta de WhatsApp Business no tiene ninguna línea activa');
+    }
+    return account;
   }
 
   async refreshStatus(tenantId: string, id: string) {

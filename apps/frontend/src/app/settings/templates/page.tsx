@@ -39,19 +39,26 @@ export default function TemplatesPage() {
 
   const [form, setForm] = useState({ name: '', language: 'es', category: 'UTILITY', bodyText: '' });
   const [accounts, setAccounts] = useState<any[]>([]);
+  // WABA donde se va a crear la plantilla. Meta la guarda ahí y queda disponible para
+  // todas las líneas de esa cuenta — de ahí que el selector muestre cuáles son.
+  const [wabaId, setWabaId] = useState('');
 
   // Solo tiene sentido decir de que cuenta es una plantilla si hay mas de una: con un
   // solo WABA la etiqueta seria la misma en todas las filas.
   const wabaIds = Array.from(new Set(accounts.map((a) => a.wabaId).filter(Boolean)));
   const multiWaba = wabaIds.length > 1;
 
-  function wabaLabel(wabaId?: string | null) {
-    if (!wabaId) return 'Cuenta desconocida';
-    const lines = accounts
-      .filter((a) => a.wabaId === wabaId)
-      .map((a) => a.label?.trim() || a.phoneNumber)
-      .filter(Boolean);
-    return lines.length > 0 ? lines.join(', ') : `WABA ${wabaId}`;
+  function linesOfWaba(id?: string | null) {
+    if (!id) return [];
+    return accounts
+      .filter((a) => a.wabaId === id && a.isActive)
+      .map((a) => a.label?.trim() || a.phoneNumber || 'Línea sin nombre');
+  }
+
+  function wabaLabel(id?: string | null) {
+    if (!id) return 'Cuenta desconocida';
+    const lines = linesOfWaba(id);
+    return lines.length > 0 ? lines.join(', ') : `WABA ${id}`;
   }
   const [exampleValues, setExampleValues] = useState<string[]>([]);
 
@@ -72,7 +79,13 @@ export default function TemplatesPage() {
     templatesApi.list().then(setTemplates).catch(() => toast.error('Error al cargar plantillas')).finally(() => setIsLoading(false));
     // Para poder decir a que cuenta pertenece cada plantilla cuando el tenant tiene
     // lineas en mas de un WABA — que es justo cuando una plantilla puede "no existir".
-    whatsappApi.listAccounts().then(setAccounts).catch(() => setAccounts([]));
+    whatsappApi.listAccounts()
+      .then((accs) => {
+        setAccounts(accs);
+        const preferred = accs.find((a: any) => a.isDefault && a.isActive) ?? accs.find((a: any) => a.isActive);
+        setWabaId((prev) => prev || preferred?.wabaId || '');
+      })
+      .catch(() => setAccounts([]));
   }
 
   useEffect(() => { load(); }, []);
@@ -85,7 +98,11 @@ export default function TemplatesPage() {
     }
     setIsSaving(true);
     try {
-      const t = await templatesApi.create({ ...form, exampleValues: variableCount > 0 ? exampleValues : undefined });
+      const t = await templatesApi.create({
+        ...form,
+        wabaId: wabaId || undefined,
+        exampleValues: variableCount > 0 ? exampleValues : undefined,
+      });
       setTemplates((prev) => [t, ...prev]);
       setForm({ name: '', language: 'es', category: 'UTILITY', bodyText: '' });
       setExampleValues([]);
@@ -137,6 +154,46 @@ export default function TemplatesPage() {
         <form onSubmit={handleCreate} className="card p-5 mb-5 animate-fade-in">
           <p className="text-sm font-semibold text-ink mb-4">Nueva plantilla</p>
           <div className="space-y-3">
+            {/* Selector de cuenta — oculto con un solo WABA, no hay nada que elegir */}
+            {multiWaba && (
+              <div>
+                <label className="text-xs font-semibold text-ink block mb-1.5">
+                  Cuenta de WhatsApp Business
+                </label>
+                <select value={wabaId} onChange={(e) => setWabaId(e.target.value)} className="input w-full">
+                  {wabaIds.map((id) => (
+                    <option key={id} value={id}>
+                      {linesOfWaba(id).length > 0 ? linesOfWaba(id).join(', ') : `WABA ${id}`}
+                    </option>
+                  ))}
+                </select>
+                <div
+                  className="rounded-lg px-3 py-2.5 mt-2 text-[11px]"
+                  style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)' }}
+                >
+                  <p className="text-ink-muted">
+                    Meta guarda la plantilla en esta cuenta. Va a quedar disponible para
+                    {linesOfWaba(wabaId).length === 1 ? ' la línea:' : ' estas líneas:'}
+                  </p>
+                  {linesOfWaba(wabaId).length > 0 ? (
+                    <ul className="mt-1.5 space-y-0.5">
+                      {linesOfWaba(wabaId).map((name) => (
+                        <li key={name} className="flex items-center gap-1.5 text-ink">
+                          <span className="w-1 h-1 rounded-full shrink-0" style={{ background: '#25D366' }} />
+                          {name}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-ink-subtle mt-1">Esta cuenta no tiene líneas activas.</p>
+                  )}
+                  <p className="text-ink-subtle mt-2">
+                    Para usarla desde una línea de otra cuenta, hay que crearla también allí.
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div>
               <input
                 required placeholder="nombre_de_la_plantilla" value={form.name}
