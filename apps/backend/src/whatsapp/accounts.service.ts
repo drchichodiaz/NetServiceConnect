@@ -39,6 +39,8 @@ export class WhatsAppAccountsService {
     label: true,
     isDefault: true,
     sortOrder: true,
+    platformStatus: true,
+    statusCheckedAt: true,
     signupStatus: true,
     isActive: true,
     webhookVerifyToken: true,

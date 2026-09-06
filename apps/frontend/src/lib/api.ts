@@ -88,6 +88,12 @@ export const whatsappApi = {
     api.post('/whatsapp/accounts/sync').then((r) => r.data),
   updateAccount: (id: string, data: { label?: string; sortOrder?: number }) =>
     api.patch(`/whatsapp/accounts/${id}`, data).then((r) => r.data),
+  // Registra en la Cloud API una linea ya dada de alta (PIN de 6 digitos de 2FA)
+  registerAccount: (id: string, pin: string) =>
+    api.post(`/whatsapp/accounts/${id}/register`, { pin }).then((r) => r.data),
+  // Relee el estado real del numero en Meta
+  checkAccount: (id: string): Promise<WhatsAppAccount[]> =>
+    api.post(`/whatsapp/accounts/${id}/check`).then((r) => r.data),
   setDefaultAccount: (id: string): Promise<WhatsAppAccount[]> =>
     api.post(`/whatsapp/accounts/${id}/default`).then((r) => r.data),
   disconnectAccount: (id: string): Promise<WhatsAppAccount[]> =>
@@ -99,8 +105,13 @@ export const whatsappApi = {
   // Activar número con PIN de 2FA si el signup lo requirió
   registerPhoneWithPin: (pin: string, accountId?: string) =>
     api.post('/whatsapp/register-phone', { pin, accountId }).then((r) => r.data),
-  connectDirect: (data: { accessToken: string; phoneNumberId: string; wabaId?: string }) =>
-    api.post('/whatsapp/connect-direct', data).then((r) => r.data),
+  connectDirect: (data: { accessToken: string; phoneNumberId: string; wabaId?: string }): Promise<{
+    ok: boolean;
+    accountId: string;
+    displayPhone?: string;
+    needsPin: boolean;
+    registerError?: string | null;
+  }> => api.post('/whatsapp/connect-direct', data).then((r) => r.data),
 };
 
 // ─── Notes ────────────────────────────────────────────────────────────────────

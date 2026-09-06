@@ -172,12 +172,50 @@ export default function WhatsAppSettingsPage() {
 function AccountCard({
   account, onChanged,
 }: { account: WhatsAppAccount; onChanged: (accounts: WhatsAppAccount[]) => void }) {
-  const [editing,  setEditing]  = useState(false);
-  const [draft,    setDraft]    = useState(account.label ?? '');
-  const [saving,   setSaving]   = useState(false);
-  const [expanded, setExpanded] = useState(false);
+  const [editing,    setEditing]    = useState(false);
+  const [draft,      setDraft]      = useState(account.label ?? '');
+  const [saving,     setSaving]     = useState(false);
+  const [expanded,   setExpanded]   = useState(false);
+  const [showPin,    setShowPin]    = useState(false);
+  const [pin,        setPin]        = useState('');
+  const [registering, setRegistering] = useState(false);
+  const [checking,   setChecking]   = useState(false);
 
   const isConnected = account.signupStatus === 'CONNECTED' && account.isActive;
+  // Meta dice CONNECTED solo cuando el número está registrado en la Cloud API y puede
+  // enviar. Guardar la línea no alcanza — de ahí que este chip sea distinto del de arriba.
+  const isRegistered = account.platformStatus === 'CONNECTED';
+
+  async function checkStatus() {
+    setChecking(true);
+    try {
+      onChanged(await whatsappApi.checkAccount(account.id));
+      toast.success('Estado actualizado desde Meta');
+    } catch {
+      toast.error('No se pudo consultar el estado en Meta');
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  async function submitPin() {
+    if (pin.length !== 6) {
+      toast.error('El PIN es de 6 dígitos');
+      return;
+    }
+    setRegistering(true);
+    try {
+      const res = await whatsappApi.registerAccount(account.id, pin);
+      onChanged(await whatsappApi.listAccounts());
+      setShowPin(false);
+      setPin('');
+      toast.success(res?.alreadyRegistered ? 'El número ya estaba registrado' : 'Número registrado en la Cloud API');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Error al registrar el número');
+    } finally {
+      setRegistering(false);
+    }
+  }
 
   async function saveLabel() {
     setSaving(true);
@@ -282,6 +320,7 @@ function AccountCard({
                   Desconectada
                 </span>
               )}
+              {isConnected && <RegistrationChip account={account} />}
             </div>
           )}
 
@@ -298,6 +337,24 @@ function AccountCard({
             >
               {expanded ? 'Ocultar detalles' : 'Ver detalles'}
             </button>
+            {isConnected && (
+              <button
+                onClick={checkStatus}
+                disabled={checking}
+                className="text-[11px] text-ink-subtle hover:text-ink transition-colors"
+              >
+                {checking ? 'Verificando...' : 'Verificar estado'}
+              </button>
+            )}
+            {isConnected && !isRegistered && (
+              <button
+                onClick={() => setShowPin(!showPin)}
+                className="text-[11px] font-semibold transition-colors"
+                style={{ color: '#D97706' }}
+              >
+                Registrar en la Cloud API
+              </button>
+            )}
             {isConnected && !account.isDefault && (
               <button onClick={makeDefault} className="text-[11px] text-ink-subtle hover:text-ink transition-colors">
                 Marcar como predeterminada
@@ -312,6 +369,47 @@ function AccountCard({
         </div>
       </div>
 
+      {showPin && (
+        <div className="px-4 pb-4 pt-1" style={{ borderTop: '1px solid var(--border)' }}>
+          <div
+            className="rounded-xl p-3.5 mt-3"
+            style={{ background: '#FFFBEB', border: '1px solid #FDE68A' }}
+          >
+            <p className="text-xs font-semibold text-ink mb-1">Registrar el número en la Cloud API</p>
+            <p className="text-[11px] text-ink-muted mb-3">
+              Es el paso que habilita a la línea a enviar mensajes. Poné el PIN de 6 dígitos de la
+              verificación en dos pasos del número. Si nunca le configuraste uno, el que escribas
+              acá queda como su PIN.
+            </p>
+            <div className="flex items-center gap-2">
+              <input
+                autoFocus
+                value={pin}
+                onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                onKeyDown={(e) => { if (e.key === 'Enter') submitPin(); }}
+                placeholder="000000"
+                inputMode="numeric"
+                className="input font-mono text-sm w-32 tracking-widest text-center"
+              />
+              <button
+                onClick={submitPin}
+                disabled={registering || pin.length !== 6}
+                className="btn-primary flex items-center gap-1.5 text-xs px-3 py-1.5"
+              >
+                {registering ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <KeyRound className="w-3.5 h-3.5" />}
+                Registrar
+              </button>
+              <button
+                onClick={() => { setShowPin(false); setPin(''); }}
+                className="btn-ghost text-xs px-2.5 py-1.5"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {expanded && (
         <div className="divide-y divide-border" style={{ borderTop: '1px solid var(--border)' }}>
           <AccountRow label="Número de teléfono"   value={account.phoneNumber} />
@@ -319,10 +417,36 @@ function AccountCard({
           <AccountRow label="Empresa"              value={account.businessName} />
           <AccountRow label="Phone Number ID"      value={account.phoneNumberId} mono />
           <AccountRow label="WABA ID"              value={account.wabaId} mono />
+          <AccountRow label="Estado en Meta"       value={account.platformStatus ?? 'Sin verificar'} />
           <AccountRow label="Webhook Verify Token" value={account.webhookVerifyToken} mono secret />
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Chip de estado de registro en la Cloud API ───────────────────────────────
+// Meta es la autoridad: CONNECTED significa que el número puede enviar. Sin verificar
+// no se afirma nada — no queremos mostrar "no registrada" para un número que se
+// registró a mano en el panel de Meta.
+
+function RegistrationChip({ account }: { account: WhatsAppAccount }) {
+  const status = account.platformStatus;
+
+  const style = !status
+    ? { bg: '#F3F4F6', color: '#6B7280', text: 'Sin verificar', title: 'Todavía no consultamos su estado en Meta. Usá "Verificar estado".' }
+    : status === 'CONNECTED'
+      ? { bg: '#E8FBF0', color: '#128C7E', text: 'Registrada', title: 'Registrada en la Cloud API: puede enviar y recibir.' }
+      : { bg: '#FFFBEB', color: '#D97706', text: `Meta: ${status}`, title: `Meta reporta el número como ${status}. Mientras no diga CONNECTED, la línea no puede enviar.` };
+
+  return (
+    <span
+      className="text-[10px] font-semibold rounded-full px-2 py-0.5"
+      style={{ background: style.bg, color: style.color }}
+      title={style.title}
+    >
+      {style.text}
+    </span>
   );
 }
 
@@ -385,6 +509,28 @@ function DirectTokenForm({ onConnected }: { onConnected: () => void }) {
   const [wabaId,        setWabaId]        = useState('');
   const [loading,       setLoading]       = useState(false);
   const [errorMsg,      setErrorMsg]      = useState('');
+  // La linea queda guardada aunque el registro en la Cloud API pida PIN: en vez de
+  // dejarla muda sin avisar, se pide el PIN acá mismo.
+  const [pendingId,     setPendingId]     = useState<string | null>(null);
+  const [pin,           setPin]           = useState('');
+  const [savingPin,     setSavingPin]     = useState(false);
+
+  async function submitPin() {
+    if (!pendingId || pin.length !== 6) {
+      toast.error('El PIN es de 6 dígitos');
+      return;
+    }
+    setSavingPin(true);
+    try {
+      await whatsappApi.registerAccount(pendingId, pin);
+      toast.success('Número registrado en la Cloud API');
+      onConnected();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Error al registrar el número');
+    } finally {
+      setSavingPin(false);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -396,7 +542,7 @@ function DirectTokenForm({ onConnected }: { onConnected: () => void }) {
     setLoading(true);
     setErrorMsg('');
     try {
-      await whatsappApi.connectDirect({
+      const res = await whatsappApi.connectDirect({
         accessToken: accessToken.trim(),
         phoneNumberId: phoneNumberId.trim(),
         wabaId: wabaId.trim() || undefined,
@@ -404,6 +550,15 @@ function DirectTokenForm({ onConnected }: { onConnected: () => void }) {
       setAccessToken('');
       setPhoneNumberId('');
       setWabaId('');
+
+      // La línea ya quedó guardada; solo falta el registro en la Cloud API.
+      if (res.needsPin) {
+        setPendingId(res.accountId);
+        return;
+      }
+      if (res.registerError) {
+        toast.error(`Línea guardada, pero el registro en la Cloud API falló: ${res.registerError}`);
+      }
       onConnected();
     } catch (err: any) {
       const msg = err?.response?.data?.message || err?.message || 'Error al conectar';
@@ -411,6 +566,56 @@ function DirectTokenForm({ onConnected }: { onConnected: () => void }) {
     } finally {
       setLoading(false);
     }
+  }
+
+  if (pendingId) {
+    return (
+      <div className="card p-6">
+        <div className="flex items-start gap-3 mb-4">
+          <div
+            className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+            style={{ background: '#FFFBEB', border: '1px solid #FDE68A' }}
+          >
+            <KeyRound className="w-5 h-5" style={{ color: '#D97706' }} />
+          </div>
+          <div>
+            <p className="font-semibold text-ink text-sm">Falta registrar el número</p>
+            <p className="text-xs text-ink-muted mt-0.5">
+              La línea ya quedó guardada, pero todavía no puede enviar mensajes. Poné el PIN de
+              6 dígitos de la verificación en dos pasos del número para terminar de registrarla
+              en la Cloud API.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <input
+            autoFocus
+            value={pin}
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            onKeyDown={(e) => { if (e.key === 'Enter') submitPin(); }}
+            placeholder="000000"
+            inputMode="numeric"
+            className="input font-mono text-sm w-32 tracking-widest text-center"
+          />
+          <button
+            onClick={submitPin}
+            disabled={savingPin || pin.length !== 6}
+            className="btn-primary flex items-center gap-1.5 text-xs px-3 py-1.5"
+          >
+            {savingPin ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <KeyRound className="w-3.5 h-3.5" />}
+            Registrar
+          </button>
+          <button onClick={onConnected} className="btn-ghost text-xs px-2.5 py-1.5">
+            Después
+          </button>
+        </div>
+        <p className="text-[11px] text-ink-subtle mt-3">
+          Si elegís hacerlo después, la línea queda en la lista marcada como pendiente y podés
+          registrarla desde ahí.
+        </p>
+      </div>
+    );
   }
 
   return (

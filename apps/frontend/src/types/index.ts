@@ -101,6 +101,13 @@ export interface WhatsAppAccount {
   /** Linea usada para plantillas y para conversaciones salientes sin linea elegida. */
   isDefault?: boolean;
   sortOrder?: number;
+  /**
+   * Estado del numero segun Meta (CONNECTED = registrada y operativa). Distinto de
+   * signupStatus, que es nuestro flujo de alta: una linea puede estar guardada pero
+   * sin registrar en la Cloud API, y en ese estado no puede enviar.
+   */
+  platformStatus?: string | null;
+  statusCheckedAt?: string | null;
   signupStatus: 'PENDING' | 'CONNECTED' | 'FAILED' | 'DISCONNECTED';
   isActive: boolean;
   webhookVerifyToken: string;

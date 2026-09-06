@@ -65,8 +65,12 @@ export class EmbeddedSignupService {
         `[EmbeddedSignup] Número ${phoneId} guardado pero registro pendiente`,
         registerResult,
       );
+      // Se cachea igual el estado: la linea queda visible en el panel como pendiente
+      // en vez de aparecer sin verificar.
+      await this.refreshPlatformStatus(account.id);
       return {
         ok: true,
+        accountId: account.id,
         displayPhone: account.phoneNumber,
         phoneNumberId: account.phoneNumberId,
         needsPin: registerResult.needsPin,
@@ -75,8 +79,10 @@ export class EmbeddedSignupService {
     }
 
     this.logger.log(`[EmbeddedSignup] Tenant ${tenantId} conectado — número ${displayPhone}`);
+    await this.refreshPlatformStatus(account.id);
     return {
       ok: true,
+      accountId: account.id,
       displayPhone: account.phoneNumber,
       phoneNumberId: account.phoneNumberId,
       needsPin: false,
@@ -105,12 +111,25 @@ export class EmbeddedSignupService {
       displayPhone,
     });
 
-    this.logger.log(`[ConnectDirect] Tenant ${tenantId} conectado — ${displayPhone || phoneNumberId}`);
+    // Igual que processSignup: guardar la linea no alcanza, hay que registrarla en la
+    // Cloud API o no puede enviar. Antes este camino se saltaba el registro (se hizo
+    // para el numero de prueba de Meta, que ya viene registrado) y con un numero real
+    // la linea quedaba muda sin ninguna senal en el panel.
+    const registerResult = await this.registerPhone(phoneNumberId, accessToken, cfg.metaApiVersion);
+    await this.refreshPlatformStatus(account.id);
+
+    this.logger.log(
+      `[ConnectDirect] Tenant ${tenantId} conectado — ${displayPhone || phoneNumberId}` +
+        (registerResult.ok ? '' : ' (pendiente de registro en la Cloud API)'),
+    );
 
     return {
       ok: true,
+      accountId: account.id,
       displayPhone: account.phoneNumber,
       phoneNumberId: account.phoneNumberId,
+      needsPin: registerResult.needsPin ?? false,
+      registerError: registerResult.needsPin ? null : registerResult.error ?? null,
     };
   }
 
@@ -135,12 +154,59 @@ export class EmbeddedSignupService {
       body: JSON.stringify({ messaging_product: 'whatsapp', pin }),
     });
 
-    const data = (await res.json()) as { success?: boolean; error?: { message: string } };
-    if (!res.ok) {
+    const data = (await res.json()) as { success?: boolean; error?: { message: string; code?: number } };
+    // 80007 = ya estaba registrado; no es un error desde el punto de vista del admin.
+    if (!res.ok && data.error?.code !== 80007) {
       throw new BadRequestException(data.error?.message ?? 'Error al registrar con PIN');
     }
 
-    return { ok: true };
+    const status = await this.refreshPlatformStatus(account.id);
+    return { ok: true, alreadyRegistered: data.error?.code === 80007, platformStatus: status };
+  }
+
+  /**
+   * Relee el estado del numero en Meta y lo cachea. Es la unica fuente de verdad sobre
+   * si la linea puede enviar: un numero registrado a mano en el panel de Meta figura
+   * como CONNECTED aunque el registro no haya pasado por aca.
+   */
+  async refreshPlatformStatus(accountId: string): Promise<string | null> {
+    const account = await this.prisma.whatsAppAccount.findUnique({ where: { id: accountId } });
+    if (!account) return null;
+    const cfg = await this.systemConfig.get();
+
+    let status: string | null = null;
+    try {
+      const res = await fetch(
+        `${this.base(cfg.metaApiVersion)}/${account.phoneNumberId}?fields=status,display_phone_number,verified_name,quality_rating&access_token=${account.accessToken}`,
+      );
+      const data = (await res.json()) as {
+        status?: string;
+        display_phone_number?: string;
+        verified_name?: string;
+        error?: { message: string };
+      };
+      if (data.error) throw new Error(data.error.message);
+      status = data.status ?? null;
+
+      await this.prisma.whatsAppAccount.update({
+        where: { id: accountId },
+        data: {
+          platformStatus: status,
+          statusCheckedAt: new Date(),
+          // Meta es la autoridad sobre el numero y el nombre verificado; el `label`
+          // operativo que puso el admin no se toca.
+          ...(data.display_phone_number && { phoneNumber: data.display_phone_number }),
+          ...(data.verified_name && { displayName: data.verified_name }),
+        },
+      });
+    } catch (err) {
+      this.logger.warn(`[PlatformStatus] No se pudo leer el estado del número ${account.phoneNumberId}`, err);
+      await this.prisma.whatsAppAccount.update({
+        where: { id: accountId },
+        data: { platformStatus: null, statusCheckedAt: new Date() },
+      });
+    }
+    return status;
   }
 
   // ─── Leer / desconectar ───────────────────────────────────────────────────

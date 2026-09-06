@@ -96,6 +96,13 @@ model WhatsAppAccount {
   // plantillas (se crean contra el WABA) y conversaciones salientes sin linea elegida.
   isDefault          Boolean              @default(false)
   sortOrder          Int                  @default(0)
+  // Estado del numero segun Meta (CONNECTED / PENDING / FLAGGED / RESTRICTED / ...).
+  // NO confundir con signupStatus, que describe nuestro flujo de alta: un numero puede
+  // estar guardado y con webhook suscrito (signupStatus CONNECTED) pero todavia sin
+  // registrar en la Cloud API, y en ese estado no puede enviar. Se cachea para poder
+  // pintar la lista sin pegarle a Meta 15 veces; statusCheckedAt dice que tan viejo es.
+  platformStatus     String?
+  statusCheckedAt    DateTime?
   webhookVerifyToken String               @default(cuid())
   isActive           Boolean              @default(true)
   signupStatus       EmbeddedSignupStatus @default(PENDING)

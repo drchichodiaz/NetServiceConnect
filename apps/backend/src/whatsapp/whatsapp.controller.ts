@@ -145,6 +145,26 @@ export class WhatsAppController {
     return this.accountsService.update(user.tenantId, id, dto);
   }
 
+  // Registra en la Cloud API una linea ya dada de alta. Sin esto, un numero agregado
+  // por token directo quedaba guardado pero sin poder enviar, y no habia forma de
+  // completarlo desde el panel.
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN' as any, 'SUPERVISOR' as any)
+  @Post('accounts/:id/register')
+  registerAccount(@CurrentUser() user: any, @Param('id') id: string, @Body() dto: RegisterPhoneWithPinDto) {
+    return this.signupService.registerPhoneWithPin(user.tenantId, dto.pin, id);
+  }
+
+  // Relee el estado real del numero en Meta — la fuente de verdad sobre si puede enviar.
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN' as any, 'SUPERVISOR' as any)
+  @Post('accounts/:id/check')
+  async checkAccount(@CurrentUser() user: any, @Param('id') id: string) {
+    await this.accountsService.findOneOrThrow(user.tenantId, id);
+    await this.signupService.refreshPlatformStatus(id);
+    return this.accountsService.listForTenant(user.tenantId);
+  }
+
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN' as any, 'SUPERVISOR' as any)
   @Post('accounts/:id/default')
