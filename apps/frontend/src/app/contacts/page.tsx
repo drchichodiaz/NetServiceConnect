@@ -16,6 +16,8 @@ import clsx from 'clsx';
 
 interface Template {
   id: string;
+  // WABA dueño de la plantilla — Meta las guarda por cuenta, no por tenant.
+  wabaId?: string | null;
   name: string;
   language: string;
   category: string;
@@ -440,9 +442,18 @@ function NewConversationModal({ contact, onClose, onSent }: {
   const [variables, setVariables] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
 
+  // Se piden solo las utilizables por la línea que va a enviar: una plantilla de otro
+  // WABA no existe para ese número y Meta la rechaza con 132001.
+  const [hasOtherWabaTemplates, setHasOtherWabaTemplates] = useState(false);
+
   useEffect(() => {
-    templatesApi.list()
-      .then((all: Template[]) => setTemplates(all.filter((t) => t.status === 'APPROVED')))
+    Promise.all([templatesApi.list({ sendable: true }), templatesApi.list()])
+      .then(([sendable, all]: [Template[], Template[]]) => {
+        const usable = sendable.filter((t) => t.status === 'APPROVED');
+        setTemplates(usable);
+        // Para poder explicar una lista vacía en vez de mostrarla pelada.
+        setHasOtherWabaTemplates(usable.length === 0 && all.some((t) => t.status === 'APPROVED'));
+      })
       .catch(() => toast.error('Error al cargar plantillas'))
       .finally(() => setLoadingTemplates(false));
   }, []);
@@ -508,9 +519,17 @@ function NewConversationModal({ contact, onClose, onSent }: {
               <Loader2 className="w-4 h-4 animate-spin" /> Cargando plantillas...
             </div>
           ) : templates.length === 0 ? (
-            <p className="text-sm text-ink-muted py-2">
-              No tienes plantillas aprobadas todavía. Crea una en Settings → Plantillas y espera su aprobación de Meta.
-            </p>
+            hasOtherWabaTemplates ? (
+              <p className="text-sm text-ink-muted py-2">
+                Tenés plantillas aprobadas, pero pertenecen a otra cuenta de WhatsApp Business y
+                no se pueden enviar desde esta línea. Meta guarda las plantillas por cuenta:
+                creá la misma plantilla en la cuenta de esta línea para poder usarla.
+              </p>
+            ) : (
+              <p className="text-sm text-ink-muted py-2">
+                No tienes plantillas aprobadas todavía. Crea una en Settings → Plantillas y espera su aprobación de Meta.
+              </p>
+            )
           ) : (
             <select value={templateId} onChange={(e) => handleSelectTemplate(e.target.value)} className="input w-full">
               <option value="">Elige una plantilla...</option>

@@ -1,11 +1,13 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { templatesApi } from '@/lib/api';
+import { templatesApi, whatsappApi } from '@/lib/api';
 import { FileText, Plus, Loader2, X, RefreshCw, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface Template {
   id: string;
+  // WABA dueño de la plantilla — Meta las guarda por cuenta, no por tenant.
+  wabaId?: string | null;
   name: string;
   language: string;
   category: string;
@@ -36,6 +38,21 @@ export default function TemplatesPage() {
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
 
   const [form, setForm] = useState({ name: '', language: 'es', category: 'UTILITY', bodyText: '' });
+  const [accounts, setAccounts] = useState<any[]>([]);
+
+  // Solo tiene sentido decir de que cuenta es una plantilla si hay mas de una: con un
+  // solo WABA la etiqueta seria la misma en todas las filas.
+  const wabaIds = Array.from(new Set(accounts.map((a) => a.wabaId).filter(Boolean)));
+  const multiWaba = wabaIds.length > 1;
+
+  function wabaLabel(wabaId?: string | null) {
+    if (!wabaId) return 'Cuenta desconocida';
+    const lines = accounts
+      .filter((a) => a.wabaId === wabaId)
+      .map((a) => a.label?.trim() || a.phoneNumber)
+      .filter(Boolean);
+    return lines.length > 0 ? lines.join(', ') : `WABA ${wabaId}`;
+  }
   const [exampleValues, setExampleValues] = useState<string[]>([]);
 
   const variableCount = new Set(form.bodyText.match(/\{\{\d+\}\}/g) ?? []).size;
@@ -53,6 +70,9 @@ export default function TemplatesPage() {
   function load() {
     setIsLoading(true);
     templatesApi.list().then(setTemplates).catch(() => toast.error('Error al cargar plantillas')).finally(() => setIsLoading(false));
+    // Para poder decir a que cuenta pertenece cada plantilla cuando el tenant tiene
+    // lineas en mas de un WABA — que es justo cuando una plantilla puede "no existir".
+    whatsappApi.listAccounts().then(setAccounts).catch(() => setAccounts([]));
   }
 
   useEffect(() => { load(); }, []);
@@ -199,7 +219,10 @@ export default function TemplatesPage() {
                           {ss.label}
                         </span>
                       </div>
-                      <p className="text-xs text-ink-subtle">{CATEGORY_LABELS[t.category] ?? t.category} · {t.language}</p>
+                      <p className="text-xs text-ink-subtle">
+                        {CATEGORY_LABELS[t.category] ?? t.category} · {t.language}
+                        {multiWaba && <> · {wabaLabel(t.wabaId)}</>}
+                      </p>
                       <p className="text-xs text-ink-muted mt-1 whitespace-pre-wrap">{t.bodyText}</p>
                       {t.status === 'REJECTED' && t.rejectReason && (
                         <p className="text-[11px] text-red-500 mt-1">Motivo: {t.rejectReason}</p>

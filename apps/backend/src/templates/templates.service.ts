@@ -32,10 +32,12 @@ export class TemplatesService {
       throw new BadRequestException('No active WhatsApp account found for this tenant');
     }
 
-    const existing = await this.prisma.messageTemplate.findUnique({
-      where: { tenantId_name_language: { tenantId, name: dto.name, language: dto.language } },
+    const existing = await this.prisma.messageTemplate.findFirst({
+      where: { tenantId, wabaId: account.wabaId, name: dto.name, language: dto.language },
     });
-    if (existing) throw new ConflictException('A template with this name/language already exists');
+    if (existing) {
+      throw new ConflictException('Ya existe una plantilla con ese nombre e idioma en esta cuenta de WhatsApp');
+    }
 
     const variableCount = this.countVariables(dto.bodyText);
 
@@ -74,6 +76,7 @@ export class TemplatesService {
     return this.prisma.messageTemplate.create({
       data: {
         tenantId,
+        wabaId: account.wabaId,
         name: dto.name,
         language: dto.language,
         category: dto.category,
@@ -85,9 +88,19 @@ export class TemplatesService {
     });
   }
 
-  findAll(tenantId: string) {
+  /**
+   * `sendableOnly` deja solo las plantillas del WABA de la linea por defecto — las
+   * unicas que un envio puede usar hoy. El selector de "iniciar conversacion" pide
+   * asi, para no ofrecer plantillas que Meta va a rechazar con 132001.
+   */
+  async findAll(tenantId: string, sendableOnly = false) {
+    const account = await this.accounts.getDefault(tenantId);
+
     return this.prisma.messageTemplate.findMany({
-      where: { tenantId },
+      where: {
+        tenantId,
+        ...(sendableOnly && { wabaId: account?.wabaId ?? '__sin_cuenta__' }),
+      },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -96,7 +109,7 @@ export class TemplatesService {
     const template = await this.findOneOrThrow(tenantId, id);
     if (!template.metaTemplateId) return template;
 
-    const account = await this.accounts.getDefault(tenantId);
+    const account = await this.accountForTemplate(tenantId, template.wabaId);
     if (!account) throw new BadRequestException('No active WhatsApp account found for this tenant');
 
     try {
@@ -117,7 +130,7 @@ export class TemplatesService {
 
   async remove(tenantId: string, id: string) {
     const template = await this.findOneOrThrow(tenantId, id);
-    const account = await this.accounts.getDefault(tenantId);
+    const account = await this.accountForTemplate(tenantId, template.wabaId);
 
     if (account && template.metaTemplateId) {
       try {
@@ -140,11 +153,37 @@ export class TemplatesService {
     return template;
   }
 
-  async findApprovedOrThrow(tenantId: string, id: string) {
+  /**
+   * `wabaId` es el de la linea desde la que se va a enviar. Meta guarda las plantillas
+   * por WABA: mandar una de otro WABA devuelve 132001 con un texto que no dice nada
+   * util, asi que se corta antes con un mensaje que explica que hacer.
+   */
+  async findApprovedOrThrow(tenantId: string, id: string, wabaId?: string) {
     const template = await this.findOneOrThrow(tenantId, id);
     if (template.status !== 'APPROVED') {
-      throw new BadRequestException('Template is not approved yet');
+      throw new BadRequestException('La plantilla todavía no está aprobada por Meta');
+    }
+    if (wabaId && template.wabaId && template.wabaId !== wabaId) {
+      throw new BadRequestException(
+        `La plantilla "${template.name}" pertenece a otra cuenta de WhatsApp Business (WABA ${template.wabaId}) ` +
+          'y no existe para la línea desde la que estás enviando. Creála también en esta cuenta para poder usarla.',
+      );
     }
     return template;
+  }
+
+  /**
+   * La cuenta cuyo WABA es dueño de la plantilla — no la linea por defecto. Alta,
+   * consulta de estado y borrado tienen que pegarle al WABA correcto o Meta responde
+   * sobre una plantilla que no es.
+   */
+  private async accountForTemplate(tenantId: string, wabaId: string | null) {
+    if (wabaId) {
+      const owner = await this.prisma.whatsAppAccount.findFirst({
+        where: { tenantId, wabaId, isActive: true },
+      });
+      if (owner) return owner;
+    }
+    return this.accounts.getDefault(tenantId);
   }
 }

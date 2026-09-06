@@ -220,7 +220,11 @@ export const tenantsApi = {
 // ─── Message Templates ─────────────────────────────────────────────────────────
 
 export const templatesApi = {
-  list: () => api.get('/whatsapp/templates').then((r) => r.data),
+  // sendable=true: solo las plantillas del WABA de la linea que envia. Meta guarda las
+  // plantillas por WABA, asi que ofrecer una de otro WABA termina en error 132001.
+  list: (opts?: { sendable?: boolean }) =>
+    api.get('/whatsapp/templates', { params: opts?.sendable ? { sendable: 'true' } : undefined })
+      .then((r) => r.data),
   create: (data: { name: string; language: string; category: string; bodyText: string; exampleValues?: string[] }) =>
     api.post('/whatsapp/templates', data).then((r) => r.data),
   refresh: (id: string) => api.patch(`/whatsapp/templates/${id}/refresh`).then((r) => r.data),

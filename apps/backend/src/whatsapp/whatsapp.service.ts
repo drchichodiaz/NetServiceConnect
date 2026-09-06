@@ -210,7 +210,8 @@ export class WhatsAppService {
       throw new BadRequestException('No active WhatsApp account found for this tenant');
     }
 
-    const template = await this.templatesService.findApprovedOrThrow(tenantId, dto.templateId);
+    // El WABA de la línea que envía: una plantilla de otro WABA no existe para este número.
+    const template = await this.templatesService.findApprovedOrThrow(tenantId, dto.templateId, account.wabaId);
 
     let contact: { id: string; name: string | null; phone: string };
     if (dto.contactId) {
@@ -278,7 +279,18 @@ export class WhatsAppService {
       externalId = data?.messages?.[0]?.id;
     } catch (err) {
       this.logger.error('Failed to send template message', err?.response?.data);
-      throw new BadRequestException(err?.response?.data?.error?.message || 'Failed to send template message');
+      const metaError = err?.response?.data?.error;
+      // 132001: Meta no encontró la plantilla con ese nombre + idioma para el WABA de
+      // este número. El texto crudo ("template name does not exist in the translation")
+      // no dice cuál de las dos cosas falló, así que se explica acá.
+      if (metaError?.code === 132001) {
+        throw new BadRequestException(
+          `Meta no encontró la plantilla "${template.name}" en el idioma "${template.language}" para esta línea. ` +
+            'Verificá que el idioma sea exactamente el aprobado en Meta (es, es_AR, en_US… no son intercambiables) ' +
+            'y que la plantilla exista en la cuenta de WhatsApp Business de esta línea.',
+        );
+      }
+      throw new BadRequestException(metaError?.message || 'Failed to send template message');
     }
 
     const [message] = await Promise.all([

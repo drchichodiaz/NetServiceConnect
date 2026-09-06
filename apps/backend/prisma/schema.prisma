@@ -335,6 +335,11 @@ model QuickReply {
 model MessageTemplate {
   id             String   @id @default(cuid())
   tenantId       String
+  // WABA donde vive la plantilla. Meta las guarda por WABA, no por numero: una
+  // plantilla creada en un WABA no existe para un numero de otro, y enviarla da
+  // el error 132001 ("template name does not exist in the translation"). Un tenant
+  // con lineas en varios WABA necesita la misma plantilla en cada uno.
+  wabaId         String?
   name           String
   language       String   @default("es")
   category       String   // MARKETING | UTILITY | AUTHENTICATION
@@ -348,7 +353,9 @@ model MessageTemplate {
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  @@unique([tenantId, name, language])
+  // El nombre solo es unico dentro de su WABA — el mismo nombre puede (y suele
+  // necesitar) existir en cada WABA del tenant.
+  @@unique([tenantId, wabaId, name, language])
   @@index([tenantId])
 }
 

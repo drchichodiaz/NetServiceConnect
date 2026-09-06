@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Patch, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Patch, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { TemplatesService } from './templates.service';
 import { CreateTemplateDto } from './dto/create-template.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -17,9 +17,11 @@ export class TemplatesController {
     return this.service.create(user.tenantId, dto);
   }
 
+  // ?sendable=true devuelve solo las plantillas utilizables por la linea que envia —
+  // es lo que pide el selector de "iniciar conversacion".
   @Get()
-  findAll(@CurrentUser() user: any) {
-    return this.service.findAll(user.tenantId);
+  findAll(@CurrentUser() user: any, @Query('sendable') sendable?: string) {
+    return this.service.findAll(user.tenantId, sendable === 'true');
   }
 
   @Patch(':id/refresh')
