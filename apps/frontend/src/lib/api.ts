@@ -193,6 +193,10 @@ export const statsApi = {
 
 export const systemConfigApi = {
   get: () => api.get('/system-config').then((r) => r.data),
+  // Solo el App ID / Config ID de Meta — lo que necesita el Embedded Signup. El GET
+  // completo es superadmin, asi que un admin de tenant no puede usarlo.
+  getMetaApp: (): Promise<{ metaAppId: string; metaConfigId: string; metaApiVersion: string }> =>
+    api.get('/system-config/meta-app').then((r) => r.data),
   update: (data: {
     metaAppId?: string;
     metaConfigId?: string;

@@ -25,13 +25,19 @@ export default function EmbeddedSignup({ onConnected }: Props) {
   const [metaAppId,    setMetaAppId]    = useState('');
   const [metaConfigId, setMetaConfigId] = useState('');
   const [configLoaded, setConfigLoaded] = useState(false);
+  // Distingue "la plataforma no tiene App ID" de "no pude leer la config": antes las
+  // dos terminaban en el mismo cartel, y el 403 del endpoint de superadmin se leia
+  // como si faltara configurar algo que en realidad ya estaba puesto.
+  const [configError, setConfigError] = useState(false);
 
   useEffect(() => {
-    systemConfigApi.get().then((cfg: any) => {
-      setMetaAppId(cfg.metaAppId || '');
-      setMetaConfigId(cfg.metaConfigId || cfg.metaAppId || '');
-      setConfigLoaded(true);
-    }).catch(() => setConfigLoaded(true));
+    systemConfigApi.getMetaApp()
+      .then((cfg) => {
+        setMetaAppId(cfg.metaAppId || '');
+        setMetaConfigId(cfg.metaConfigId || cfg.metaAppId || '');
+      })
+      .catch(() => setConfigError(true))
+      .finally(() => setConfigLoaded(true));
   }, []);
 
   const sessionInfoRef = useRef<SessionInfo>({});
@@ -285,9 +291,18 @@ export default function EmbeddedSignup({ onConnected }: Props) {
         </button>
       )}
 
-      {configLoaded && !metaAppId && (
+      {configLoaded && configError && (
         <p className="text-xs text-red-500 text-center mt-3">
-          ⚠️ Configura el Meta App ID en <strong>Configuración del sistema</strong>
+          ⚠️ No se pudo leer la configuración de la plataforma. Reintentá en unos segundos
+          o avisale al administrador.
+        </p>
+      )}
+
+      {configLoaded && !configError && !metaAppId && (
+        <p className="text-xs text-red-500 text-center mt-3">
+          ⚠️ La plataforma todavía no tiene configurado el Meta App ID, así que este método
+          no está disponible. Pedíselo al administrador de {BRAND.name}, o conectá el número
+          con la pestaña <strong>Token directo</strong>.
         </p>
       )}
 

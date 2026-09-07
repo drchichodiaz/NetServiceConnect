@@ -63,6 +63,22 @@ export class SystemConfigService {
     };
   }
 
+  /**
+   * Lo minimo que necesita el Embedded Signup para abrir el popup de Meta: el App ID
+   * y el Config ID. NO son secretos — viajan en la URL del login de Facebook, cualquiera
+   * que abra el popup los ve. El App Secret y el verify token si lo son y siguen
+   * saliendo solo por getForFrontend(), que es superadmin.
+   */
+  async getPublicMetaConfig() {
+    const record = await this.prisma.systemConfig.findUnique({ where: { id: '1' } });
+    const cfg = await this.get();
+    return {
+      metaAppId:      cfg.metaAppId,
+      metaConfigId:   record?.metaConfigId || '',
+      metaApiVersion: cfg.metaApiVersion,
+    };
+  }
+
   async update(data: UpdateSystemConfigDto) {
     const payload: any = {};
     if (data.metaAppId       !== undefined && data.metaAppId       !== '') payload.metaAppId       = data.metaAppId;
