@@ -207,8 +207,16 @@ export class WhatsAppService {
       ? await this.accounts.findActiveOrThrow(tenantId, dto.whatsappAccountId)
       : await this.accounts.getDefault(tenantId);
     if (!account) {
-      throw new BadRequestException('No active WhatsApp account found for this tenant');
+      this.logger.warn(`[Envio bloqueado] Tenant ${tenantId} no tiene ninguna línea de WhatsApp activa`);
+      throw new BadRequestException('No hay ninguna línea de WhatsApp activa en esta empresa');
     }
+
+    // Deja constancia de cada intento ANTES de que pueda fallar: sin esto, un envio
+    // rechazado por nuestras propias validaciones no aparecia en el log y era
+    // indistinguible de "nunca se intento".
+    this.logger.log(
+      `[start-conversation] tenant=${tenantId} linea=${account.phoneNumberId} waba=${account.wabaId} plantilla=${dto.templateId}`,
+    );
 
     // El WABA de la línea que envía: una plantilla de otro WABA no existe para este número.
     const template = await this.templatesService.findApprovedOrThrow(tenantId, dto.templateId, account.wabaId);

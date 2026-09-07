@@ -179,10 +179,21 @@ export class TemplatesService {
    */
   async findApprovedOrThrow(tenantId: string, id: string, wabaId?: string) {
     const template = await this.findOneOrThrow(tenantId, id);
+
+    // Estos rechazos se loguean igual que los errores de Meta: si no, un envio
+    // frenado aca no deja ningun rastro en el log y desde el server parece que
+    // nunca se intento enviar nada.
     if (template.status !== 'APPROVED') {
+      this.logger.warn(
+        `[Envio bloqueado] Plantilla "${template.name}" (${template.id}) en estado ${template.status}, no APPROVED`,
+      );
       throw new BadRequestException('La plantilla todavía no está aprobada por Meta');
     }
     if (wabaId && template.wabaId && template.wabaId !== wabaId) {
+      this.logger.warn(
+        `[Envio bloqueado] Plantilla "${template.name}" (${template.id}) pertenece al WABA ${template.wabaId} ` +
+          `pero se intento enviar desde una linea del WABA ${wabaId}`,
+      );
       throw new BadRequestException(
         `La plantilla "${template.name}" pertenece a otra cuenta de WhatsApp Business (WABA ${template.wabaId}) ` +
           'y no existe para la línea desde la que estás enviando. Creála también en esta cuenta para poder usarla.',
