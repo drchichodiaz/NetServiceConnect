@@ -1,6 +1,7 @@
 'use client';
+import { useState } from 'react';
 import { format } from 'date-fns';
-import { Check, CheckCheck, Clock, AlertCircle, Image, Mic, FileText, Loader2, Download, Bot } from 'lucide-react';
+import { Check, CheckCheck, Clock, AlertCircle, Image, Mic, FileText, Loader2, Download, Bot, ChevronDown, ExternalLink } from 'lucide-react';
 import { Message } from '@/types';
 import { useAuthedMedia } from '@/hooks/useAuthedMedia';
 import clsx from 'clsx';
@@ -113,6 +114,85 @@ function MediaContent({ message }: { message: Message }) {
   );
 }
 
+// Meta mete en el motivo una URL larguisima al billing hub. Se muestra como link en
+// vez de texto crudo: la URL no aporta nada legible y desbordaba la burbuja. Solo se
+// convierte en link si es https y de un dominio de Meta — el motivo viene de un
+// webhook, y no queremos renderizar como link cualquier cosa que llegue de afuera.
+const META_HOSTS = /(^|\.)(facebook|meta|whatsapp)\.com$/i;
+
+function splitFailureReason(reason: string): { text: string; url?: string } {
+  const match = reason.match(/https?:\/\/\S+/);
+  if (!match) return { text: reason };
+
+  let parsed: URL;
+  try {
+    parsed = new URL(match[0]);
+  } catch {
+    return { text: reason };
+  }
+  if (parsed.protocol !== 'https:' || !META_HOSTS.test(parsed.hostname)) return { text: reason };
+
+  const text = reason
+    .replace(/\s*Visit\s+https?:\/\/\S+/i, '')
+    .replace(/\s*https?:\/\/\S+/, '')
+    .replace(/\s*to resolve this issue\.?\s*$/i, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+  return { text, url: match[0] };
+}
+
+/**
+ * Colapsado por defecto: el motivo de Meta es un parrafo largo y tenerlo siempre
+ * abierto tapaba el hilo. La linea de "No se entregó" sigue visible — el fallo no
+ * se esconde, solo su detalle.
+ */
+function FailureNotice({ reason }: { reason?: string | null }) {
+  const [open, setOpen] = useState(false);
+  const { text, url } = splitFailureReason(reason ?? '');
+
+  return (
+    <div className="mt-1.5">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 text-[11px] font-semibold"
+        style={{ color: '#B91C1C' }}
+      >
+        <AlertCircle className="w-3 h-3 shrink-0" />
+        No se entregó
+        <ChevronDown className={clsx('w-3 h-3 transition-transform', open && 'rotate-180')} />
+      </button>
+
+      {open && (
+        <div
+          className="mt-1 rounded-lg px-2.5 py-1.5 text-[11px] leading-snug"
+          style={{
+            background: '#FEF2F2',
+            border: '1px solid #FECACA',
+            color: '#B91C1C',
+            // La URL del billing hub es un token unico larguisimo: sin esto estira
+            // la burbuja y se sale de la pantalla.
+            overflowWrap: 'anywhere',
+          }}
+        >
+          {text || 'Meta no informó el motivo.'}
+          {url && (
+            <a
+              href={url}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="flex items-center gap-1 mt-1.5 font-semibold underline"
+            >
+              Resolver en Meta
+              <ExternalLink className="w-3 h-3 shrink-0" />
+            </a>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function MessageBubble({ message }: Props) {
   const isOut = message.direction === 'OUTBOUND';
   // Los mensajes que manda el bot son OUTBOUND pero sin senderId (a diferencia de
@@ -155,13 +235,7 @@ export default function MessageBubble({ message }: Props) {
         )}
 
         {isOut && message.status === 'FAILED' && (
-          <div
-            className="mt-1.5 rounded-lg px-2.5 py-1.5 text-[11px] leading-snug"
-            style={{ background: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C' }}
-          >
-            <strong>No se entregó.</strong>{' '}
-            {message.failureReason || 'Meta no informó el motivo.'}
-          </div>
+          <FailureNotice reason={message.failureReason} />
         )}
 
         <div className={clsx('flex items-center gap-1 mt-1', isOut ? 'justify-end' : 'justify-end')}>
