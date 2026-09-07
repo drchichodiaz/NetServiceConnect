@@ -78,7 +78,7 @@ export function useRealtimeEvents() {
         }
 
         if (data.type === 'message_status') {
-          store.updateMessageStatus(data.payload.externalId, data.payload.status);
+          store.updateMessageStatus(data.payload.externalId, data.payload.status, data.payload.failureReason);
         }
 
         if (data.type === 'conversation_updated') {

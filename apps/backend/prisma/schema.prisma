@@ -231,6 +231,11 @@ model Message {
   mediaType      String?
   mediaMimeType  String?
   status         MessageStatus    @default(SENT)
+  // Por que fallo la entrega, segun el webhook de estado de Meta (ej: "131049:
+  // This message was not delivered to maintain healthy ecosystem engagement").
+  // Meta acepta el mensaje y recien despues avisa que no lo entrego, asi que sin
+  // esto un mensaje fallido era un icono rojo sin explicacion posible.
+  failureReason  String?
   externalId     String?
   rawPayload     Json?
   createdAt      DateTime         @default(now())

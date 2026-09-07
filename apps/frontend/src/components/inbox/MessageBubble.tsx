@@ -7,11 +7,20 @@ import clsx from 'clsx';
 
 interface Props { message: Message; }
 
-function DeliveryIcon({ status }: { status: string }) {
+function DeliveryIcon({ status, failureReason }: { status: string; failureReason?: string | null }) {
   if (status === 'READ')      return <CheckCheck className="w-3.5 h-3.5" style={{ color: '#60A5FA' }} />;
   if (status === 'DELIVERED') return <CheckCheck className="w-3.5 h-3.5 opacity-50" />;
   if (status === 'SENT')      return <Check className="w-3.5 h-3.5 opacity-50" />;
-  if (status === 'FAILED')    return <AlertCircle className="w-3.5 h-3.5" style={{ color: '#F87171' }} />;
+  if (status === 'FAILED')
+    return (
+      <AlertCircle
+        className="w-3.5 h-3.5"
+        style={{ color: '#F87171' }}
+        // Meta manda el motivo en el webhook de estado; sin esto el icono rojo no
+        // decia nada y el fallo era imposible de diagnosticar desde el inbox.
+        aria-label={failureReason ? `No entregado — ${failureReason}` : 'No entregado'}
+      />
+    );
   return <Clock className="w-3.5 h-3.5 opacity-30" />;
 }
 
@@ -145,11 +154,21 @@ export default function MessageBubble({ message }: Props) {
           <p className="whitespace-pre-wrap break-words">{message.body}</p>
         )}
 
+        {isOut && message.status === 'FAILED' && (
+          <div
+            className="mt-1.5 rounded-lg px-2.5 py-1.5 text-[11px] leading-snug"
+            style={{ background: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C' }}
+          >
+            <strong>No se entregó.</strong>{' '}
+            {message.failureReason || 'Meta no informó el motivo.'}
+          </div>
+        )}
+
         <div className={clsx('flex items-center gap-1 mt-1', isOut ? 'justify-end' : 'justify-end')}>
           <span className="text-[11px] opacity-60">
             {format(new Date(message.createdAt), 'HH:mm')}
           </span>
-          {isOut && <DeliveryIcon status={message.status} />}
+          {isOut && <DeliveryIcon status={message.status} failureReason={message.failureReason} />}
         </div>
       </div>
     </div>

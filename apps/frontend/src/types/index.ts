@@ -75,6 +75,8 @@ export interface Message {
   mediaUrl?: string;
   mediaType?: string;
   status: MessageStatus;
+  /** Motivo del fallo de entrega segun Meta, solo cuando status es FAILED. */
+  failureReason?: string | null;
   externalId?: string;
   createdAt: string;
 }

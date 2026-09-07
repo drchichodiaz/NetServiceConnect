@@ -43,7 +43,7 @@ interface InboxStore {
   updateConversation: (id: string, data: any) => Promise<void>;
   addMessage: (message: Message) => void;
   addNote: (note: InternalNote) => void;
-  updateMessageStatus: (externalId: string, status: string) => void;
+  updateMessageStatus: (externalId: string, status: string, failureReason?: string | null) => void;
   updateConversationLastMessage: (opts: {
     conversationId: string;
     lastMessageText: string;
@@ -144,10 +144,12 @@ export const useInboxStore = create<InboxStore>((set, get) => ({
     set((state) => ({ notes: [...state.notes, note] }));
   },
 
-  updateMessageStatus: (externalId, status) => {
+  updateMessageStatus: (externalId, status, failureReason) => {
     set((state) => ({
       messages: state.messages.map((m) =>
-        m.externalId === externalId ? { ...m, status: status as any } : m,
+        m.externalId === externalId
+          ? { ...m, status: status as any, ...(failureReason !== undefined && { failureReason }) }
+          : m,
       ),
     }));
   },

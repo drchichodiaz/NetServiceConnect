@@ -68,17 +68,33 @@ export class WebhookService {
       const mapped = statusMap[status.status];
       if (!mapped) continue;
 
+      // Meta acepta el mensaje (devuelve un wamid) y recien despues avisa por webhook
+      // que no lo entrego. El motivo viene aca y antes se descartaba, asi que un envio
+      // fallido era indistinguible de uno que nunca salio.
+      const failureReason = mapped === 'FAILED' ? this.extractFailureReason(status) : null;
+      if (failureReason) {
+        this.logger.error(`Entrega fallida (${status.id}) para ${status.recipient_id}: ${failureReason}`);
+      }
+
       await this.prisma.message.updateMany({
         where: { externalId: status.id, tenantId },
-        data: { status: mapped as any },
+        data: { status: mapped as any, ...(failureReason && { failureReason }) },
       });
 
       this.eventBus.publish({
         type: 'message_status',
         tenantId,
-        payload: { externalId: status.id, status: mapped },
+        payload: { externalId: status.id, status: mapped, failureReason },
       });
     }
+  }
+
+  /** "131049: Title — detalle". Meta manda el motivo en statuses[].errors[0]. */
+  private extractFailureReason(status: any): string | null {
+    const error = status?.errors?.[0];
+    if (!error) return null;
+    const details = error.error_data?.details || error.message || error.title;
+    return [error.code, details].filter(Boolean).join(': ') || null;
   }
 
   private async handleInboundMessage(tenantId: string, accountId: string, accessToken: string, msg: any, contactInfo: any) {
