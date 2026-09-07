@@ -82,7 +82,9 @@ export function useRealtimeEvents() {
         }
 
         if (data.type === 'conversation_updated') {
-          store.loadConversations();
+          // Silencioso: estos eventos llegan seguido (cualquier agente que cierre o
+          // reasigne un chat dispara uno) y el spinner haria parpadear la lista entera.
+          store.loadConversations({ silent: true });
         }
       } catch {
         // JSON inválido — ignorar

@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { EventBusService } from '../events/event-bus.service';
 import { UpdateConversationDto } from './dto/update-conversation.dto';
 
 @Injectable()
 export class ConversationsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private eventBus: EventBusService,
+  ) {}
 
   async findAll(
     tenantId: string,
@@ -113,6 +117,11 @@ export class ConversationsService {
         });
       }
     });
+
+    // Los cambios del bot ya emitian este evento, los manuales no: si un agente
+    // cerraba o reasignaba una conversacion, el inbox del resto seguia mostrandola
+    // como estaba hasta que recargaran a mano.
+    this.eventBus.publish({ type: 'conversation_updated', tenantId, payload: { conversationId: id } });
 
     return this.findOne(tenantId, id);
   }

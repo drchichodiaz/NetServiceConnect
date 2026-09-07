@@ -55,7 +55,7 @@ export default function ConversationList() {
             <h1 className="font-semibold text-ink text-sm tracking-tight">Conversaciones</h1>
           </div>
           <button
-            onClick={loadConversations}
+            onClick={() => loadConversations()}
             className="btn-ghost w-7 h-7 p-0"
             title="Actualizar"
           >
