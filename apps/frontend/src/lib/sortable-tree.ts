@@ -9,6 +9,8 @@ export interface MenuNode {
   subtitle: string | null;
   bodyText: string | null;
   promptText: string | null;
+  /** Config del nodo ORDER_LOOKUP (ver LookupConfig en lib/api). */
+  config?: Record<string, any> | null;
   active: boolean;
   sortOrder: number;
 }

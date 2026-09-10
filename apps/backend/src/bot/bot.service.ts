@@ -6,6 +6,7 @@ import { EventBusService } from '../events/event-bus.service';
 import { AssignmentService } from '../whatsapp/assignment.service';
 import { WhatsAppAccountsService, WhatsAppAccountCreds } from '../whatsapp/accounts.service';
 import { OpenAiClientService } from '../common/openai-client.service';
+import { LookupService, LookupConfig } from '../common/lookup.service';
 
 type MenuNodeType = 'MENU' | 'TEXT' | 'ORDER_LOOKUP' | 'AGENT' | 'AI_CHAT';
 
@@ -17,10 +18,16 @@ interface MenuNode {
   subtitle: string | null;
   bodyText: string | null;
   promptText: string | null;
+  // Config del nodo ORDER_LOOKUP (URL del sistema externo, plantilla de respuesta...).
+  config?: unknown;
 }
 
 interface BotContext {
   nodeId: string | null;
+  // Nodo ORDER_LOOKUP que pidio el dato. Se guarda aparte de nodeId porque ese apunta
+  // al menu del que colgaba, y al llegar la respuesta del cliente hay que volver a
+  // este nodo para saber a que sistema externo consultar.
+  lookupNodeId: string | null;
   retryCount: number;
   // Desde cuándo está activa la sesión de chat de IA actual (ISO). Acota el
   // historial que se le manda a OpenAI para no incluir ruido de navegación
@@ -65,6 +72,7 @@ export class BotService {
     private assignmentService: AssignmentService,
     private accounts: WhatsAppAccountsService,
     private openaiClient: OpenAiClientService,
+    private lookup: LookupService,
     config: ConfigService,
   ) {
     this.apiVersion = config.get('META_API_VERSION') || 'v19.0';
@@ -232,7 +240,7 @@ export class BotService {
       case 'TEXT':
         return this.sendLeafText(tenantId, conversationId, phone, account, node);
       case 'ORDER_LOOKUP':
-        return this.askOrderNumber(tenantId, conversationId, phone, account);
+        return this.askOrderNumber(tenantId, conversationId, phone, account, node);
       case 'AGENT':
         await this.sendText(tenantId, conversationId, phone, account, 'Perfecto, ya te conecto con un agente.');
         return this.handoffToHuman(tenantId, conversationId, 'menu_selection');
@@ -528,11 +536,21 @@ ${knowledgeBase}
 
   // ─── Consultar orden (sin cambios respecto al árbol configurable) ──────────
 
-  private async askOrderNumber(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds) {
-    const sent = await this.sendText(tenantId, conversationId, phone, account, 'Dime el número de tu orden y en un momento te ayudamos.');
+  private async askOrderNumber(
+    tenantId: string,
+    conversationId: string,
+    phone: string,
+    account: WhatsAppAccountCreds,
+    node: MenuNode,
+  ) {
+    // El prompt lo escribe el admin en el nodo: este tipo de nodo ya no es solo
+    // "numero de orden", sirve igual para un expediente o una factura.
+    const prompt = node.promptText?.trim() || 'Dime el número de tu orden y en un momento te ayudamos.';
+    const sent = await this.sendText(tenantId, conversationId, phone, account, prompt);
     if (!sent) {
       return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
     }
+    await this.setContext(conversationId, { lookupNodeId: node.id, retryCount: 0 });
     await this.prisma.conversation.update({ where: { id: conversationId }, data: { botState: 'AWAITING_ORDER_NUMBER' } });
   }
 
@@ -543,28 +561,86 @@ ${knowledgeBase}
     msg: any,
     account: WhatsAppAccountCreds,
   ) {
-    const orderNumber = msg.text?.body?.trim() || '(no informado)';
+    const orderNumber = msg.text?.body?.trim() || '';
+    const { lookupNodeId } = await this.getContext(conversationId);
+    const node = lookupNodeId ? await this.resolveNode(tenantId, lookupNodeId) : null;
+    const config = (node?.config ?? null) as LookupConfig | null;
 
     await this.prisma.auditLog.create({
       data: {
         tenantId,
         conversationId,
         action: 'conversation.order_lookup_requested',
-        metadata: { orderNumber },
+        metadata: { orderNumber: orderNumber || '(no informado)', nodeId: lookupNodeId },
       },
     });
 
-    // Todavía no hay ninguna API de pedidos conectada para ningún tenant — siempre
-    // cae al fallback humano. Cuando el nodo ORDER_LOOKUP tenga una config.apiUrl,
-    // acá es donde se debería intentar la consulta real antes de derivar.
-    await this.sendText(
-      tenantId,
-      conversationId,
-      phone,
-      account,
-      'Por ahora no puedo consultar tu orden automáticamente. Ya te paso con un agente que te va a ayudar con el número que me pasaste.',
-    );
-    await this.handoffToHuman(tenantId, conversationId, 'order_lookup_fallback');
+    // Sin URL o sin plantilla el nodo no puede responder solo — es el comportamiento
+    // que tenia siempre, ahora acotado al caso de un nodo sin configurar.
+    if (!config || !this.lookup.isConfigured(config)) {
+      await this.sendText(
+        tenantId,
+        conversationId,
+        phone,
+        account,
+        'Por ahora no puedo consultar eso automáticamente. Ya te paso con un agente que te va a ayudar con el dato que me pasaste.',
+      );
+      return this.handoffToHuman(tenantId, conversationId, 'order_lookup_not_configured');
+    }
+
+    if (!orderNumber) {
+      return this.trackUnrecognizedReply(tenantId, conversationId, phone, account, msg, async () => {
+        await this.sendText(tenantId, conversationId, phone, account, 'No entendí. Escribime solo el número, por favor.');
+      });
+    }
+
+    const result = await this.lookup.run(config, orderNumber);
+
+    // Cae el sistema externo o tarda: no se le muestra el error tecnico al cliente,
+    // se lo pasa a un humano que puede resolverlo igual.
+    if (!result.ok) {
+      await this.prisma.auditLog.create({
+        data: {
+          tenantId,
+          conversationId,
+          action: 'conversation.order_lookup_failed',
+          metadata: { orderNumber, error: result.error, status: result.status },
+        },
+      });
+      await this.sendText(
+        tenantId,
+        conversationId,
+        phone,
+        account,
+        'No pude consultar el sistema en este momento. Ya te paso con un agente para que te ayude.',
+      );
+      return this.handoffToHuman(tenantId, conversationId, 'order_lookup_error');
+    }
+
+    // No existe: se deja reintentar (puede haberse equivocado tipeando) hasta el tope
+    // de reintentos, que ya deriva a un humano solo.
+    if (result.notFound) {
+      await this.prisma.auditLog.create({
+        data: { tenantId, conversationId, action: 'conversation.order_lookup_not_found', metadata: { orderNumber } },
+      });
+      return this.trackUnrecognizedReply(tenantId, conversationId, phone, account, msg, async () => {
+        await this.sendText(tenantId, conversationId, phone, account, this.lookup.renderNotFound(config, orderNumber));
+      });
+    }
+
+    const sent = await this.sendText(tenantId, conversationId, phone, account, result.rendered || '');
+    if (!sent) {
+      return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
+    }
+
+    await this.prisma.auditLog.create({
+      data: { tenantId, conversationId, action: 'conversation.order_lookup_resolved', metadata: { orderNumber } },
+    });
+
+    // Sigue el flujo normal ("¿necesitas algo más?"), igual que una hoja de texto:
+    // la consulta resuelta no tiene por que cortar la conversacion.
+    await this.resetRetryCount(conversationId);
+    return this.sendPostReplyPrompt(tenantId, conversationId, phone, account, node?.parentId ?? null);
   }
 
   // ─── Handoff a humano (idempotente) ────────────────────────────────────────
@@ -647,7 +723,12 @@ ${knowledgeBase}
   private async getContext(conversationId: string): Promise<BotContext> {
     const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId }, select: { botContext: true } });
     const ctx = (conv?.botContext as Partial<BotContext>) || {};
-    return { nodeId: ctx.nodeId ?? null, retryCount: ctx.retryCount ?? 0, aiSince: ctx.aiSince ?? null };
+    return {
+      nodeId: ctx.nodeId ?? null,
+      lookupNodeId: ctx.lookupNodeId ?? null,
+      retryCount: ctx.retryCount ?? 0,
+      aiSince: ctx.aiSince ?? null,
+    };
   }
 
   /**

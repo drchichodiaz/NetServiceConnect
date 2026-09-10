@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { LookupService, LookupConfig } from '../common/lookup.service';
 
 const NODE_TYPES = ['MENU', 'TEXT', 'ORDER_LOOKUP', 'AGENT', 'AI_CHAT'] as const;
 type NodeType = (typeof NODE_TYPES)[number];
@@ -30,7 +31,34 @@ export interface ReparentDto {
 
 @Injectable()
 export class MenuNodesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private lookup: LookupService,
+  ) {}
+
+  /**
+   * Corre la consulta del nodo con un valor de prueba y devuelve tanto el JSON crudo
+   * como el mensaje ya armado. Sin esto, configurar la plantilla seria a ciegas:
+   * habria que probar cada cambio mandandose un WhatsApp a uno mismo.
+   */
+  async testLookup(tenantId: string, id: string, value: string) {
+    const node = await this.prisma.tenantMenuNode.findFirst({ where: { id, tenantId } });
+    if (!node) throw new NotFoundException('Opción no encontrada');
+
+    const config = (node.config ?? {}) as LookupConfig;
+    if (!config.apiUrl?.trim()) {
+      throw new BadRequestException('Configurá primero la URL del sistema externo');
+    }
+
+    const result = await this.lookup.run(config, value?.trim() || '');
+    return {
+      ...result,
+      // Si no hay plantilla todavia, igual sirve ver que devolvio la API para poder
+      // escribirla mirando los campos reales.
+      rendered: result.rendered,
+      notFoundText: result.notFound ? this.lookup.renderNotFound(config, value?.trim() || '') : null,
+    };
+  }
 
   getTree(tenantId: string) {
     return this.prisma.tenantMenuNode.findMany({

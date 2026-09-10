@@ -26,6 +26,12 @@ export class MenuNodesController {
     return this.service.update(user.tenantId, id, dto);
   }
 
+  // Prueba la consulta al sistema externo sin tener que mandarse un WhatsApp.
+  @Post(':id/test-lookup')
+  testLookup(@CurrentUser() user: any, @Param('id') id: string, @Body() body: { value?: string }) {
+    return this.service.testLookup(user.tenantId, id, body?.value ?? '');
+  }
+
   @Patch(':id/reparent')
   reparent(@CurrentUser() user: any, @Param('id') id: string, @Body() dto: ReparentDto) {
     return this.service.reparent(user.tenantId, id, dto);

@@ -171,6 +171,27 @@ export interface MenuNodeInput {
   bodyText?: string;
   promptText?: string;
   active?: boolean;
+  /** Config del nodo ORDER_LOOKUP: URL del sistema externo, plantilla de respuesta, etc. */
+  config?: LookupConfig | null;
+}
+
+export interface LookupConfig {
+  apiUrl?: string;
+  method?: string;
+  headers?: Record<string, string>;
+  responseTemplate?: string;
+  notFoundText?: string;
+  timeoutMs?: number;
+}
+
+export interface LookupTestResult {
+  ok: boolean;
+  notFound: boolean;
+  rendered: string | null;
+  status: number | null;
+  raw: unknown;
+  error: string | null;
+  notFoundText: string | null;
 }
 
 export const menuNodesApi = {
@@ -180,6 +201,9 @@ export const menuNodesApi = {
   move: (id: string, data: { parentId: string | null; orderedSiblingIds: string[] }) =>
     api.patch(`/menu-nodes/${id}/reparent`, data).then((r) => r.data),
   remove: (id: string) => api.delete(`/menu-nodes/${id}`).then((r) => r.data),
+  // Prueba la consulta al sistema externo sin mandarse un WhatsApp
+  testLookup: (id: string, value: string): Promise<LookupTestResult> =>
+    api.post(`/menu-nodes/${id}/test-lookup`, { value }).then((r) => r.data),
 };
 
 // ─── Stats ────────────────────────────────────────────────────────────────────
