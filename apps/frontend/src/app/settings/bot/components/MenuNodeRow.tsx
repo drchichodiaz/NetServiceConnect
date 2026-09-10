@@ -16,7 +16,7 @@ export const TYPE_ICON: Record<MenuNodeType, typeof FolderTree> = {
 export const TYPE_LABEL: Record<MenuNodeType, string> = {
   MENU: 'Submenú',
   TEXT: 'Texto',
-  ORDER_LOOKUP: 'Consultar pedido',
+  ORDER_LOOKUP: 'Consulta a sistema externo',
   AGENT: 'Hablar con un agente',
   AI_CHAT: 'Modo IA',
 };
@@ -34,7 +34,7 @@ const TYPE_COLOR: Record<MenuNodeType, { bg: string; fg: string }> = {
 export const ADDABLE_TYPES: { type: MenuNodeType; label: string }[] = [
   { type: 'TEXT', label: 'Texto' },
   { type: 'MENU', label: 'Submenú' },
-  { type: 'ORDER_LOOKUP', label: 'Consultar pedido' },
+  { type: 'ORDER_LOOKUP', label: 'Consulta a sistema externo' },
   { type: 'AGENT', label: 'Hablar con un agente' },
   { type: 'AI_CHAT', label: 'Modo IA' },
 ];

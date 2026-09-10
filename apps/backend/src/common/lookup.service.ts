@@ -148,14 +148,65 @@ export class LookupService {
    */
   private render(template: string, record: unknown, value: string): string {
     return this.fillValue(template, value, false)
-      .replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_full, path: string) => {
+      .replace(/\{\{\s*([\w.]+)\s*((?:\|[^}]*)?)\}\}/g, (_full, path: string, rawFilters: string) => {
+        // Los indices de array funcionan solos: "anotaciones.0.usuarioNombre".
         const resolved = String(path)
           .split('.')
           .reduce<any>((acc, key) => (acc == null ? acc : acc[key]), record);
         if (resolved === null || resolved === undefined) return '';
-        return typeof resolved === 'object' ? JSON.stringify(resolved) : String(resolved);
+
+        let out = typeof resolved === 'object' ? JSON.stringify(resolved) : String(resolved);
+        for (const step of rawFilters.split('|').map((f) => f.trim()).filter(Boolean)) {
+          const [name, arg] = step.split(':').map((x) => x.trim());
+          out = this.applyFilter(out, name.toLowerCase(), arg);
+        }
+        return out;
       })
       .trim();
+  }
+
+  /**
+   * Filtros de plantilla: {{campo|filtro}}, encadenables como
+   * {{anotaciones.0.descripcion|texto|corto:200}}. Existen porque los sistemas reales
+   * devuelven fechas ISO, HTML de un editor y descripciones larguisimas — todo eso
+   * puesto crudo en un WhatsApp queda ilegible.
+   */
+  private applyFilter(input: string, name: string, arg?: string): string {
+    switch (name) {
+      case 'fecha':
+      case 'fechahora': {
+        const date = new Date(input);
+        if (Number.isNaN(date.getTime())) return input;
+        const p2 = (n: number) => String(n).padStart(2, '0');
+        const dmy = `${p2(date.getDate())}/${p2(date.getMonth() + 1)}/${date.getFullYear()}`;
+        return name === 'fecha' ? dmy : `${dmy} ${p2(date.getHours())}:${p2(date.getMinutes())}`;
+      }
+      case 'texto':
+        // Un editor rico manda <div style="..."> por todos lados: se convierten los
+        // cortes de bloque en saltos de linea y se tira el resto del marcado.
+        return input
+          .replace(/<br\s*\/?>/gi, '\n')
+          .replace(/<\/(p|div|li|tr)>/gi, '\n')
+          .replace(/<[^>]*>/g, '')
+          .replace(/&nbsp;/gi, ' ')
+          .replace(/&amp;/gi, '&')
+          .replace(/&lt;/gi, '<')
+          .replace(/&gt;/gi, '>')
+          .replace(/&quot;/gi, '"')
+          .replace(/&#39;/gi, "'")
+          .replace(/[ \t]{2,}/g, ' ')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim();
+      case 'corto': {
+        const max = Math.max(10, Number(arg) || 200);
+        const clean = input.trim();
+        return clean.length <= max ? clean : `${clean.slice(0, max - 1).trimEnd()}…`;
+      }
+      case 'mayus':
+        return input.toUpperCase();
+      default:
+        return input;
+    }
   }
 
   /**
