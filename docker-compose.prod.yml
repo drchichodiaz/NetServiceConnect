@@ -23,6 +23,24 @@ services:
       retries: 10
     restart: unless-stopped
 
+  # Reparte los eventos en vivo del panel (SSE) entre los procesos de la API. Sin esto
+  # la API tiene que correr en UN solo proceso: los eventos se entregan en memoria y un
+  # mensaje recibido por un worker no llegaria a los agentes conectados a otro.
+  #
+  # Sin persistencia a proposito: solo reparte mensajes en el momento, no guarda nada
+  # que valga la pena sobrevivir a un reinicio. Tampoco expone puertos al host — vive
+  # en la red interna de compose, que es lo que evita dejar un Redis abierto a internet.
+  redis:
+    image: redis:7-alpine
+    container_name: netservice_redis
+    command: ['redis-server', '--save', '', '--appendonly', 'no']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
   backend:
     build:
       context: .
@@ -32,10 +50,13 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
+      REDIS_URL: redis://redis:6379
     volumes:
       - netservice_media:/repo/apps/backend/media
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     restart: unless-stopped
 
