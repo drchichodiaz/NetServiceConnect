@@ -61,3 +61,6 @@ coverage/
 # ── Claude Code internals ─────────────────────────────────────────────────────
 .agents/
 skills-lock.json
+
+# Notas de configuración con credenciales — no versionar
+ConfigTickets.txt

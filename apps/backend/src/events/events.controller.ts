@@ -32,11 +32,9 @@ export class EventsController {
         subscriber.next({ data: JSON.stringify({ type: 'heartbeat' }) } as MessageEvent);
       }, 25_000);
 
-      // Suscribirse solo a eventos del tenant de este cliente
-      const unsubscribe = this.eventBus.subscribe((event) => {
-        if (event.tenantId === tenantId) {
-          subscriber.next({ data: JSON.stringify(event) } as MessageEvent);
-        }
+      // El filtrado por empresa lo hace el bus: solo llegan los eventos de este tenant.
+      const unsubscribe = this.eventBus.subscribe(tenantId, (event) => {
+        subscriber.next({ data: JSON.stringify(event) } as MessageEvent);
       });
 
       // Limpiar al desconectar
