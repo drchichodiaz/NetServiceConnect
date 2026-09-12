@@ -6,6 +6,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+# `npm install` reescribe package-lock.json al resolver dependencias en esta maquina,
+# asi que el siguiente pull choca contra esa modificacion local y aborta. El server es
+# un destino de deploy, no una maquina de desarrollo: lo que esta en el repo manda.
+echo "==> descartando cambios locales del lockfile"
+git checkout -- package-lock.json
+
 echo "==> git pull"
 git pull origin main
 

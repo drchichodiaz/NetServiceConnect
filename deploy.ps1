@@ -16,6 +16,10 @@ function Invoke-Step($description, $scriptBlock) {
     }
 }
 
+# `npm install` reescribe package-lock.json al resolver dependencias en esta maquina,
+# asi que el siguiente pull choca contra esa modificacion local y aborta. El server es
+# un destino de deploy, no una maquina de desarrollo: lo que esta en el repo manda.
+Invoke-Step "descartando cambios locales del lockfile" { git checkout -- package-lock.json }
 Invoke-Step "git pull" { git pull origin main }
 Invoke-Step "instalando dependencias (raiz, workspaces)" { npm install }
 
