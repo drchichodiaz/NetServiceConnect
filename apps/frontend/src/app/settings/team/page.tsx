@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { usersApi, whatsappApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
-import { UserPlus, Loader2, X, KeyRound, Pencil, Phone } from 'lucide-react';
+import { UserPlus, Loader2, X, KeyRound, Pencil, Phone, HelpCircle, ChevronDown } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { accountLabel, type WhatsAppAccount } from '@/types';
 
@@ -30,6 +30,7 @@ export default function TeamPage() {
   const [editSaving, setEditSaving] = useState(false);
   const [lines,     setLines]     = useState<WhatsAppAccount[]>([]);
   const [editLines, setEditLines] = useState<string[]>([]);
+  const [showHelp,  setShowHelp]  = useState(false);
 
   useEffect(() => {
     usersApi.list().then(setUsers).finally(() => setIsLoading(false));
@@ -113,6 +114,94 @@ export default function TeamPage() {
             {showForm ? <X className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
             {showForm ? 'Cancelar' : 'Agregar'}
           </button>
+        )}
+      </div>
+
+      {/* Guia de permisos: los dos limites no son evidentes mirando el formulario,
+          y la combinacion de ambos menos todavia. */}
+      <div className="card mb-5 overflow-hidden">
+        <button
+          onClick={() => setShowHelp((v) => !v)}
+          className="w-full flex items-center gap-2 px-5 py-3 text-left hover:bg-surface-hover transition-colors"
+          aria-expanded={showHelp}
+        >
+          <HelpCircle className="w-4 h-4 text-ink-muted shrink-0" />
+          <span className="text-sm font-medium text-ink flex-1">¿Qué puede ver cada usuario?</span>
+          <ChevronDown
+            className={`w-4 h-4 text-ink-muted shrink-0 transition-transform ${showHelp ? 'rotate-180' : ''}`}
+          />
+        </button>
+
+        {showHelp && (
+          <div className="px-5 pb-5 pt-1 space-y-4 animate-fade-in border-t border-line">
+            <p className="text-xs text-ink-muted leading-relaxed pt-3">
+              Cada usuario tiene <strong className="text-ink font-medium">dos límites que se aplican juntos</strong>:
+            </p>
+
+            <div className="space-y-2.5">
+              <div className="flex gap-2.5">
+                <span className="text-[11px] font-semibold text-ink bg-surface-hover rounded px-1.5 py-0.5 h-fit shrink-0">Rol</span>
+                <p className="text-xs text-ink-muted leading-relaxed">
+                  Decide <strong className="text-ink font-medium">qué conversaciones</strong> ve. Un{' '}
+                  <strong className="text-ink font-medium">Agente</strong> ve sólo las que tiene asignadas;{' '}
+                  <strong className="text-ink font-medium">Supervisor</strong> y{' '}
+                  <strong className="text-ink font-medium">Admin</strong> ven todas las de la empresa.
+                </p>
+              </div>
+              {lines.length > 1 && (
+                <div className="flex gap-2.5">
+                  <span className="text-[11px] font-semibold text-ink bg-surface-hover rounded px-1.5 py-0.5 h-fit shrink-0">Líneas</span>
+                  <p className="text-xs text-ink-muted leading-relaxed">
+                    Decide <strong className="text-ink font-medium">de qué líneas</strong>, sin importar el rol.
+                    Si no marcás ninguna, ve todas.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-lg border border-line overflow-hidden">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-surface-hover">
+                    <th className="text-left font-medium text-ink-muted px-3 py-2">Para que el usuario…</th>
+                    <th className="text-left font-medium text-ink-muted px-3 py-2">Rol</th>
+                    {lines.length > 1 && <th className="text-left font-medium text-ink-muted px-3 py-2">Líneas</th>}
+                  </tr>
+                </thead>
+                <tbody className="text-ink-muted">
+                  <tr className="border-t border-line">
+                    <td className="px-3 py-2">vea todo</td>
+                    <td className="px-3 py-2">Supervisor o Admin</td>
+                    {lines.length > 1 && <td className="px-3 py-2">ninguna</td>}
+                  </tr>
+                  <tr className="border-t border-line">
+                    <td className="px-3 py-2">vea sólo lo que le asignás</td>
+                    <td className="px-3 py-2">Agente</td>
+                    {lines.length > 1 && <td className="px-3 py-2">ninguna</td>}
+                  </tr>
+                  {lines.length > 1 && (
+                    <>
+                      <tr className="border-t border-line">
+                        <td className="px-3 py-2">vea todo, pero de una sucursal</td>
+                        <td className="px-3 py-2">Supervisor o Admin</td>
+                        <td className="px-3 py-2">esa</td>
+                      </tr>
+                      <tr className="border-t border-line">
+                        <td className="px-3 py-2">vea sólo lo suyo, en una sucursal</td>
+                        <td className="px-3 py-2">Agente</td>
+                        <td className="px-3 py-2">esa</td>
+                      </tr>
+                    </>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <p className="text-xs text-ink-muted leading-relaxed">
+              Los límites valen también para responder: si un usuario no puede ver una conversación,
+              tampoco puede contestarla.
+            </p>
+          </div>
         )}
       </div>
 
