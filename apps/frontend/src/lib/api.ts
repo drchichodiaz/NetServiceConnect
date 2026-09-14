@@ -31,6 +31,11 @@ export const authApi = {
   login: (email: string, password: string) =>
     api.post('/auth/login', { email, password }).then((r) => r.data),
   me: () => api.get('/auth/me').then((r) => r.data),
+  // Autogestion: el propio usuario, sin pasar por un administrador.
+  updateProfile: (data: { name?: string }) =>
+    api.patch('/auth/me', data).then((r) => r.data),
+  changePassword: (data: { currentPassword: string; newPassword: string }) =>
+    api.patch('/auth/me/password', data).then((r) => r.data),
 };
 
 // ─── Conversations ─────────────────────────────────────────────────────────────

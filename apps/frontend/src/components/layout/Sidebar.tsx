@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { MessageSquare, Users, Tag, Settings, LogOut, LayoutDashboard, Zap, Sparkles, BookUser, ShieldCheck, Building2, FileText, Bot } from 'lucide-react';
+import { MessageSquare, Users, Tag, Settings, LogOut, LayoutDashboard, Zap, Sparkles, BookUser, ShieldCheck, Building2, FileText, Bot, UserCircle } from 'lucide-react';
 import { useAuthStore } from '@/store/auth.store';
 import { User } from '@/types';
 import clsx from 'clsx';
@@ -113,6 +113,27 @@ export default function Sidebar({ user }: Props) {
 
       {/* Footer */}
       <div className="flex flex-col items-center gap-2 w-full px-2">
+        {/* Mi cuenta */}
+        <div className="relative group">
+          <button
+            onClick={() => router.push('/settings/account')}
+            className="flex items-center justify-center w-9 h-9 rounded-lg text-gray-500 hover:text-gray-300 transition-all duration-150"
+            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--sidebar-hover)'; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = ''; }}
+          >
+            <UserCircle className="w-4 h-4" />
+          </button>
+          <div
+            className="absolute left-full ml-3 top-1/2 -translate-y-1/2 z-50
+                       bg-gray-900 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg
+                       whitespace-nowrap pointer-events-none
+                       opacity-0 group-hover:opacity-100 transition-all duration-150 shadow-float"
+            style={{ border: '1px solid #21262D' }}
+          >
+            Mi cuenta
+          </div>
+        </div>
+
         {/* Logout */}
         <div className="relative group">
           <button

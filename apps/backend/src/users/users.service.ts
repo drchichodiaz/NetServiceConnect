@@ -13,10 +13,11 @@ export class UsersService {
   ) {}
 
   async create(tenantId: string, dto: CreateUserDto) {
-    const existing = await this.prisma.user.findUnique({
-      where: { tenantId_email: { tenantId, email: dto.email } },
-    });
-    if (existing) throw new ConflictException('Email already registered');
+    // El email es unico en todo el sistema, asi que el choque puede ser con un usuario
+    // de otra empresa. El mensaje no dice de cual: seria contar quien mas usa la
+    // plataforma a alguien que no tiene por que saberlo.
+    const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    if (existing) throw new ConflictException('Ese email ya está registrado');
 
     const hash = await bcrypt.hash(dto.password, 10);
 
@@ -69,10 +70,8 @@ export class UsersService {
     dto = userDto as UpdateUserDto;
 
     if (dto.email) {
-      const existing = await this.prisma.user.findUnique({
-        where: { tenantId_email: { tenantId, email: dto.email } },
-      });
-      if (existing && existing.id !== id) throw new ConflictException('Email already registered');
+      const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
+      if (existing && existing.id !== id) throw new ConflictException('Ese email ya está registrado');
     }
 
     const { password, ...rest } = dto;

@@ -64,7 +64,11 @@ model User {
   internalNotes InternalNote[]
   auditLogs     AuditLog[]
 
-  @@unique([tenantId, email])
+  // Unico en todo el sistema, no por empresa: con el email repetido entre empresas el
+  // login no puede saber a cual entrar (se quedaba con el primero que encontraba) y
+  // "olvide mi contrasena" tampoco sabria a que cuenta apunta. Una persona que trabaje
+  // para dos clientes necesita dos direcciones.
+  @@unique([email])
   @@index([tenantId])
 }
 

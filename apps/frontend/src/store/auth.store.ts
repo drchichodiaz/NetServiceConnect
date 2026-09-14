@@ -10,6 +10,9 @@ interface AuthStore {
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
   hydrate: () => void;
+  /** Refresca el usuario en memoria y en localStorage — el sidebar lo lee de ahi,
+   *  asi que sin esto un cambio de perfil no se ve hasta el proximo login. */
+  setUser: (user: User) => void;
 }
 
 export const useAuthStore = create<AuthStore>((set) => ({
@@ -30,6 +33,12 @@ export const useAuthStore = create<AuthStore>((set) => ({
     } finally {
       set({ isLoading: false });
     }
+  },
+
+  setUser: (user) => {
+    const token = getToken();
+    if (token) setAuth(token, user);
+    set({ user });
   },
 
   logout: () => {
