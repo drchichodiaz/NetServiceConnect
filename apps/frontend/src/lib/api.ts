@@ -36,6 +36,11 @@ export const authApi = {
     api.patch('/auth/me', data).then((r) => r.data),
   changePassword: (data: { currentPassword: string; newPassword: string }) =>
     api.patch('/auth/me/password', data).then((r) => r.data),
+  // Publicos: se usan sin sesion, desde las pantallas de recuperacion.
+  forgotPassword: (email: string) =>
+    api.post('/auth/forgot-password', { email }).then((r) => r.data),
+  resetPassword: (token: string, newPassword: string) =>
+    api.post('/auth/reset-password', { token, newPassword }).then((r) => r.data),
 };
 
 // ─── Conversations ─────────────────────────────────────────────────────────────

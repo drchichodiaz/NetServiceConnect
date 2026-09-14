@@ -60,6 +60,7 @@ model User {
   tenant        Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   assignedConvs Conversation[]       @relation("AssignedAgent")
   channelAccess UserChannelAccount[]
+  resetTokens   PasswordResetToken[]
   messages      Message[]
   internalNotes InternalNote[]
   auditLogs     AuditLog[]
@@ -70,6 +71,27 @@ model User {
   // para dos clientes necesita dos direcciones.
   @@unique([email])
   @@index([tenantId])
+}
+
+// Token de un solo uso para recuperar la contrasena.
+//
+// Se guarda el HASH del token, no el token: si alguien se lleva una copia de la base no
+// puede usarla para entrar a ninguna cuenta. El valor en claro existe solo dentro del
+// mail que recibe la persona.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  // Cuando se uso. Null = todavia sirve. No se borra la fila al usarla para poder
+  // distinguir "este link ya se uso" de "este link nunca existio".
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 enum UserRole {
@@ -453,19 +475,19 @@ model MessageTemplate {
 // ─── Tenant Bot Config (Fase D: textos del menu de WhatsApp por empresa) ──────
 
 model TenantBotConfig {
-  id                String   @id @default(cuid())
-  tenantId          String   @unique
-  horariosText      String?
-  sucursalesText    String?
-  serviciosText     String?
+  id              String   @id @default(cuid())
+  tenantId        String   @unique
+  horariosText    String?
+  sucursalesText  String?
+  serviciosText   String?
   // Info de negocio (horarios, servicios, politicas, FAQs) que alimenta el prompt
   // de cualquier nodo tipo AI_CHAT del arbol de menu. Tenant-wide, no por nodo.
-  aiKnowledgeBase   String?
+  aiKnowledgeBase String?
   // Si es true, una conversacion nueva arranca directo en modo IA en vez de
   // mostrar el arbol de menu. El menu sigue siendo alcanzable si el cliente
   // escribe "menu"/"volver" en medio del chat.
-  startInAiChat     Boolean  @default(false)
-  updatedAt         DateTime @updatedAt
+  startInAiChat   Boolean  @default(false)
+  updatedAt       DateTime @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 }

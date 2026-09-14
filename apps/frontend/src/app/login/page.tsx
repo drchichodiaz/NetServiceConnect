@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { useAuthStore } from '@/store/auth.store';
 import { Loader2, MessageSquare, Check } from 'lucide-react';
 import { BRAND } from '@/lib/brand';
+import Link from 'next/link';
 
 const CHECKLIST = [
   'Asigna conversaciones a tu equipo',
@@ -111,9 +112,14 @@ export default function LoginPage() {
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[11px] font-semibold text-ink-muted uppercase tracking-wider">
-                    Contraseña
-                  </label>
+                  <div className="flex items-baseline justify-between">
+                    <label className="text-[11px] font-semibold text-ink-muted uppercase tracking-wider">
+                      Contraseña
+                    </label>
+                    <Link href="/forgot-password" className="text-[11px] text-ink-muted hover:text-ink transition-colors">
+                      ¿La olvidaste?
+                    </Link>
+                  </div>
                   <input
                     type="password"
                     value={password}
