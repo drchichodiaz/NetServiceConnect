@@ -17,11 +17,11 @@ export class TemplatesController {
     return this.service.create(user.tenantId, dto);
   }
 
-  // Con ?whatsappAccountId= devuelve solo las plantillas utilizables por esa linea —
+  // Con ?channelAccountId= devuelve solo las plantillas utilizables por esa linea —
   // es lo que pide el selector de "iniciar conversacion". Sin el, todas.
   @Get()
-  findAll(@CurrentUser() user: any, @Query('whatsappAccountId') whatsappAccountId?: string) {
-    return this.service.findAll(user.tenantId, whatsappAccountId);
+  findAll(@CurrentUser() user: any, @Query('channelAccountId') channelAccountId?: string) {
+    return this.service.findAll(user.tenantId, channelAccountId);
   }
 
   @Patch(':id/refresh')

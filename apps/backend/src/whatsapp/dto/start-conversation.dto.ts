@@ -20,7 +20,7 @@ export class StartConversationDto {
   // linea por defecto del tenant (el caso de un tenant con un solo numero).
   @IsOptional()
   @IsString()
-  whatsappAccountId?: string;
+  channelAccountId?: string;
 
   @IsOptional()
   @IsArray()

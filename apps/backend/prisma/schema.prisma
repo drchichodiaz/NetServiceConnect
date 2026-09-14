@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   // "native" = el binario del entorno donde corre `prisma generate` (Windows en el
   // deploy pm2 de siempre). "linux-musl-openssl-3.0.x" = motor para Alpine con
   // OpenSSL 3 (imagen node:20-alpine del deploy Docker) — sin esto, Prisma detecta
@@ -16,18 +16,18 @@ datasource db {
 // ─── Tenant ───────────────────────────────────────────────────────────────────
 
 model Tenant {
-  id        String   @id @default(cuid())
-  name      String
-  slug      String   @unique
-  plan           String   @default("starter")
-  isActive       Boolean  @default(true)
-  openaiApiKey   String?
-  openaiModel    String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String   @id @default(cuid())
+  name         String
+  slug         String   @unique
+  plan         String   @default("starter")
+  isActive     Boolean  @default(true)
+  openaiApiKey String?
+  openaiModel  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   users            User[]
-  whatsappAccounts WhatsAppAccount[]
+  channelAccounts  ChannelAccount[]
   contacts         Contact[]
   conversations    Conversation[]
   messages         Message[]
@@ -44,24 +44,24 @@ model Tenant {
 // ─── User ─────────────────────────────────────────────────────────────────────
 
 model User {
-  id        String   @id @default(cuid())
-  tenantId  String
-  email     String
-  password  String
-  name      String
-  role      UserRole @default(AGENT)
-  isActive  Boolean  @default(true)
+  id           String   @id @default(cuid())
+  tenantId     String
+  email        String
+  password     String
+  name         String
+  role         UserRole @default(AGENT)
+  isActive     Boolean  @default(true)
   // Operador de la plataforma (no es "admin de una empresa") — puede ver/editar
   // config global (System) y crear empresas nuevas. No tiene relacion con `role`.
-  isSuperAdmin Boolean @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  isSuperAdmin Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  tenant            Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  assignedConvs     Conversation[] @relation("AssignedAgent")
-  messages          Message[]
-  internalNotes     InternalNote[]
-  auditLogs         AuditLog[]
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assignedConvs Conversation[] @relation("AssignedAgent")
+  messages      Message[]
+  internalNotes InternalNote[]
+  auditLogs     AuditLog[]
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -73,17 +73,30 @@ enum UserRole {
   AGENT
 }
 
-// ─── WhatsApp Account ─────────────────────────────────────────────────────────
+// ─── Channel Account ──────────────────────────────────────────────────────────
 
-// Un tenant puede tener varias lineas (ej: una por sucursal). El webhook ya rutea
-// por phoneNumberId, asi que lo que separa a una linea de otra es esta fila; la
-// conversacion guarda por cual entro (Conversation.whatsappAccountId) y todo lo que
-// sale — bot incluido — se manda por esa misma linea.
-model WhatsAppAccount {
+// Una cuenta por la que entran y salen mensajes: una linea de WhatsApp, una pagina de
+// Facebook o una cuenta de Instagram. Un tenant puede tener varias (ej: una linea por
+// sucursal). El webhook rutea por phoneNumberId / pageId / igAccountId segun el canal,
+// asi que lo que separa una cuenta de otra es esta fila; la conversacion guarda por
+// cual entro (Conversation.channelAccountId) y todo lo que sale — bot incluido — se
+// manda por esa misma cuenta.
+//
+// Antes se llamaba WhatsAppAccount. Los campos propios de cada canal son nullable
+// porque ninguno aplica a los tres; cual esta poblado lo dice `channel`, no hay que
+// adivinarlo.
+model ChannelAccount {
   id                 String               @id @default(cuid())
   tenantId           String
-  wabaId             String
-  phoneNumberId      String
+  channel            Channel              @default(WHATSAPP)
+  // ─── WhatsApp (Cloud API) ───
+  wabaId             String?
+  phoneNumberId      String?
+  // ─── Messenger / Instagram (Graph API) ───
+  // pageId es la pagina de Facebook; para Instagram es ademas la pagina a la que la
+  // cuenta de IG esta vinculada, porque los mensajes de IG entran por ahi.
+  pageId             String?
+  igAccountId        String?
   accessToken        String
   phoneNumber        String?
   displayName        String?
@@ -113,9 +126,23 @@ model WhatsAppAccount {
   tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   conversations Conversation[]
 
+  // Los dos unique conviven porque en Postgres los NULL no colisionan entre si: una
+  // cuenta de Instagram tiene phoneNumberId NULL y no pelea con las lineas de WhatsApp,
+  // y al reves con pageId.
   @@unique([tenantId, phoneNumberId])
+  @@unique([tenantId, pageId])
+  // El webhook resuelve la cuenta en cada mensaje entrante: por phoneNumberId en
+  // WhatsApp, por pageId en Messenger y por igAccountId en Instagram.
   @@index([tenantId])
   @@index([phoneNumberId])
+  @@index([pageId])
+  @@index([igAccountId])
+}
+
+enum Channel {
+  WHATSAPP
+  MESSENGER
+  INSTAGRAM
 }
 
 enum EmbeddedSignupStatus {
@@ -130,7 +157,10 @@ enum EmbeddedSignupStatus {
 model Contact {
   id        String   @id @default(cuid())
   tenantId  String
-  phone     String
+  // Dejo de ser la identidad del contacto y paso a ser un dato mas de la ficha: quien
+  // es en cada canal vive en ContactIdentity. Nullable porque un contacto que llego
+  // por Instagram o Messenger no tiene telefono y nunca lo vamos a conocer.
+  phone     String?
   name      String?
   email     String?
   company   String?
@@ -139,53 +169,82 @@ model Contact {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant        Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   conversations Conversation[]
+  identities    ContactIdentity[]
 
+  // Se queda tal cual aunque phone sea nullable: en Postgres varios NULL no colisionan,
+  // asi que esto sigue impidiendo dos contactos de WhatsApp con el mismo numero y no
+  // molesta a los de Instagram y Messenger, que tienen phone NULL.
   @@unique([tenantId, phone])
   @@index([tenantId])
+}
+
+// Quien es un contacto en cada canal. Un Contact puede tener varias: es lo que permite
+// que el cliente que escribe por WhatsApp y por Instagram sea una sola ficha para el
+// agente, en vez de dos personas distintas.
+model ContactIdentity {
+  id         String   @id @default(cuid())
+  tenantId   String
+  contactId  String
+  channel    Channel
+  // El identificador de esa persona en ese canal: telefono E.164 en WhatsApp, PSID en
+  // Messenger, IGSID en Instagram. Los dos ultimos son scoped por pagina — la misma
+  // persona tiene otro id en otra pagina tuya — asi que no sirven fuera de su canal.
+  externalId String
+  // Handle publico, cuando el canal lo da: @usuario en Instagram. Messenger no tiene,
+  // y en WhatsApp el telefono ya cumple ese rol.
+  handle     String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, channel, externalId])
+  @@index([contactId])
 }
 
 // ─── Conversation ─────────────────────────────────────────────────────────────
 
 model Conversation {
-  id              String             @id @default(cuid())
-  tenantId        String
-  contactId       String
-  // Linea de WhatsApp por la que entro (o por la que salio, si la inicio un agente).
-  // Nullable por las conversaciones anteriores al multi-numero y para no perder el
-  // historial si se borra la linea. Todo envio la resuelve desde aca.
-  whatsappAccountId String?
-  assignedUserId  String?
-  status          ConversationStatus @default(OPEN)
+  id               String                @id @default(cuid())
+  tenantId         String
+  contactId        String
+  // Cuenta por la que entro (o por la que salio, si la inicio un agente): una linea de
+  // WhatsApp, una pagina de Facebook o una cuenta de Instagram. Nullable por las
+  // conversaciones anteriores al multi-numero y para no perder el historial si se borra
+  // la cuenta. Todo envio la resuelve desde aca, y de aca sale tambien el canal.
+  channelAccountId String?
+  assignedUserId   String?
+  status           ConversationStatus    @default(OPEN)
   // Modo del bot de menu (Fase D). Default AGENT a proposito: las conversaciones
   // que ya existian antes de esta migracion viven con un humano asignado y el
   // bot no debe tocarlas; solo el webhook crea conversaciones nuevas en modo BOT.
-  mode            ConversationMode   @default(AGENT)
-  botState        ConversationBotState?
+  mode             ConversationMode      @default(AGENT)
+  botState         ConversationBotState?
   // Contexto liviano del bot que necesita sobrevivir entre turnos (ej: coincidencias
   // pendientes de una busqueda de sucursal). No confundir con AuditLog, que es historico.
-  botContext      Json?
-  closedReason    String?
-  lastMessageAt   DateTime?
-  lastMessageText String?
-  lastInboundAt   DateTime?
-  unreadCount     Int                @default(0)
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
+  botContext       Json?
+  closedReason     String?
+  lastMessageAt    DateTime?
+  lastMessageText  String?
+  lastInboundAt    DateTime?
+  unreadCount      Int                   @default(0)
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
 
-  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  contact         Contact          @relation(fields: [contactId], references: [id])
-  whatsappAccount WhatsAppAccount? @relation(fields: [whatsappAccountId], references: [id], onDelete: SetNull)
-  assignedUser    User?            @relation("AssignedAgent", fields: [assignedUserId], references: [id])
-  messages     Message[]
-  notes        InternalNote[]
-  tags         ConversationTag[]
-  auditLogs    AuditLog[]
+  tenant         Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact        Contact           @relation(fields: [contactId], references: [id])
+  channelAccount ChannelAccount?   @relation(fields: [channelAccountId], references: [id], onDelete: SetNull)
+  assignedUser   User?             @relation("AssignedAgent", fields: [assignedUserId], references: [id])
+  messages       Message[]
+  notes          InternalNote[]
+  tags           ConversationTag[]
+  auditLogs      AuditLog[]
 
   @@index([tenantId, status])
   @@index([tenantId, lastMessageAt])
-  @@index([tenantId, whatsappAccountId])
+  @@index([tenantId, channelAccountId])
 }
 
 enum ConversationStatus {
@@ -347,7 +406,7 @@ model MessageTemplate {
   wabaId         String?
   name           String
   language       String   @default("es")
-  category       String   // MARKETING | UTILITY | AUTHENTICATION
+  category       String // MARKETING | UTILITY | AUTHENTICATION
   bodyText       String
   variableCount  Int      @default(0)
   status         String   @default("PENDING") // PENDING | APPROVED | REJECTED
@@ -445,14 +504,14 @@ enum MenuNodeType {
 // ─── System Config (global, singleton) ───────────────────────────────────────
 
 model SystemConfig {
-  id              String   @id @default("1")
-  metaAppId       String?
-  metaConfigId    String?
-  metaAppSecret   String?
-  metaVerifyToken String?
-  metaApiVersion  String   @default("v19.0")
+  id               String   @id @default("1")
+  metaAppId        String?
+  metaConfigId     String?
+  metaAppSecret    String?
+  metaVerifyToken  String?
+  metaApiVersion   String   @default("v19.0")
   mediaStoragePath String?
-  updatedAt       DateTime @updatedAt
+  updatedAt        DateTime @updatedAt
 }
 
 // ─── Audit Log ────────────────────────────────────────────────────────────────

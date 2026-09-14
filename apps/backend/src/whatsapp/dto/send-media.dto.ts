@@ -4,8 +4,6 @@ export class SendMediaDto {
   @IsString()
   conversationId: string;
 
-  @IsString()
-  to: string;
 
   @IsIn(['image', 'audio', 'document', 'video'])
   type: string;

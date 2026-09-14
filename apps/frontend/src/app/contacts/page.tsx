@@ -136,7 +136,7 @@ export default function ContactsPage() {
     router.push('/inbox');
   }
 
-  const displayName = selected ? (selected.name || selected.phone) : '';
+  const displayName = selected ? (selected.name || selected.phone || 'Contacto sin nombre') : '';
 
   return (
     <div className="flex h-full">
@@ -206,7 +206,7 @@ export default function ContactsPage() {
             </div>
           ) : (
             contacts.map((c) => {
-              const name = c.name || c.phone;
+              const name = c.name || c.phone || 'Contacto sin nombre';
               const isSelected = selected?.id === c.id;
               return (
                 <button
@@ -512,7 +512,7 @@ function NewConversationModal({ contact, onClose, onSent }: {
       <div className="card w-full max-w-md p-5 animate-pop">
         <div className="flex items-center justify-between mb-4">
           <p className="text-sm font-semibold text-ink">
-            {contact ? `Nueva conversación con ${contact.name || contact.phone}` : 'Nueva conversación'}
+            {contact ? `Nueva conversación con ${contact.name || contact.phone || 'el contacto'}` : 'Nueva conversación'}
           </p>
           <button onClick={onClose} className="w-7 h-7 rounded-lg flex items-center justify-center text-ink-subtle hover:bg-black/5">
             <X className="w-4 h-4" />

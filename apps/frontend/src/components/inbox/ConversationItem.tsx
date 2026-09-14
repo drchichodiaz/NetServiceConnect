@@ -61,7 +61,7 @@ function SLABadge({ lastInboundAt }: { lastInboundAt: string }) {
 
 export default function ConversationItem({ conversation, isSelected, onClick }: Props) {
   const { contact, lastMessageText, lastMessageAt, lastInboundAt, unreadCount, tags, assignedUser, status, whatsappAccount } = conversation;
-  const name = contact.name || contact.phone;
+  const name = contact.displayId || contact.name || contact.phone || 'Contacto';
 
   // Mostrar SLA solo en conversaciones abiertas/pendientes con mensajes entrantes sin responder
   const showSLA = status !== 'CLOSED' && !!lastInboundAt && unreadCount > 0;

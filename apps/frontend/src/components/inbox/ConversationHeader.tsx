@@ -31,7 +31,7 @@ export default function ConversationHeader({ conversation, sidebarOpen, onToggle
 
   const current = STATUS_OPTIONS.find((s) => s.value === conversation.status) ?? STATUS_OPTIONS[0];
   const { contact, whatsappAccount } = conversation;
-  const displayName = contact.name || contact.phone;
+  const displayName = contact.displayId || contact.name || contact.phone || 'Contacto';
 
   // Con varias líneas, el agente necesita ver por cuál sucursal le está escribiendo
   // el cliente antes de responder — la respuesta sale por esa misma línea.

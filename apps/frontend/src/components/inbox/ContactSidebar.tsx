@@ -27,7 +27,7 @@ const STATUS_CONFIG = {
 export default function ContactSidebar({ conversation, onClose }: Props) {
   const { notes, updateConversation } = useInboxStore();
   const { contact } = conversation;
-  const displayName = contact.name || contact.phone;
+  const displayName = contact.displayId || contact.name || contact.phone || 'Contacto';
   const initials = displayName.slice(0, 2).toUpperCase();
 
   const [history, setHistory] = useState<Conversation[]>([]);
@@ -117,14 +117,16 @@ export default function ContactSidebar({ conversation, onClose }: Props) {
               {initials}
             </div>
             <p className="font-semibold text-ink text-sm text-center">{displayName}</p>
-            {contact.name && (
+            {contact.name && contact.phone && (
               <p className="text-xs text-ink-muted mt-0.5">{contact.phone}</p>
             )}
           </div>
 
           {/* Contact details */}
           <div className="space-y-2">
-            <ContactRow icon={Phone} value={contact.phone} copyable />
+            {/* Un contacto que llego por Instagram o Messenger no tiene telefono: la
+                fila no se muestra en vez de quedar vacia. */}
+            {contact.phone && <ContactRow icon={Phone} value={contact.phone} copyable />}
             {contact.email && <ContactRow icon={Mail} value={contact.email} copyable />}
           </div>
         </div>

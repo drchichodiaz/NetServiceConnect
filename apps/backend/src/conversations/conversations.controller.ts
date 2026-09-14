@@ -16,9 +16,9 @@ export class ConversationsController {
     @Query('assignedUserId') assignedUserId?: string,
     @Query('search') search?: string,
     @Query('contactId') contactId?: string,
-    @Query('whatsappAccountId') whatsappAccountId?: string,
+    @Query('channelAccountId') channelAccountId?: string,
   ) {
-    return this.service.findAll(user.tenantId, user, status, assignedUserId, search, contactId, whatsappAccountId);
+    return this.service.findAll(user.tenantId, user, status, assignedUserId, search, contactId, channelAccountId);
   }
 
   @Get(':id')

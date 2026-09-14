@@ -16,10 +16,18 @@ export interface Tenant {
   slug: string;
 }
 
+export type Channel = 'WHATSAPP' | 'MESSENGER' | 'INSTAGRAM';
+
 export interface Contact {
   id: string;
   tenantId: string;
-  phone: string;
+  /** Solo los contactos de WhatsApp tienen. Los de Instagram y Messenger, nunca. */
+  phone?: string | null;
+  /** Como llamarlo en la bandeja: lo resuelve el backend segun el canal, para que la
+   *  regla (en Instagram el @usuario, en Messenger nunca el id crudo) este en un solo
+   *  lugar. Solo viene en los contactos que llegan dentro de una conversacion. */
+  displayId?: string;
+  channel?: Channel | null;
   name?: string;
   email?: string;
   company?: string;

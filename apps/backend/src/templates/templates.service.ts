@@ -91,15 +91,15 @@ export class TemplatesService {
   }
 
   /**
-   * Con `whatsappAccountId` devuelve solo las plantillas del WABA de esa linea — las
+   * Con `channelAccountId` devuelve solo las plantillas del WABA de esa linea — las
    * unicas que un envio por esa linea puede usar. El selector de "iniciar conversacion"
    * pide asi, para no ofrecer plantillas que Meta rechazaria con 132001.
    */
-  async findAll(tenantId: string, whatsappAccountId?: string) {
+  async findAll(tenantId: string, channelAccountId?: string) {
     let wabaFilter: string | undefined;
-    if (whatsappAccountId) {
-      const account = await this.prisma.whatsAppAccount.findFirst({
-        where: { id: whatsappAccountId, tenantId },
+    if (channelAccountId) {
+      const account = await this.prisma.channelAccount.findFirst({
+        where: { id: channelAccountId, tenantId },
         select: { wabaId: true },
       });
       // Linea inexistente: se filtra por un valor imposible en vez de devolver todo,
@@ -115,7 +115,7 @@ export class TemplatesService {
 
   /** Una cuenta activa de ese WABA — la que presta el token para hablarle a Meta. */
   private async accountForWabaOrThrow(tenantId: string, wabaId: string) {
-    const account = await this.prisma.whatsAppAccount.findFirst({
+    const account = await this.prisma.channelAccount.findFirst({
       where: { tenantId, wabaId, isActive: true },
     });
     if (!account) {
@@ -209,7 +209,7 @@ export class TemplatesService {
    */
   private async accountForTemplate(tenantId: string, wabaId: string | null) {
     if (wabaId) {
-      const owner = await this.prisma.whatsAppAccount.findFirst({
+      const owner = await this.prisma.channelAccount.findFirst({
         where: { tenantId, wabaId, isActive: true },
       });
       if (owner) return owner;

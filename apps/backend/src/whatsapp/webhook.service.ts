@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
+import { ContactIdentityService, displayId } from '../contacts/contact-identity.service';
 import { EventBusService } from '../events/event-bus.service';
 import { MediaService } from '../media/media.service';
 import { BotService } from '../bot/bot.service';
@@ -12,6 +13,7 @@ export class WebhookService {
 
   constructor(
     private prisma: PrismaService,
+    private identities: ContactIdentityService,
     private eventBus: EventBusService,
     private mediaService: MediaService,
     private botService: BotService,
@@ -31,7 +33,7 @@ export class WebhookService {
         // phoneNumberId es más específico que wabaId para el lookup del tenant
         const phoneNumberId = value.metadata?.phone_number_id;
 
-        const account = await this.prisma.whatsAppAccount.findFirst({
+        const account = await this.prisma.channelAccount.findFirst({
           where: { phoneNumberId, isActive: true },
         });
 
@@ -120,19 +122,17 @@ export class WebhookService {
       }
     }
 
-    // Upsert de contacto
-    const contact = await this.prisma.contact.upsert({
-      where: { tenantId_phone: { tenantId, phone } },
-      update: contactName ? { name: contactName } : {},
-      create: { tenantId, phone, name: contactName },
-    });
+    // Quien escribio. En WhatsApp la identidad es el telefono, pero el que resuelve
+    // eso es ContactIdentityService: aca no se asume mas que un contacto se busca por
+    // numero, porque en Messenger e Instagram no hay numero que buscar.
+    const contact = await this.identities.resolve(tenantId, 'WHATSAPP', phone, { name: contactName });
 
     // Buscar conversación abierta o pendiente existente EN ESTA LÍNEA. El contacto
     // es uno solo por tenant a propósito (el agente ve la ficha completa del cliente),
     // pero la conversación se separa por línea: si el mismo cliente le escribe a dos
     // sucursales, son dos hilos distintos y cada respuesta sale por su propio número.
     let conversation = await this.prisma.conversation.findFirst({
-      where: { tenantId, contactId: contact.id, whatsappAccountId: accountId, status: { not: 'CLOSED' } },
+      where: { tenantId, contactId: contact.id, channelAccountId: accountId, status: { not: 'CLOSED' } },
       orderBy: { createdAt: 'desc' },
     });
 
@@ -147,7 +147,7 @@ export class WebhookService {
         data: {
           tenantId,
           contactId: contact.id,
-          whatsappAccountId: accountId,
+          channelAccountId: accountId,
           status: 'OPEN',
           mode: 'BOT',
           botState: 'MENU',
@@ -206,7 +206,15 @@ export class WebhookService {
       payload: {
         message,
         conversationId: conversation.id,
-        contact: { id: contact.id, name: contact.name, phone: contact.phone },
+        contact: {
+          id: contact.id,
+          name: contact.name,
+          phone: contact.phone,
+          channel: 'WHATSAPP' as const,
+          // El evento en vivo tiene que traer el mismo nombre que devuelve la API al
+          // recargar; si no, la conversacion cambia de titulo sola al refrescar.
+          displayId: displayId('WHATSAPP', contact, null),
+        },
         lastMessageText: body,
         lastMessageAt: now.toISOString(),
       },

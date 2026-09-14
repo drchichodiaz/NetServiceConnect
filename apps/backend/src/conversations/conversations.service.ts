@@ -1,5 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { displayId } from '../contacts/contact-identity.service';
+import { Channel } from '@prisma/client';
 import { EventBusService } from '../events/event-bus.service';
 import { UpdateConversationDto } from './dto/update-conversation.dto';
 
@@ -17,7 +19,7 @@ export class ConversationsService {
     assignedUserId?: string,
     search?: string,
     contactId?: string,
-    whatsappAccountId?: string,
+    channelAccountId?: string,
   ) {
     // Un AGENTE solo puede ver sus propias conversaciones asignadas, sin importar
     // qué assignedUserId pida por query — ADMIN/SUPERVISOR ven todo el tenant.
@@ -26,13 +28,13 @@ export class ConversationsService {
     // El filtro por línea (sucursal) es una vista, no un permiso: el pool de agentes
     // es compartido y todos ven todas las líneas. Si más adelante se pide limitar
     // qué líneas ve cada agente, el filtro forzado va acá, al lado del de AGENT.
-    return this.prisma.conversation.findMany({
+    const conversations = await this.prisma.conversation.findMany({
       where: {
         tenantId,
         ...(status && { status: status as any }),
         ...(effectiveAssignedUserId && { assignedUserId: effectiveAssignedUserId }),
         ...(contactId && { contactId }),
-        ...(whatsappAccountId && { whatsappAccountId }),
+        ...(channelAccountId && { channelAccountId }),
         ...(search && {
           contact: {
             OR: [
@@ -44,21 +46,31 @@ export class ConversationsService {
       },
       orderBy: { lastMessageAt: 'desc' },
       include: {
-        contact: { select: { id: true, name: true, phone: true, avatarUrl: true } },
-        whatsappAccount: { select: { id: true, label: true, phoneNumber: true } },
+        contact: {
+          select: {
+            id: true,
+            name: true,
+            phone: true,
+            avatarUrl: true,
+            identities: { select: { channel: true, externalId: true, handle: true } },
+          },
+        },
+        channelAccount: { select: { id: true, label: true, phoneNumber: true, channel: true } },
         assignedUser: { select: { id: true, name: true } },
         tags: { include: { tag: true } },
         _count: { select: { messages: true, notes: true } },
       },
     });
+
+    return conversations.map(withDisplayId);
   }
 
   async findOne(tenantId: string, id: string, requester?: any) {
     const conv = await this.prisma.conversation.findFirst({
       where: { id, tenantId },
       include: {
-        contact: true,
-        whatsappAccount: { select: { id: true, label: true, phoneNumber: true } },
+        contact: { include: { identities: { select: { channel: true, externalId: true, handle: true } } } },
+        channelAccount: { select: { id: true, label: true, phoneNumber: true, channel: true } },
         assignedUser: { select: { id: true, name: true, email: true } },
         tags: { include: { tag: true } },
         _count: { select: { messages: true, notes: true } },
@@ -68,7 +80,7 @@ export class ConversationsService {
     if (requester?.role === 'AGENT' && conv.assignedUserId !== requester.id) {
       throw new NotFoundException('Conversation not found');
     }
-    return conv;
+    return withDisplayId(conv);
   }
 
   async update(tenantId: string, id: string, actorId: string, dto: UpdateConversationDto, requester?: any) {
@@ -136,4 +148,32 @@ export class ConversationsService {
       data: { unreadCount: 0 },
     });
   }
+}
+
+/**
+ * Le agrega al contacto el nombre con el que se lo muestra en la bandeja, resuelto
+ * segun el canal por el que entro la conversacion. Vive en el backend y no en cada
+ * componente del panel para que la regla — que en Instagram es el @usuario y en
+ * Messenger nunca es el id crudo — este escrita una sola vez.
+ */
+function withDisplayId<
+  T extends {
+    channelAccount?: { channel?: Channel | null } | null;
+    contact: {
+      name?: string | null;
+      phone?: string | null;
+      identities?: Array<{ channel: Channel; externalId: string; handle: string | null }>;
+    };
+  },
+>(conv: T) {
+  const channel = conv.channelAccount?.channel ?? null;
+  const identity = conv.contact.identities?.find((i) => i.channel === channel) ?? conv.contact.identities?.[0] ?? null;
+  return {
+    ...conv,
+    contact: {
+      ...conv.contact,
+      channel,
+      displayId: displayId(channel, conv.contact, identity),
+    },
+  };
 }

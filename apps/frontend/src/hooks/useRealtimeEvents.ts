@@ -53,7 +53,7 @@ export function useRealtimeEvents() {
 
           if (message.direction === 'INBOUND') {
             // Mostrar notificación del OS si la pestaña está en background
-            const contactName = contact?.name || contact?.phone || 'Contacto';
+            const contactName = contact?.displayId || contact?.name || contact?.phone || 'Contacto';
             showNotification(
               `💬 ${contactName}`,
               lastMessageText || 'Nuevo mensaje',

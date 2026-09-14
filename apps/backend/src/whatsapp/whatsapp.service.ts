@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
+import { ContactIdentityService, displayId } from '../contacts/contact-identity.service';
 import { EventBusService } from '../events/event-bus.service';
 import { MediaService } from '../media/media.service';
 import { TemplatesService } from '../templates/templates.service';
@@ -26,6 +27,7 @@ export class WhatsAppService {
     private mediaService: MediaService,
     private templatesService: TemplatesService,
     private accounts: WhatsAppAccountsService,
+    private identities: ContactIdentityService,
   ) {
     this.apiVersion = config.get('META_API_VERSION') || 'v19.0';
   }
@@ -47,7 +49,7 @@ export class WhatsAppService {
 
     await this.takeOverFromBot(tenantId, conversation, senderId);
 
-    const payload = this.buildPayload(dto.to, dto);
+    const payload = this.buildPayload(await this.recipientFor(conversation.contactId), dto);
     let externalId: string | undefined;
 
     try {
@@ -133,7 +135,7 @@ export class WhatsAppService {
     const payload = {
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
-      to: dto.to,
+      to: await this.recipientFor(conversation.contactId),
       type: dto.type,
       [dto.type]: mediaPayload,
     };
@@ -203,8 +205,8 @@ export class WhatsAppService {
   async startConversation(tenantId: string, senderId: string, dto: StartConversationDto) {
     // Acá no hay conversación de la cual deducir la línea, así que la elige el agente
     // (o se usa la línea por defecto del tenant).
-    const account = dto.whatsappAccountId
-      ? await this.accounts.findActiveOrThrow(tenantId, dto.whatsappAccountId)
+    const account = dto.channelAccountId
+      ? await this.accounts.findActiveCredsOrThrow(tenantId, dto.channelAccountId)
       : await this.accounts.getDefault(tenantId);
     if (!account) {
       this.logger.warn(`[Envio bloqueado] Tenant ${tenantId} no tiene ninguna línea de WhatsApp activa`);
@@ -221,23 +223,27 @@ export class WhatsAppService {
     // El WABA de la línea que envía: una plantilla de otro WABA no existe para este número.
     const template = await this.templatesService.findApprovedOrThrow(tenantId, dto.templateId, account.wabaId);
 
-    let contact: { id: string; name: string | null; phone: string };
+    let contact: { id: string; name: string | null; phone: string | null };
     if (dto.contactId) {
       const found = await this.prisma.contact.findFirst({ where: { id: dto.contactId, tenantId } });
       if (!found) throw new NotFoundException('Contact not found');
       contact = found;
     } else {
       if (!dto.phone) throw new BadRequestException('phone is required to create a new contact');
-      contact = await this.prisma.contact.upsert({
-        where: { tenantId_phone: { tenantId, phone: dto.phone } },
-        update: dto.name ? { name: dto.name } : {},
-        create: { tenantId, phone: dto.phone, name: dto.name },
-      });
+      contact = await this.identities.resolve(tenantId, 'WHATSAPP', dto.phone, { name: dto.name });
+    }
+
+    // El destinatario sale de la identidad de WhatsApp del contacto, no de su columna
+    // phone: un contacto que llego por Instagram no tiene numero, y a uno que tiene
+    // ficha cargada a mano puede faltarle la identidad.
+    const recipient = await this.identities.findExternalId(contact.id, 'WHATSAPP');
+    if (!recipient) {
+      throw new BadRequestException('Ese contacto no tiene un número de WhatsApp');
     }
 
     // Misma regla que el webhook: la identidad de un hilo es (contacto, línea).
     let conversation = await this.prisma.conversation.findFirst({
-      where: { tenantId, contactId: contact.id, whatsappAccountId: account.id, status: { not: 'CLOSED' } },
+      where: { tenantId, contactId: contact.id, channelAccountId: account.id, status: { not: 'CLOSED' } },
       orderBy: { createdAt: 'desc' },
     });
 
@@ -250,7 +256,7 @@ export class WhatsAppService {
         data: {
           tenantId,
           contactId: contact.id,
-          whatsappAccountId: account.id,
+          channelAccountId: account.id,
           status: 'OPEN',
           assignedUserId: senderId,
           lastMessageAt: now,
@@ -267,7 +273,7 @@ export class WhatsAppService {
     const payload = {
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
-      to: contact.phone,
+      to: recipient,
       type: 'template',
       template: {
         name: template.name,
@@ -326,7 +332,15 @@ export class WhatsAppService {
       payload: {
         message,
         conversationId: conversation.id,
-        contact: { id: contact.id, name: contact.name, phone: contact.phone },
+        contact: {
+          id: contact.id,
+          name: contact.name,
+          phone: contact.phone,
+          channel: 'WHATSAPP' as const,
+          // El evento en vivo tiene que traer el mismo nombre que devuelve la API al
+          // recargar; si no, la conversacion cambia de titulo sola al refrescar.
+          displayId: displayId('WHATSAPP', contact, null),
+        },
         lastMessageText: renderedBody,
         lastMessageAt: now.toISOString(),
       },
@@ -385,6 +399,20 @@ export class WhatsAppService {
       this.logger.error('Failed to upload media to Meta', err?.response?.data || err?.message);
       throw new BadRequestException(err?.response?.data?.error?.message || 'Failed to upload media');
     }
+  }
+
+  /**
+   * A que numero se entrega. Sale de la identidad de WhatsApp del contacto de la
+   * conversacion, nunca de lo que mande el cliente: hasta ahora el panel enviaba el
+   * destinatario en el body, asi que un request manipulado podia entregarle el mensaje
+   * a cualquiera.
+   */
+  private async recipientFor(contactId: string): Promise<string> {
+    const recipient = await this.identities.findExternalId(contactId, 'WHATSAPP');
+    if (!recipient) {
+      throw new BadRequestException('Ese contacto no tiene un número de WhatsApp');
+    }
+    return recipient;
   }
 
   private buildPayload(to: string, dto: SendMessageDto) {

@@ -74,7 +74,7 @@ export default function ReplyBox({ conversationId, contact }: Props) {
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
     setIsSending(true);
     try {
-      const message = await whatsappApi.send({ conversationId, to: contact.phone, type: 'text', body });
+      const message = await whatsappApi.send({ conversationId, type: 'text', body });
       addMessage(message as Message);
     } catch (err: any) {
       toast.error(err?.response?.data?.message || 'Error al enviar');
@@ -95,7 +95,6 @@ export default function ReplyBox({ conversationId, contact }: Props) {
     try {
       const message = await whatsappApi.sendMedia({
         conversationId,
-        to: contact.phone,
         type: whatsappTypeFor(file),
         caption: caption || undefined,
         file,

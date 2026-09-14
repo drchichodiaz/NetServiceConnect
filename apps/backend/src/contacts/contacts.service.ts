@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { ContactIdentityService } from './contact-identity.service';
 import { CreateContactDto } from './dto/create-contact.dto';
 import { parseWorkbookRows, ParsedContactRow } from './contacts-import.util';
 
@@ -17,7 +18,10 @@ export interface ImportContactsResult {
 
 @Injectable()
 export class ContactsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private identities: ContactIdentityService,
+  ) {}
 
   async create(tenantId: string, dto: CreateContactDto) {
     const existing = await this.prisma.contact.findUnique({
@@ -25,7 +29,12 @@ export class ContactsService {
     });
     if (existing) throw new ConflictException('Contact with this phone already exists');
 
-    return this.prisma.contact.create({ data: { tenantId, ...dto } });
+    const contact = await this.prisma.contact.create({ data: { tenantId, ...dto } });
+    // Un contacto dado de alta a mano todavia no escribio nunca, asi que no tiene
+    // identidad de canal. Se le crea la de WhatsApp con su telefono para que, cuando
+    // escriba, el webhook lo reconozca en vez de abrir una ficha nueva.
+    await this.identities.ensureWhatsAppIdentity(tenantId, contact.id, dto.phone);
+    return contact;
   }
 
   async findAll(tenantId: string, search?: string) {
@@ -120,6 +129,20 @@ export class ContactsService {
     if (newRows.length > 0) {
       await this.prisma.contact.createMany({
         data: newRows.map((r) => ({ tenantId, phone: r.phone, name: r.name, email: r.email, company: r.company })),
+        skipDuplicates: true,
+      });
+
+      // Mismo motivo que en el alta manual: sin identidad, el primer mensaje de un
+      // contacto importado abriria una ficha duplicada. createMany no devuelve los ids,
+      // asi que se releen por telefono — son los que acabamos de insertar.
+      const created = await this.prisma.contact.findMany({
+        where: { tenantId, phone: { in: newRows.map((r) => r.phone) } },
+        select: { id: true, phone: true },
+      });
+      await this.prisma.contactIdentity.createMany({
+        data: created
+          .filter((c): c is { id: string; phone: string } => c.phone !== null)
+          .map((c) => ({ tenantId, contactId: c.id, channel: 'WHATSAPP' as const, externalId: c.phone })),
         skipDuplicates: true,
       });
     }

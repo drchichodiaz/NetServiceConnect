@@ -57,12 +57,12 @@ export const messagesApi = {
 // ─── WhatsApp ─────────────────────────────────────────────────────────────────
 
 export const whatsappApi = {
-  send: (data: { conversationId: string; to: string; type: string; body?: string; mediaUrl?: string }) =>
+  // El destinatario ya no viaja en el request: lo deriva el backend de la conversacion.
+  send: (data: { conversationId: string; type: string; body?: string; mediaUrl?: string }) =>
     api.post('/whatsapp/send', data).then((r) => r.data),
-  sendMedia: (data: { conversationId: string; to: string; type: string; caption?: string; file: File }) => {
+  sendMedia: (data: { conversationId: string; type: string; caption?: string; file: File }) => {
     const form = new FormData();
     form.append('conversationId', data.conversationId);
-    form.append('to', data.to);
     form.append('type', data.type);
     if (data.caption) form.append('caption', data.caption);
     form.append('file', data.file);

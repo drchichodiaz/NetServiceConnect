@@ -8,9 +8,10 @@ import { MediaModule } from '../media/media.module';
 import { TemplatesModule } from '../templates/templates.module';
 import { BotModule } from '../bot/bot.module';
 import { WhatsAppAccountsModule } from './accounts.module';
+import { ContactIdentityModule } from '../contacts/contact-identity.module';
 
 @Module({
-  imports: [SystemConfigModule, MediaModule, TemplatesModule, BotModule, WhatsAppAccountsModule],
+  imports: [SystemConfigModule, MediaModule, TemplatesModule, BotModule, WhatsAppAccountsModule, ContactIdentityModule],
   controllers: [WhatsAppController],
   providers: [WhatsAppService, EmbeddedSignupService, WebhookService],
   exports: [WhatsAppService],

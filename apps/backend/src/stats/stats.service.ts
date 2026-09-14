@@ -63,14 +63,14 @@ export class StatsService {
         // ── Comparativa por linea (sucursal) ─────────────────────────────────
         // Conversaciones del periodo por linea y estado.
         this.prisma.conversation.groupBy({
-          by: ['whatsappAccountId', 'status'],
+          by: ['channelAccountId', 'status'],
           where: { tenantId, createdAt: { gte: since } },
           _count: { _all: true },
         }),
 
         // Conversaciones que el bot cerro sin pasar por un humano.
         this.prisma.conversation.groupBy({
-          by: ['whatsappAccountId'],
+          by: ['channelAccountId'],
           where: { tenantId, createdAt: { gte: since }, closedReason: 'BOT_RESOLVED' },
           _count: { _all: true },
         }),
@@ -78,14 +78,14 @@ export class StatsService {
         // Mensajes por linea y direccion. Va en SQL crudo porque Message no guarda
         // la linea (la tiene la conversacion) y Prisma no agrupa por campo de relacion.
         this.prisma.$queryRaw<Array<{ accountId: string | null; direction: string; count: number }>>`
-          SELECT c."whatsappAccountId" AS "accountId", m."direction", COUNT(*)::int AS "count"
+          SELECT c."channelAccountId" AS "accountId", m."direction", COUNT(*)::int AS "count"
           FROM "Message" m
           JOIN "Conversation" c ON c."id" = m."conversationId"
           WHERE m."tenantId" = ${tenantId} AND m."createdAt" >= ${since}
           GROUP BY 1, 2
         `,
 
-        this.prisma.whatsAppAccount.findMany({
+        this.prisma.channelAccount.findMany({
           where: { tenantId },
           select: { id: true, label: true, phoneNumber: true, isActive: true },
           orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
@@ -183,13 +183,13 @@ export class StatsService {
     };
 
     for (const r of lineConvData) {
-      const row = rowFor(r.whatsappAccountId);
+      const row = rowFor(r.channelAccountId);
       row.conversations += r._count._all;
       if (r.status === 'OPEN') row.open += r._count._all;
       if (r.status === 'CLOSED') row.closed += r._count._all;
     }
     for (const r of lineBotData) {
-      rowFor(r.whatsappAccountId).botResolved += r._count._all;
+      rowFor(r.channelAccountId).botResolved += r._count._all;
     }
     for (const r of lineMsgData) {
       const row = rowFor(r.accountId);

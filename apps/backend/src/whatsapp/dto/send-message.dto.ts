@@ -4,8 +4,6 @@ export class SendMessageDto {
   @IsString()
   conversationId: string;
 
-  @IsString()
-  to: string;
 
   @IsIn(['text', 'image', 'audio', 'document'])
   type: string;

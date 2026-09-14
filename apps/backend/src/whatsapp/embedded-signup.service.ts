@@ -139,8 +139,8 @@ export class EmbeddedSignupService {
     // Sin accountId se asume el caso de un tenant con una sola linea (o la recien
     // conectada, que queda como la mas nueva).
     const account = accountId
-      ? await this.prisma.whatsAppAccount.findFirst({ where: { id: accountId, tenantId } })
-      : await this.prisma.whatsAppAccount.findFirst({ where: { tenantId }, orderBy: { createdAt: 'desc' } });
+      ? await this.prisma.channelAccount.findFirst({ where: { id: accountId, tenantId } })
+      : await this.prisma.channelAccount.findFirst({ where: { tenantId }, orderBy: { createdAt: 'desc' } });
     if (!account) throw new BadRequestException('No hay configuración de WhatsApp para este tenant');
     const cfg = await this.systemConfig.get();
 
@@ -170,7 +170,7 @@ export class EmbeddedSignupService {
    * como CONNECTED aunque el registro no haya pasado por aca.
    */
   async refreshPlatformStatus(accountId: string): Promise<string | null> {
-    const account = await this.prisma.whatsAppAccount.findUnique({ where: { id: accountId } });
+    const account = await this.prisma.channelAccount.findUnique({ where: { id: accountId } });
     if (!account) return null;
     const cfg = await this.systemConfig.get();
 
@@ -188,7 +188,7 @@ export class EmbeddedSignupService {
       if (data.error) throw new Error(data.error.message);
       status = data.status ?? null;
 
-      await this.prisma.whatsAppAccount.update({
+      await this.prisma.channelAccount.update({
         where: { id: accountId },
         data: {
           platformStatus: status,
@@ -201,7 +201,7 @@ export class EmbeddedSignupService {
       });
     } catch (err) {
       this.logger.warn(`[PlatformStatus] No se pudo leer el estado del número ${account.phoneNumberId}`, err);
-      await this.prisma.whatsAppAccount.update({
+      await this.prisma.channelAccount.update({
         where: { id: accountId },
         data: { platformStatus: null, statusCheckedAt: new Date() },
       });
@@ -218,7 +218,11 @@ export class EmbeddedSignupService {
    * Reusa el token ya guardado de cada WABA — no pide nada nuevo al usuario.
    */
   async syncNumbers(tenantId: string) {
-    const existing = await this.prisma.whatsAppAccount.findMany({ where: { tenantId } });
+    // Solo lineas de WhatsApp: esto sincroniza numeros contra un WABA, y una pagina de
+    // Facebook o una cuenta de Instagram no tiene ninguno.
+    const existing = await this.prisma.channelAccount.findMany({
+      where: { tenantId, channel: 'WHATSAPP', wabaId: { not: null } },
+    });
     if (existing.length === 0) {
       throw new BadRequestException('Primero conecta una cuenta de WhatsApp para poder sincronizar sus números');
     }
@@ -228,7 +232,7 @@ export class EmbeddedSignupService {
     // con el token de la cuenta mas nueva de ese WABA (la de token menos vencido).
     const tokenByWaba = new Map<string, string>();
     for (const acc of [...existing].sort((a, b) => +a.createdAt - +b.createdAt)) {
-      tokenByWaba.set(acc.wabaId, acc.accessToken);
+      tokenByWaba.set(acc.wabaId!, acc.accessToken);
     }
 
     const knownPhoneIds = new Set(existing.map((a) => a.phoneNumberId));
@@ -404,9 +408,9 @@ export class EmbeddedSignupService {
 
     // La clave es (tenant, numero): reconectar un numero que ya existe lo refresca
     // — renueva el token — en vez de pisar la linea de otra sucursal.
-    const isFirst = (await this.prisma.whatsAppAccount.count({ where: { tenantId } })) === 0;
+    const isFirst = (await this.prisma.channelAccount.count({ where: { tenantId } })) === 0;
 
-    return this.prisma.whatsAppAccount.upsert({
+    return this.prisma.channelAccount.upsert({
       where: { tenantId_phoneNumberId: { tenantId, phoneNumberId: phoneId } },
       update: {
         wabaId,
