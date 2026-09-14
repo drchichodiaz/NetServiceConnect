@@ -60,7 +60,7 @@ function SLABadge({ lastInboundAt }: { lastInboundAt: string }) {
 }
 
 export default function ConversationItem({ conversation, isSelected, onClick }: Props) {
-  const { contact, lastMessageText, lastMessageAt, lastInboundAt, unreadCount, tags, assignedUser, status, whatsappAccount } = conversation;
+  const { contact, lastMessageText, lastMessageAt, lastInboundAt, unreadCount, tags, assignedUser, status, channelAccount } = conversation;
   const name = contact.displayId || contact.name || contact.phone || 'Contacto';
 
   // Mostrar SLA solo en conversaciones abiertas/pendientes con mensajes entrantes sin responder
@@ -69,7 +69,7 @@ export default function ConversationItem({ conversation, isSelected, onClick }: 
   // El badge de línea solo tiene sentido si el tenant tiene más de un número: con
   // uno solo sería la misma etiqueta repetida en cada fila.
   const isMultiLine = useInboxStore((s) => s.accounts.length > 1);
-  const showLine = isMultiLine && !!whatsappAccount;
+  const showLine = isMultiLine && !!channelAccount;
 
   return (
     <button
@@ -125,10 +125,10 @@ export default function ConversationItem({ conversation, isSelected, onClick }: 
               <span
                 className="flex items-center gap-1 text-[10px] rounded-full pl-1.5 pr-2 py-0.5 font-semibold max-w-[140px]"
                 style={{ background: '#EEF2FF', color: '#4F46E5' }}
-                title={`Entró por ${accountLabel(whatsappAccount)}`}
+                title={`Entró por ${accountLabel(channelAccount)}`}
               >
                 <Phone className="w-2.5 h-2.5 shrink-0" />
-                <span className="truncate">{accountLabel(whatsappAccount)}</span>
+                <span className="truncate">{accountLabel(channelAccount)}</span>
               </span>
             )}
             {showSLA && <SLABadge lastInboundAt={lastInboundAt!} />}

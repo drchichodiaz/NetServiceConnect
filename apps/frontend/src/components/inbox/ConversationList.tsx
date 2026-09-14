@@ -23,15 +23,15 @@ export default function ConversationList() {
 
   // Con una sola línea el filtro no aporta nada: es el caso de un tenant común.
   const showLineFilter = accounts.length > 1;
-  const activeLine = accounts.find((a) => a.id === filter.whatsappAccountId);
+  const activeLine = accounts.find((a) => a.id === filter.channelAccountId);
 
   function handleStatusChange(status: string) {
     setFilter({ ...filter, status });
   }
 
-  function handleLineChange(whatsappAccountId?: string) {
+  function handleLineChange(channelAccountId?: string) {
     setShowLineMenu(false);
-    setFilter({ ...filter, whatsappAccountId });
+    setFilter({ ...filter, channelAccountId });
   }
 
   function handleSearch(e: React.ChangeEvent<HTMLInputElement>) {
@@ -106,7 +106,7 @@ export default function ConversationList() {
                 >
                   <LineOption
                     label="Todas las líneas"
-                    selected={!filter.whatsappAccountId}
+                    selected={!filter.channelAccountId}
                     onClick={() => handleLineChange(undefined)}
                   />
                   {accounts.map((acc) => (
@@ -114,7 +114,7 @@ export default function ConversationList() {
                       key={acc.id}
                       label={accountLabel(acc)}
                       hint={acc.label ? acc.phoneNumber ?? undefined : undefined}
-                      selected={filter.whatsappAccountId === acc.id}
+                      selected={filter.channelAccountId === acc.id}
                       onClick={() => handleLineChange(acc.id)}
                     />
                   ))}

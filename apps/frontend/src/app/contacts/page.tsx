@@ -465,7 +465,7 @@ function NewConversationModal({ contact, onClose, onSent }: {
     setLoadingTemplates(true);
     setTemplateId('');
     setVariables([]);
-    Promise.all([templatesApi.list({ whatsappAccountId: accountId }), templatesApi.list()])
+    Promise.all([templatesApi.list({ channelAccountId: accountId }), templatesApi.list()])
       .then(([forLine, all]: [Template[], Template[]]) => {
         const usable = forLine.filter((t) => t.status === 'APPROVED');
         setTemplates(usable);
@@ -496,7 +496,7 @@ function NewConversationModal({ contact, onClose, onSent }: {
         name: contact ? undefined : (name.trim() || undefined),
         templateId,
         variables,
-        whatsappAccountId: accountId || undefined,
+        channelAccountId: accountId || undefined,
       });
       toast.success('Conversación iniciada');
       onSent(result.conversation.id);

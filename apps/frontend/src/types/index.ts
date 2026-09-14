@@ -53,8 +53,8 @@ export interface Conversation {
   tenantId: string;
   contactId: string;
   contact: Contact;
-  whatsappAccountId?: string | null;
-  whatsappAccount?: ConversationAccount | null;
+  channelAccountId?: string | null;
+  channelAccount?: ConversationAccount | null;
   assignedUserId?: string;
   assignedUser?: { id: string; name: string };
   status: ConversationStatus;

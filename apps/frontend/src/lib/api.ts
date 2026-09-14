@@ -36,7 +36,7 @@ export const authApi = {
 // ─── Conversations ─────────────────────────────────────────────────────────────
 
 export const conversationsApi = {
-  list: (params?: { status?: string; assignedUserId?: string; search?: string; contactId?: string; whatsappAccountId?: string }) =>
+  list: (params?: { status?: string; assignedUserId?: string; search?: string; contactId?: string; channelAccountId?: string }) =>
     api.get('/conversations', { params }).then((r) => r.data),
   get: (id: string) => api.get(`/conversations/${id}`).then((r) => r.data),
   update: (id: string, data: any) =>
@@ -74,7 +74,7 @@ export const whatsappApi = {
     name?: string;
     templateId: string;
     variables?: string[];
-    whatsappAccountId?: string;
+    channelAccountId?: string;
   }) => api.post('/whatsapp/start-conversation', data).then((r) => r.data),
 
   // ── Líneas (una por sucursal) ──────────────────────────────────────────────
@@ -248,11 +248,11 @@ export const tenantsApi = {
 // ─── Message Templates ─────────────────────────────────────────────────────────
 
 export const templatesApi = {
-  // Con whatsappAccountId: solo las plantillas del WABA de esa linea. Meta guarda las
+  // Con channelAccountId: solo las plantillas del WABA de esa linea. Meta guarda las
   // plantillas por WABA, asi que ofrecer una de otro WABA termina en error 132001.
-  list: (opts?: { whatsappAccountId?: string }) =>
+  list: (opts?: { channelAccountId?: string }) =>
     api.get('/whatsapp/templates', {
-      params: opts?.whatsappAccountId ? { whatsappAccountId: opts.whatsappAccountId } : undefined,
+      params: opts?.channelAccountId ? { channelAccountId: opts.channelAccountId } : undefined,
     }).then((r) => r.data),
   create: (data: { name: string; language: string; category: string; bodyText: string; wabaId?: string; exampleValues?: string[] }) =>
     api.post('/whatsapp/templates', data).then((r) => r.data),

@@ -12,10 +12,10 @@ import { useAuthStore } from './auth.store';
  */
 function matchesFilter(
   conv: Conversation,
-  filter: { status?: string; whatsappAccountId?: string },
+  filter: { status?: string; channelAccountId?: string },
 ): boolean {
   if (filter.status && conv.status !== filter.status) return false;
-  if (filter.whatsappAccountId && conv.whatsappAccountId !== filter.whatsappAccountId) return false;
+  if (filter.channelAccountId && conv.channelAccountId !== filter.channelAccountId) return false;
 
   // Un AGENTE solo ve lo suyo: si se reasigna a otro, desaparece de su bandeja.
   const user = useAuthStore.getState().user;
@@ -34,12 +34,12 @@ interface InboxStore {
   // Lineas activas del tenant (una por sucursal) — alimentan el filtro del inbox.
   // Vacio o de largo 1 significa que no hay nada que filtrar y el selector se oculta.
   accounts: WhatsAppAccount[];
-  filter: { status?: string; search?: string; whatsappAccountId?: string };
+  filter: { status?: string; search?: string; channelAccountId?: string };
 
   loadConversations: (opts?: { silent?: boolean }) => Promise<void>;
   loadAccounts: () => Promise<void>;
   selectConversation: (id: string) => Promise<void>;
-  setFilter: (filter: { status?: string; search?: string; whatsappAccountId?: string }) => void;
+  setFilter: (filter: { status?: string; search?: string; channelAccountId?: string }) => void;
   updateConversation: (id: string, data: any) => Promise<void>;
   addMessage: (message: Message) => void;
   addNote: (note: InternalNote) => void;
