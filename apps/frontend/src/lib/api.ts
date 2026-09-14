@@ -225,8 +225,22 @@ export const statsApi = {
 
 // ─── System Config ────────────────────────────────────────────────────────────
 
+export interface MailConfig {
+  host: string; port: number; user: string; from: string;
+  /** De donde salio la config: 'db' = cargada desde el panel, 'env' = variables del server. */
+  source: 'db' | 'env';
+  /** El panel nunca devuelve la contraseña, solo si hay una guardada. */
+  hasPassword: boolean;
+}
+
 export const systemConfigApi = {
   get: () => api.get('/system-config').then((r) => r.data),
+  getMail: (): Promise<MailConfig> => api.get('/system-config/mail').then((r) => r.data),
+  updateMail: (data: {
+    mailHost?: string; mailPort?: number; mailUser?: string; mailPass?: string; mailFrom?: string;
+  }): Promise<MailConfig> => api.patch('/system-config/mail', data).then((r) => r.data),
+  sendTestMail: (to: string): Promise<{ sent: boolean; error?: string }> =>
+    api.post('/system-config/mail/test', { to }).then((r) => r.data),
   // Solo el App ID / Config ID de Meta — lo que necesita el Embedded Signup. El GET
   // completo es superadmin, asi que un admin de tenant no puede usarlo.
   getMetaApp: (): Promise<{ metaAppId: string; metaConfigId: string; metaApiVersion: string }> =>

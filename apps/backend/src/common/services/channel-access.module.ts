@@ -1,5 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { ChannelAccessService } from './channel-access.service';
+import { CryptoService } from './crypto.service';
 
 /**
  * Global porque el filtro por linea lo necesitan modulos que no tienen relacion entre
@@ -8,7 +9,7 @@ import { ChannelAccessService } from './channel-access.service';
  */
 @Global()
 @Module({
-  providers: [ChannelAccessService],
-  exports: [ChannelAccessService],
+  providers: [ChannelAccessService, CryptoService],
+  exports: [ChannelAccessService, CryptoService],
 })
 export class ChannelAccessModule {}

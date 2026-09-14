@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { systemConfigApi } from '@/lib/api';
-import { Shield, Eye, EyeOff, Save, RefreshCw, CheckCircle, AlertCircle, Loader2, FolderCog } from 'lucide-react';
+import { systemConfigApi, type MailConfig } from '@/lib/api';
+import { Shield, Eye, EyeOff, Save, RefreshCw, CheckCircle, AlertCircle, Loader2, FolderCog, Mail, Send } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface Config {
@@ -244,9 +244,152 @@ export default function SystemConfigPage() {
         </button>
       </form>
 
+      <MailSettings />
+
       <p className="text-[11px] text-ink-subtle text-center mt-4">
         Solo administradores pueden modificar esta configuración. Los cambios toman efecto inmediatamente sin reiniciar el servidor.
       </p>
     </div>
+  );
+}
+
+
+/**
+ * Configuracion del correo saliente. Lo que se guarda acá pisa a las variables MAIL_*
+ * del servidor, asi que una instalacion se puede configurar sin acceso por SSH.
+ */
+function MailSettings() {
+  const [cfg, setCfg] = useState<MailConfig | null>(null);
+  const [host, setHost] = useState('');
+  const [port, setPort] = useState(587);
+  const [user, setUser] = useState('');
+  const [pass, setPass] = useState('');
+  const [from, setFrom] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [testTo, setTestTo] = useState('');
+  const [testing, setTesting] = useState(false);
+
+  useEffect(() => {
+    systemConfigApi.getMail().then((c) => {
+      setCfg(c);
+      setHost(c.host); setPort(c.port); setUser(c.user); setFrom(c.from);
+    }).catch(() => {});
+  }, []);
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      // La contraseña solo viaja si el usuario escribio una: vacia significa "dejar la
+      // que ya estaba", no "borrarla".
+      const updated = await systemConfigApi.updateMail({
+        mailHost: host, mailPort: port, mailUser: user, mailFrom: from,
+        ...(pass ? { mailPass: pass } : {}),
+      });
+      setCfg(updated);
+      setPass('');
+      toast.success('Configuración de correo guardada');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'No se pudo guardar');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleTest() {
+    if (!testTo) { toast.error('Escribí una dirección para la prueba'); return; }
+    setTesting(true);
+    try {
+      const result = await systemConfigApi.sendTestMail(testTo);
+      if (result.sent) toast.success(`Correo enviado a ${testTo}`);
+      // El error del servidor SMTP se muestra tal cual: es lo unico que permite saber
+      // si falta verificar el dominio, si la clave esta mal o si el puerto es otro.
+      else toast.error(result.error || 'No se pudo enviar', { duration: 8000 });
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'No se pudo enviar');
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSave} className="card p-6 mt-5 space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-ink flex items-center gap-2">
+            <Mail className="w-4 h-4 text-ink-muted" /> Correo saliente
+          </p>
+          <p className="text-xs text-ink-muted mt-1">
+            Se usa para recuperar contraseñas. Lo que cargues acá tiene prioridad sobre las
+            variables del servidor.
+          </p>
+        </div>
+        {cfg && (
+          <span className="text-[10px] uppercase tracking-wide rounded-full px-2 py-1 shrink-0"
+                style={{ background: 'var(--surface-muted)' }}>
+            {cfg.source === 'db' ? 'Desde el panel' : 'Desde el servidor'}
+          </span>
+        )}
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        <div className="col-span-2 space-y-1.5">
+          <label className="text-xs font-semibold text-ink-subtle">Servidor SMTP</label>
+          <input value={host} onChange={(e) => setHost(e.target.value)}
+                 placeholder="smtp.resend.com" className="input w-full" />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-ink-subtle">Puerto</label>
+          <input type="number" value={port} onChange={(e) => setPort(Number(e.target.value))}
+                 className="input w-full" />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-ink-subtle">Usuario</label>
+          <input value={user} onChange={(e) => setUser(e.target.value)}
+                 autoComplete="off" placeholder="resend" className="input w-full" />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-ink-subtle">
+            Contraseña / API key
+          </label>
+          <input type="password" value={pass} onChange={(e) => setPass(e.target.value)}
+                 autoComplete="new-password"
+                 placeholder={cfg?.hasPassword ? 'Ya hay una guardada' : 'Pegá la API key'}
+                 className="input w-full" />
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="text-xs font-semibold text-ink-subtle">Remitente</label>
+        <input value={from} onChange={(e) => setFrom(e.target.value)}
+               placeholder="NetService Connect <noreply@tudominio.com>" className="input w-full" />
+        <p className="text-[11px] text-ink-subtle">
+          La dirección tiene que ser de un dominio verificado en tu proveedor, o el envío se rechaza.
+        </p>
+      </div>
+
+      <button type="submit" disabled={saving} className="btn-primary w-full justify-center">
+        {saving ? <><Loader2 className="w-4 h-4 animate-spin" />Guardando...</> : <><Save className="w-4 h-4" />Guardar correo</>}
+      </button>
+
+      <div className="border-t border-line pt-4 space-y-2">
+        <label className="text-xs font-semibold text-ink-subtle">Probar el envío</label>
+        <div className="flex gap-2">
+          <input type="email" value={testTo} onChange={(e) => setTestTo(e.target.value)}
+                 placeholder="tu@email.com" className="input flex-1" />
+          <button type="button" onClick={handleTest} disabled={testing} className="btn-secondary shrink-0">
+            {testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+            Enviar
+          </button>
+        </div>
+        <p className="text-[11px] text-ink-subtle">
+          Manda un correo real con la configuración guardada. Si falla, muestra el error del
+          servidor de correo — guardá antes de probar.
+        </p>
+      </div>
+    </form>
   );
 }

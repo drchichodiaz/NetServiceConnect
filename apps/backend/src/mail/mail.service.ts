@@ -1,6 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
+import { SystemConfigService } from '../system-config/system-config.service';
 
 export interface MailMessage {
   to: string;
@@ -9,79 +9,101 @@ export interface MailMessage {
   text: string;
 }
 
+export interface MailSendResult {
+  sent: boolean;
+  /** El error tal cual lo devolvio el servidor SMTP. Solo se le muestra a un super
+   *  admin probando la configuracion — nunca al usuario final. */
+  error?: string;
+}
+
 /**
  * Envio de correo por SMTP.
  *
  * Va por SMTP y no por el SDK de un proveedor a proposito: el codigo queda atado al
- * protocolo y no a la empresa. Hoy apunta a Resend; mudarse a SES, Postmark o a un
- * servidor propio es cambiar las variables de MAIL_* y reiniciar, sin recompilar ni
- * tocar la logica de recuperacion de contrasena.
+ * protocolo y no a la empresa. Mudarse de Resend a SES, Postmark o un servidor propio
+ * es cambiar la configuracion, sin recompilar ni tocar la logica de recuperacion.
  *
- * Si no hay configuracion de SMTP el servicio no falla: loguea lo que hubiera mandado y
- * sigue. Eso permite levantar el backend en desarrollo sin credenciales, y que un
- * despliegue al que todavia no le cargaron la API key no se caiga entero — el precio es
- * que el correo no sale, y por eso lo avisa en el log con nivel warn.
+ * La configuracion se lee en cada envio, no al arrancar: como tambien se puede cargar
+ * desde el panel, tomarla una sola vez al inicio haria que guardar una configuracion
+ * nueva no tuviera efecto hasta reiniciar el backend. La conexion se cachea y se
+ * descarta sola cuando alguno de los datos cambia.
  */
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
-  private readonly transporter: nodemailer.Transporter | null;
-  private readonly from: string;
 
-  constructor(private config: ConfigService) {
-    const host = this.config.get<string>('MAIL_HOST');
-    const user = this.config.get<string>('MAIL_USER');
-    const pass = this.config.get<string>('MAIL_PASS');
-    this.from = this.config.get<string>('MAIL_FROM') || 'NetService Connect <onboarding@resend.dev>';
+  private transporter: nodemailer.Transporter | null = null;
+  /** Huella de la config con la que se armo el transporter cacheado. */
+  private fingerprint = '';
 
-    if (!host || !user || !pass) {
-      this.transporter = null;
-      this.logger.warn('SMTP sin configurar (MAIL_HOST/MAIL_USER/MAIL_PASS): los correos se van a loguear, no a enviar');
-      return;
-    }
+  constructor(
+    @Inject(forwardRef(() => SystemConfigService))
+    private systemConfig: SystemConfigService,
+  ) {}
 
-    const port = Number(this.config.get('MAIL_PORT') ?? 587);
-    this.transporter = nodemailer.createTransport({
-      host,
-      port,
-      // 465 es SMTPS (TLS desde el saludo); 587 arranca en claro y sube a TLS con
-      // STARTTLS. Ponerlo al reves hace que la conexion quede colgada hasta el timeout.
-      secure: port === 465,
-      auth: { user, pass },
-    });
-  }
-
-  get isConfigured(): boolean {
-    return this.transporter !== null;
+  async isConfigured(): Promise<boolean> {
+    const cfg = await this.systemConfig.getMailConfig();
+    return !!(cfg.host && cfg.user && cfg.pass);
   }
 
   /**
-   * Devuelve true si el correo salio. No lanza: quien llama decide si un fallo de
-   * correo tiene que romper su operacion, y en el caso de "olvide mi contrasena" la
-   * respuesta al usuario es la misma haya salido o no, para no revelar que direcciones
-   * existen en el sistema.
+   * No lanza: quien llama decide si un fallo de correo rompe su operacion. En "olvide
+   * mi contrasena" la respuesta al usuario es la misma salga o no, para no revelar que
+   * direcciones existen.
    */
-  async send(message: MailMessage): Promise<boolean> {
-    if (!this.transporter) {
+  async send(message: MailMessage): Promise<MailSendResult> {
+    const cfg = await this.systemConfig.getMailConfig();
+
+    if (!cfg.host || !cfg.user || !cfg.pass) {
       this.logger.warn(`[correo no enviado - SMTP sin configurar] para=${message.to} asunto="${message.subject}"`);
-      return false;
+      return { sent: false, error: 'SMTP sin configurar' };
     }
 
+    const transporter = this.getTransporter(cfg);
+
     try {
-      const info = await this.transporter.sendMail({
-        from: this.from,
+      const info = await transporter.sendMail({
+        from: cfg.from || cfg.user,
         to: message.to,
         subject: message.subject,
         text: message.text,
         html: message.html,
       });
       this.logger.log(`Correo enviado a ${message.to} (${info.messageId})`);
-      return true;
+      return { sent: true };
     } catch (err: any) {
-      // El detalle va al log del servidor, nunca al usuario: un error de SMTP puede
-      // traer el host y el usuario de la cuenta.
-      this.logger.error(`Fallo el envio a ${message.to}: ${err?.message ?? err}`);
-      return false;
+      const detail = err?.response || err?.message || String(err);
+      this.logger.error(`Fallo el envio a ${message.to}: ${detail}`);
+      return { sent: false, error: detail };
     }
+  }
+
+  /** Correo de prueba, para que configurar SMTP no sea a ciegas. */
+  async sendTest(to: string): Promise<MailSendResult> {
+    return this.send({
+      to,
+      subject: 'Prueba de configuración — NetService Connect',
+      text: 'Si estás leyendo esto, el envío de correo del sistema quedó funcionando.',
+      html:
+        '<p style="font-family:sans-serif;font-size:14px;color:#101819">' +
+        'Si estás leyendo esto, el envío de correo del sistema quedó funcionando.</p>',
+    });
+  }
+
+  private getTransporter(cfg: { host: string; port: number; user: string; pass: string }) {
+    const fingerprint = `${cfg.host}|${cfg.port}|${cfg.user}|${cfg.pass}`;
+    if (this.transporter && this.fingerprint === fingerprint) return this.transporter;
+
+    this.transporter?.close();
+    this.transporter = nodemailer.createTransport({
+      host: cfg.host,
+      port: cfg.port,
+      // 465 es SMTPS (TLS desde el saludo); 587 arranca en claro y sube con STARTTLS.
+      // Al reves, la conexion queda colgada hasta el timeout.
+      secure: cfg.port === 465,
+      auth: { user: cfg.user, pass: cfg.pass },
+    });
+    this.fingerprint = fingerprint;
+    return this.transporter;
   }
 }

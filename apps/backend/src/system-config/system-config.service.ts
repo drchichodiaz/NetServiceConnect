@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
+import { CryptoService } from '../common/services/crypto.service';
 import { UpdateSystemConfigDto } from './dto/system-config.dto';
 
 export interface ResolvedConfig {
@@ -19,6 +20,7 @@ export class SystemConfigService {
   constructor(
     private prisma: PrismaService,
     private config: ConfigService,
+    private crypto: CryptoService,
   ) {}
 
   async get(): Promise<ResolvedConfig> {
@@ -94,4 +96,50 @@ export class SystemConfigService {
       update: payload,
     });
   }
+
+  /**
+   * Configuracion de correo saliente. Prioridad: base > variables MAIL_* del entorno.
+   * La comparacion es campo por campo a proposito: una instalacion puede tener el host
+   * en el .env y solo la clave cargada desde el panel, o al reves.
+   *
+   * La contrasena se guarda cifrada, asi que acá se descifra. Si no se puede (cambio la
+   * clave del servidor), se cae a la del entorno en vez de devolver un valor corrupto
+   * que fallaria recien al intentar conectarse.
+   */
+  async getMailConfig() {
+    const record = await this.prisma.systemConfig.findUnique({ where: { id: '1' } });
+    const storedPass = record?.mailPass ? this.crypto.decrypt(record.mailPass) : null;
+
+    return {
+      host: record?.mailHost || this.config.get<string>('MAIL_HOST') || '',
+      port: record?.mailPort ?? Number(this.config.get('MAIL_PORT') ?? 587),
+      user: record?.mailUser || this.config.get<string>('MAIL_USER') || '',
+      pass: storedPass || this.config.get<string>('MAIL_PASS') || '',
+      from: record?.mailFrom || this.config.get<string>('MAIL_FROM') || '',
+      /** De donde salio la config, para poder decirlo en el panel. */
+      source: record?.mailHost ? ('db' as const) : ('env' as const),
+    };
+  }
+
+  /** Guarda la configuracion de correo. Una contrasena vacia deja la que ya estaba:
+   *  el panel nunca devuelve la actual, asi que un guardado sin tocar ese campo no
+   *  tiene que borrarla. */
+  async updateMailConfig(data: {
+    mailHost?: string; mailPort?: number; mailUser?: string; mailPass?: string; mailFrom?: string;
+  }) {
+    const payload: any = {};
+    if (data.mailHost !== undefined) payload.mailHost = data.mailHost.trim() || null;
+    if (data.mailPort !== undefined) payload.mailPort = data.mailPort || null;
+    if (data.mailUser !== undefined) payload.mailUser = data.mailUser.trim() || null;
+    if (data.mailFrom !== undefined) payload.mailFrom = data.mailFrom.trim() || null;
+    if (data.mailPass) payload.mailPass = this.crypto.encrypt(data.mailPass);
+
+    await this.prisma.systemConfig.upsert({
+      where: { id: '1' },
+      create: { id: '1', ...payload },
+      update: payload,
+    });
+    return this.getMailConfig();
+  }
+
 }

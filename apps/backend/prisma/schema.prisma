@@ -559,6 +559,16 @@ model SystemConfig {
   metaApiVersion   String   @default("v19.0")
   mediaStoragePath String?
   updatedAt        DateTime @updatedAt
+  // ─── Correo saliente ───
+  // Lo de aca tiene prioridad sobre las variables MAIL_* del entorno, igual que pasa
+  // con las credenciales de Meta: quien tiene acceso al servidor usa el .env, quien no,
+  // el panel. mailPass va CIFRADO (ver CryptoService) — es lo unico que permite mandar
+  // correo firmado con el dominio del sistema.
+  mailHost         String?
+  mailPort         Int?
+  mailUser         String?
+  mailPass         String?
+  mailFrom         String?
 }
 
 // ─── Audit Log ────────────────────────────────────────────────────────────────

@@ -56,7 +56,7 @@ export class PasswordResetService {
     const base = origin || this.config.get<string>('FRONTEND_URL') || '';
     const link = `${base.replace(/\/$/, '')}/reset-password?token=${token}`;
 
-    const sent = await this.mail.send({
+    const result = await this.mail.send({
       to: user.email,
       subject: 'Restablecer tu contraseña',
       text: textEmail(user.name, user.tenant.name, link),
@@ -66,7 +66,7 @@ export class PasswordResetService {
     // Sin SMTP configurado el mail no sale y el flujo quedaria imposible de probar, asi
     // que en ese caso — y SOLO en ese — el enlace va al log para poder copiarlo. Con
     // SMTP configurado el token no se escribe en ningun lado fuera del correo.
-    if (!sent && !this.mail.isConfigured) {
+    if (!result.sent && !(await this.mail.isConfigured())) {
       this.logger.warn(`[SMTP sin configurar] enlace de recuperacion: ${link}`);
     }
   }
