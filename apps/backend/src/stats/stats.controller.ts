@@ -13,6 +13,6 @@ export class StatsController {
     @CurrentUser() user: any,
     @Query('period') period: 'today' | 'week' | 'month' = 'week',
   ) {
-    return this.service.getStats(user.tenantId, period);
+    return this.service.getStats(user.tenantId, period, user.id);
   }
 }

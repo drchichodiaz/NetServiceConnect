@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, Logger } from '@nes
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { ContactIdentityService, displayId } from '../contacts/contact-identity.service';
+import { ChannelAccessService } from '../common/services/channel-access.service';
 import { EventBusService } from '../events/event-bus.service';
 import { MediaService } from '../media/media.service';
 import { TemplatesService } from '../templates/templates.service';
@@ -28,6 +29,7 @@ export class WhatsAppService {
     private templatesService: TemplatesService,
     private accounts: WhatsAppAccountsService,
     private identities: ContactIdentityService,
+    private channelAccess: ChannelAccessService,
   ) {
     this.apiVersion = config.get('META_API_VERSION') || 'v19.0';
   }
@@ -46,6 +48,8 @@ export class WhatsAppService {
     if (!account) {
       throw new BadRequestException('No active WhatsApp account found for this tenant');
     }
+
+    await this.assertCanSend(senderId, conversation);
 
     await this.takeOverFromBot(tenantId, conversation, senderId);
 
@@ -118,6 +122,8 @@ export class WhatsAppService {
     if (!account) {
       throw new BadRequestException('No active WhatsApp account found for this tenant');
     }
+
+    await this.assertCanSend(senderId, conversation);
 
     await this.takeOverFromBot(tenantId, conversation, senderId);
 
@@ -407,6 +413,17 @@ export class WhatsAppService {
    * destinatario en el body, asi que un request manipulado podia entregarle el mensaje
    * a cualquiera.
    */
+  /**
+   * Corta un envio si el usuario no puede ver la linea de esa conversacion. Sin esto el
+   * limite por linea seria solo visual: la conversacion no aparece en la bandeja, pero
+   * el endpoint de envio la acepta igual si alguien conoce su id.
+   */
+  private async assertCanSend(senderId: string, conversation: { id: string; channelAccountId: string | null }) {
+    if (!(await this.channelAccess.canAccessAccount(senderId, conversation.channelAccountId))) {
+      throw new BadRequestException('No tenés acceso a la línea de esta conversación');
+    }
+  }
+
   private async recipientFor(contactId: string): Promise<string> {
     const recipient = await this.identities.findExternalId(contactId, 'WHATSAPP');
     if (!recipient) {

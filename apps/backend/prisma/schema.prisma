@@ -57,8 +57,9 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  assignedConvs Conversation[] @relation("AssignedAgent")
+  tenant        Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assignedConvs Conversation[]       @relation("AssignedAgent")
+  channelAccess UserChannelAccount[]
   messages      Message[]
   internalNotes InternalNote[]
   auditLogs     AuditLog[]
@@ -123,8 +124,9 @@ model ChannelAccount {
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
 
-  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant        Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   conversations Conversation[]
+  userAccess    UserChannelAccount[]
 
   // Los dos unique conviven porque en Postgres los NULL no colisionan entre si: una
   // cuenta de Instagram tiene phoneNumberId NULL y no pelea con las lineas de WhatsApp,
@@ -143,6 +145,27 @@ enum Channel {
   WHATSAPP
   MESSENGER
   INSTAGRAM
+}
+
+// Que lineas puede ver cada usuario. La ausencia de filas es lo que da el permiso:
+// un usuario SIN ninguna fila ve TODAS las lineas del tenant. Es deliberado — asi
+// limitar a alguien es una accion explicita y nadie pierde acceso por omision, que es
+// lo que pasaria si el default fuera "no ve nada".
+//
+// Es independiente del rol: el rol decide QUE conversaciones ve (todas las del tenant
+// o solo las asignadas a el) y esto decide DE QUE LINEAS. Se combinan, asi que un
+// agente puede ver solo sus conversaciones asignadas y solo las de una sucursal.
+model UserChannelAccount {
+  userId           String
+  channelAccountId String
+  createdAt        DateTime @default(now())
+
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channelAccount ChannelAccount @relation(fields: [channelAccountId], references: [id], onDelete: Cascade)
+
+  @@id([userId, channelAccountId])
+  @@index([userId])
+  @@index([channelAccountId])
 }
 
 enum EmbeddedSignupStatus {

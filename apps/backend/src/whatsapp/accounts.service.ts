@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Channel } from '@prisma/client';
+import { ChannelAccessService } from '../common/services/channel-access.service';
 
 /** Lo minimo que necesita cualquier llamada a la Cloud API de Meta. */
 export interface WhatsAppAccountCreds {
@@ -18,16 +19,18 @@ export interface WhatsAppAccountCreds {
  * asi que la regla de que un envio siempre sale por la misma linea por la que entro
  * la conversacion vive en un solo lugar.
  *
- * Tambien es el punto de enganche para un futuro scoping por sucursal (limitar que
- * lineas ve cada agente): hoy el pool de agentes es compartido y todas las lineas
- * son visibles para todo el tenant, pero el filtro iria aca y en
- * ConversationsService.findAll, no desperdigado por los servicios de envio.
+ * El scoping por sucursal vive aca y en ConversationsService.findAll, no desperdigado
+ * por los servicios de envio: a que lineas puede ver cada usuario lo resuelve
+ * ChannelAccessService, y un usuario sin lineas asignadas las ve todas.
  */
 @Injectable()
 export class WhatsAppAccountsService {
   private readonly logger = new Logger(WhatsAppAccountsService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private channelAccess: ChannelAccessService,
+  ) {}
 
   /** Campos seguros para el frontend — nunca incluye accessToken. */
   private static readonly PUBLIC_FIELDS = {
@@ -62,9 +65,13 @@ export class WhatsAppAccountsService {
    * Lo lee cualquier agente, asi que devuelve lo minimo para mostrar una linea: sin
    * webhookVerifyToken ni ids de Meta, que son cosa del admin.
    */
-  listActiveForTenant(tenantId: string) {
+  async listActiveForTenant(tenantId: string, userId?: string) {
+    // Si al usuario se le asignaron lineas, el selector del inbox solo muestra las
+    // suyas: ofrecerle filtrar por una sucursal cuyas conversaciones no puede ver seria
+    // una lista que siempre da vacio.
+    const allowed = userId ? await this.channelAccess.allowedAccountIds(userId) : null;
     return this.prisma.channelAccount.findMany({
-      where: { tenantId, isActive: true },
+      where: { tenantId, isActive: true, ...(allowed && { id: { in: allowed } }) },
       select: { id: true, label: true, phoneNumber: true, isDefault: true, sortOrder: true },
       orderBy: [{ isDefault: 'desc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }],
     });

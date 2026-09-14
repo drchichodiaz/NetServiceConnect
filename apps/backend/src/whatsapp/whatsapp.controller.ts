@@ -126,7 +126,7 @@ export class WhatsAppController {
   @UseGuards(JwtAuthGuard)
   @Get('accounts/active')
   listActiveAccounts(@CurrentUser() user: any) {
-    return this.accountsService.listActiveForTenant(user.tenantId);
+    return this.accountsService.listActiveForTenant(user.tenantId, user.id);
   }
 
   // Importa el resto de los numeros del WABA ya conectado, para no repetir el

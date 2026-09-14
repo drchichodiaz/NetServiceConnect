@@ -1,11 +1,12 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { usersApi } from '@/lib/api';
+import { usersApi, whatsappApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
-import { UserPlus, Loader2, X, KeyRound, Pencil } from 'lucide-react';
+import { UserPlus, Loader2, X, KeyRound, Pencil, Phone } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { accountLabel, type WhatsAppAccount } from '@/types';
 
-interface TeamUser { id: string; name: string; email: string; role: string; isActive: boolean; }
+interface TeamUser { id: string; name: string; email: string; role: string; isActive: boolean; channelAccountIds?: string[]; }
 
 const ROLE_STYLES: Record<string, { label: string; bg: string; color: string }> = {
   ADMIN:      { label: 'Admin',      bg: '#F3E8FF', color: '#7E22CE' },
@@ -27,9 +28,13 @@ export default function TeamPage() {
   const [editEmail, setEditEmail] = useState('');
   const [editRole,  setEditRole]  = useState('AGENT');
   const [editSaving, setEditSaving] = useState(false);
+  const [lines,     setLines]     = useState<WhatsAppAccount[]>([]);
+  const [editLines, setEditLines] = useState<string[]>([]);
 
   useEffect(() => {
     usersApi.list().then(setUsers).finally(() => setIsLoading(false));
+    // Solo las activas: asignar una linea desconectada no le sirve a nadie.
+    whatsappApi.listActiveAccounts().then(setLines).catch(() => setLines([]));
   }, []);
 
   async function handleCreate(e: React.FormEvent) {
@@ -61,12 +66,13 @@ export default function TeamPage() {
     setEditId(u.id);
     setEditEmail(u.email);
     setEditRole(u.role);
+    setEditLines(u.channelAccountIds ?? []);
   }
 
   async function handleSaveEdit(id: string) {
     setEditSaving(true);
     try {
-      const updated = await usersApi.update(id, { email: editEmail, role: editRole });
+      const updated = await usersApi.update(id, { email: editEmail, role: editRole, channelAccountIds: editLines });
       setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, ...updated } : u)));
       toast.success('Usuario actualizado');
       setEditId(null);
@@ -201,16 +207,44 @@ export default function TeamPage() {
                         onChange={(e) => setEditEmail(e.target.value)}
                         className="input w-full"
                       />
-                      <div className="flex gap-2">
-                        <select
-                          value={editRole}
-                          onChange={(e) => setEditRole(e.target.value)}
-                          className="input flex-1"
-                        >
-                          <option value="AGENT">Agente</option>
-                          <option value="SUPERVISOR">Supervisor</option>
-                          {me?.role === 'ADMIN' && <option value="ADMIN">Admin</option>}
-                        </select>
+                      <select
+                        value={editRole}
+                        onChange={(e) => setEditRole(e.target.value)}
+                        className="input w-full"
+                      >
+                        <option value="AGENT">Agente</option>
+                        <option value="SUPERVISOR">Supervisor</option>
+                        {me?.role === 'ADMIN' && <option value="ADMIN">Admin</option>}
+                      </select>
+
+                      {lines.length > 1 && (
+                        <div className="rounded-lg border border-line px-3 py-2.5">
+                          <p className="text-xs font-medium text-ink mb-0.5 flex items-center gap-1.5">
+                            <Phone className="w-3.5 h-3.5" /> Líneas que puede ver
+                          </p>
+                          <p className="text-[11px] text-ink-muted mb-2">
+                            Sin ninguna marcada ve todas las líneas.
+                          </p>
+                          <div className="space-y-1.5">
+                            {lines.map((line) => (
+                              <label key={line.id} className="flex items-center gap-2 text-xs text-ink cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={editLines.includes(line.id)}
+                                  onChange={(e) =>
+                                    setEditLines((prev) =>
+                                      e.target.checked ? [...prev, line.id] : prev.filter((id) => id !== line.id),
+                                    )
+                                  }
+                                />
+                                <span className="truncate">{accountLabel(line)}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex gap-2 justify-end">
                         <button
                           onClick={() => handleSaveEdit(u.id)}
                           disabled={editSaving}

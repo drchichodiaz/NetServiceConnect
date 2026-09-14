@@ -1,13 +1,28 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { ChannelAccessService } from '../common/services/channel-access.service';
+import { Prisma } from '@prisma/client';
 import { getPeriodStart, StatsPeriod } from '../common/period-range';
 
 @Injectable()
 export class StatsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private channelAccess: ChannelAccessService,
+  ) {}
 
-  async getStats(tenantId: string, period: StatsPeriod) {
+  async getStats(tenantId: string, period: StatsPeriod, userId?: string) {
     const since = getPeriodStart(period);
+
+    // Las metricas respetan el mismo limite por linea que la bandeja: si no, alguien
+    // que ve una sucursal deduce el volumen de las demas mirando el dashboard.
+    const allowed = userId ? await this.channelAccess.allowedAccountIds(userId) : null;
+    // Sobre Conversation.
+    const convFilter: Prisma.ConversationWhereInput = allowed
+      ? { OR: [{ channelAccountId: { in: allowed } }, { channelAccountId: null }] }
+      : {};
+    // Sobre Message, que no guarda la linea: se filtra por la conversacion.
+    const msgFilter: Prisma.MessageWhereInput = allowed ? { conversation: convFilter } : {};
 
     const [
       conversations,
@@ -23,32 +38,32 @@ export class StatsService {
     ] = await Promise.all([
         // Conversations summary
         this.prisma.conversation.findMany({
-          where: { tenantId, createdAt: { gte: since } },
+          where: { tenantId, createdAt: { gte: since }, ...convFilter },
           select: { status: true, assignedUserId: true },
         }),
 
         // Message totals for the period
         this.prisma.message.aggregate({
-          where: { tenantId, createdAt: { gte: since } },
+          where: { tenantId, createdAt: { gte: since }, ...msgFilter },
           _count: true,
         }),
 
         // Messages for chart (always last 7 days)
         this.prisma.message.findMany({
-          where: { tenantId, createdAt: { gte: getPeriodStart('week') } },
+          where: { tenantId, createdAt: { gte: getPeriodStart('week') }, ...msgFilter },
           select: { direction: true, createdAt: true },
         }),
 
         // Agent conversation counts (ALL open, not filtered by period)
         this.prisma.conversation.findMany({
-          where: { tenantId, assignedUserId: { not: null } },
+          where: { tenantId, assignedUserId: { not: null }, ...convFilter },
           select: { assignedUserId: true, status: true, createdAt: true },
         }),
 
         // Tag stats
         this.prisma.conversationTag.groupBy({
           by: ['tagId'],
-          where: { conversation: { tenantId } },
+          where: { conversation: { tenantId, ...convFilter } },
           _count: { tagId: true },
           orderBy: { _count: { tagId: 'desc' } },
           take: 6,
@@ -64,14 +79,14 @@ export class StatsService {
         // Conversaciones del periodo por linea y estado.
         this.prisma.conversation.groupBy({
           by: ['channelAccountId', 'status'],
-          where: { tenantId, createdAt: { gte: since } },
+          where: { tenantId, createdAt: { gte: since }, ...convFilter },
           _count: { _all: true },
         }),
 
         // Conversaciones que el bot cerro sin pasar por un humano.
         this.prisma.conversation.groupBy({
           by: ['channelAccountId'],
-          where: { tenantId, createdAt: { gte: since }, closedReason: 'BOT_RESOLVED' },
+          where: { tenantId, createdAt: { gte: since }, closedReason: 'BOT_RESOLVED', ...convFilter },
           _count: { _all: true },
         }),
 
@@ -82,11 +97,14 @@ export class StatsService {
           FROM "Message" m
           JOIN "Conversation" c ON c."id" = m."conversationId"
           WHERE m."tenantId" = ${tenantId} AND m."createdAt" >= ${since}
+          ${allowed
+            ? Prisma.sql`AND (c."channelAccountId" IN (${Prisma.join(allowed)}) OR c."channelAccountId" IS NULL)`
+            : Prisma.empty}
           GROUP BY 1, 2
         `,
 
         this.prisma.channelAccount.findMany({
-          where: { tenantId },
+          where: { tenantId, ...(allowed && { id: { in: allowed } }) },
           select: { id: true, label: true, phoneNumber: true, isActive: true },
           orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
         }),

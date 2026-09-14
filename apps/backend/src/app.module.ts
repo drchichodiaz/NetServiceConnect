@@ -22,9 +22,11 @@ import { SystemConfigModule } from './system-config/system-config.module';
 import { TemplatesModule } from './templates/templates.module';
 import { BotConfigModule } from './bot-config/bot-config.module';
 import { MenuNodesModule } from './menu-nodes/menu-nodes.module';
+import { ChannelAccessModule } from './common/services/channel-access.module';
 
 @Module({
   imports: [
+    ChannelAccessModule,
     ConfigModule.forRoot({ isGlobal: true }),
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
     PrismaModule,

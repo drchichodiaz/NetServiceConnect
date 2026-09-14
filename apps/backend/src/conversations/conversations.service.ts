@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { ChannelAccessService } from '../common/services/channel-access.service';
 import { displayId } from '../contacts/contact-identity.service';
 import { Channel } from '@prisma/client';
 import { EventBusService } from '../events/event-bus.service';
@@ -10,6 +11,7 @@ export class ConversationsService {
   constructor(
     private prisma: PrismaService,
     private eventBus: EventBusService,
+    private channelAccess: ChannelAccessService,
   ) {}
 
   async findAll(
@@ -25,12 +27,15 @@ export class ConversationsService {
     // qué assignedUserId pida por query — ADMIN/SUPERVISOR ven todo el tenant.
     const effectiveAssignedUserId = requester?.role === 'AGENT' ? requester.id : assignedUserId;
 
-    // El filtro por línea (sucursal) es una vista, no un permiso: el pool de agentes
-    // es compartido y todos ven todas las líneas. Si más adelante se pide limitar
-    // qué líneas ve cada agente, el filtro forzado va acá, al lado del de AGENT.
+    // Filtro forzado por línea: si al usuario se le asignaron líneas, sólo ve esas —
+    // sin importar su rol ni qué channelAccountId pida por query. El `channelAccountId`
+    // de abajo es la *vista* que el agente elige; esto es el permiso, y va primero.
+    const accessFilter = requester?.id ? await this.channelAccess.conversationFilter(requester.id) : {};
+
     const conversations = await this.prisma.conversation.findMany({
       where: {
         tenantId,
+        ...accessFilter,
         ...(status && { status: status as any }),
         ...(effectiveAssignedUserId && { assignedUserId: effectiveAssignedUserId }),
         ...(contactId && { contactId }),
@@ -78,6 +83,11 @@ export class ConversationsService {
     });
     if (!conv) throw new NotFoundException('Conversation not found');
     if (requester?.role === 'AGENT' && conv.assignedUserId !== requester.id) {
+      throw new NotFoundException('Conversation not found');
+    }
+    // Misma respuesta que si no existiera: a alguien que no puede ver esta línea no le
+    // decimos que la conversación existe pero es de otra sucursal.
+    if (requester?.id && !(await this.channelAccess.canAccessAccount(requester.id, conv.channelAccountId))) {
       throw new NotFoundException('Conversation not found');
     }
     return withDisplayId(conv);
