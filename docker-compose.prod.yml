@@ -74,6 +74,47 @@ services:
       - backend
     restart: unless-stopped
 
+  # nginx + certbot viven detras del perfil "nginx" para no romper el droplet
+  # compartido, donde los puertos 80/443 son de otra app y el proxy es ajeno. Ahi se
+  # sigue levantando el stack sin perfil y estos dos servicios no se crean ni se
+  # tocan; en un server dedicado se usa `--profile nginx`.
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: netservice_nginx
+    profiles: ['nginx']
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./deploy/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - netservice_letsencrypt:/etc/letsencrypt
+      - netservice_certbot_www:/var/www/certbot
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+
+  # Renueva el certificado solo. Let's Encrypt dura 90 dias y `renew` no hace nada
+  # hasta que faltan 30, asi que reintentar cada 12h es barato y deja margen de sobra
+  # si el server estuvo caido. El certificado inicial NO lo pide este servicio: lo
+  # pide deploy/init-letsencrypt.sh una sola vez (ver DEPLOY-DOCKER.md).
+  certbot:
+    image: certbot/certbot:latest
+    container_name: netservice_certbot
+    profiles: ['nginx']
+    volumes:
+      - netservice_letsencrypt:/etc/letsencrypt
+      - netservice_certbot_www:/var/www/certbot
+    entrypoint: >
+      sh -c "trap exit TERM;
+      while :; do
+        certbot renew --webroot -w /var/www/certbot --quiet;
+        sleep 12h & wait $${!};
+      done"
+    restart: unless-stopped
+
 volumes:
   netservice_postgres_data:
   netservice_media:
+  netservice_letsencrypt:
+  netservice_certbot_www:
