@@ -18,7 +18,7 @@ export class BotConfigController {
   }
 
   @Patch()
-  update(@CurrentUser() user: any, @Body() dto: { orderStatusApiUrl?: string; aiKnowledgeBase?: string; startInAiChat?: boolean }) {
+  update(@CurrentUser() user: any, @Body() dto: { aiKnowledgeBase?: string; startInAiChat?: boolean }) {
     return this.service.updateConfig(user.tenantId, dto);
   }
 

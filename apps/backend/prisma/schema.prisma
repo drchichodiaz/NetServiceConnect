@@ -454,8 +454,6 @@ model TenantBotConfig {
   horariosText      String?
   sucursalesText    String?
   serviciosText     String?
-  // Reservado para conectar una API de pedidos por tenant mas adelante; sin usar por ahora.
-  orderStatusApiUrl String?
   // Info de negocio (horarios, servicios, politicas, FAQs) que alimenta el prompt
   // de cualquier nodo tipo AI_CHAT del arbol de menu. Tenant-wide, no por nodo.
   aiKnowledgeBase   String?

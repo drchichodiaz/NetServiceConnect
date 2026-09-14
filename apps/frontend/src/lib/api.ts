@@ -152,7 +152,7 @@ export const settingsApi = {
 
 export const botConfigApi = {
   get: () => api.get('/bot-config').then((r) => r.data),
-  update: (data: { orderStatusApiUrl?: string; aiKnowledgeBase?: string; startInAiChat?: boolean }) =>
+  update: (data: { aiKnowledgeBase?: string; startInAiChat?: boolean }) =>
     api.patch('/bot-config', data).then((r) => r.data),
 };
 

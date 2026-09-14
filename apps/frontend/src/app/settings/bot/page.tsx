@@ -11,8 +11,6 @@ const AI_KNOWLEDGE_MAX_LENGTH = 20000;
 
 export default function BotSettingsPage() {
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [orderStatusApiUrl, setOrderStatusApiUrl] = useState('');
 
   const [aiKnowledgeBase, setAiKnowledgeBase] = useState('');
   const [savingAi, setSavingAi] = useState(false);
@@ -24,7 +22,6 @@ export default function BotSettingsPage() {
     (async () => {
       try {
         const [config, settings] = await Promise.all([botConfigApi.get(), settingsApi.get()]);
-        setOrderStatusApiUrl(config.orderStatusApiUrl ?? '');
         setAiKnowledgeBase(config.aiKnowledgeBase ?? '');
         setStartInAiChat(!!config.startInAiChat);
         setHasOpenaiKey(!!settings.hasOpenaiKey);
@@ -52,18 +49,6 @@ export default function BotSettingsPage() {
     }
   }
 
-  async function handleSaveConfig(e: React.FormEvent) {
-    e.preventDefault();
-    setSaving(true);
-    try {
-      await botConfigApi.update({ orderStatusApiUrl });
-      toast.success('Configuración guardada');
-    } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Error al guardar');
-    } finally {
-      setSaving(false);
-    }
-  }
 
   async function handleSaveAiKnowledgeBase(e: React.FormEvent) {
     e.preventDefault();
@@ -191,31 +176,6 @@ export default function BotSettingsPage() {
         </button>
       </form>
 
-      <form onSubmit={handleSaveConfig} className="card p-5 space-y-3">
-        <label className="text-xs font-semibold text-ink-subtle flex items-center justify-between">
-          <span>API de consulta de pedidos</span>
-          <span className="text-[10px] font-normal uppercase tracking-wide rounded-full px-2 py-0.5" style={{ background: 'var(--surface-muted)' }}>
-            Próximamente
-          </span>
-        </label>
-        <input
-          disabled
-          value={orderStatusApiUrl}
-          placeholder="Todavía no disponible — el bot deriva a un agente"
-          className="input w-full opacity-60 cursor-not-allowed"
-        />
-        <p className="text-[11px] text-ink-subtle">
-          Cuando un cliente elige la opción de tipo &quot;Consultar pedido&quot;, hoy el bot le pide el número y lo pasa directo a un agente.
-        </p>
-        <button
-          type="submit"
-          disabled={saving}
-          className="btn-primary text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-          Guardar
-        </button>
-      </form>
     </div>
   );
 }
