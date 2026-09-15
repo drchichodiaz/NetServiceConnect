@@ -72,18 +72,34 @@ export default function TenantsPage() {
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     setIsSaving(true);
+
+    // El try cubre SOLO la llamada. Cuando abarcaba tambien lo de abajo, un error al
+    // refrescar la pantalla se anunciaba como "error al crear la empresa" aunque la
+    // empresa ya estuviera creada — y eso invita a reintentar, que la duplicaria o
+    // chocaria contra el slug.
+    let created: Awaited<ReturnType<typeof tenantsApi.create>>;
     try {
-      const created = await tenantsApi.create(form);
+      created = await tenantsApi.create(form);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Error al crear la empresa');
+      setIsSaving(false);
+      return;
+    }
+
+    toast.success('Empresa creada');
+    setIsSaving(false);
+
+    // A partir de acá la empresa ya existe: si algo falla es un problema de pantalla, y
+    // se resuelve recargando la lista, no volviendo a crearla.
+    try {
       setResult({ tenant: created.tenant, admin: created.admin, password: form.adminPassword });
       setTenants((prev) => [created.tenant, ...prev]);
       setForm({ name: '', slug: '', adminName: '', adminEmail: '', adminPassword: generatePassword() });
       setSlugTouched(false);
       setShowForm(false);
-      toast.success('Empresa creada');
-    } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Error al crear la empresa');
-    } finally {
-      setIsSaving(false);
+    } catch {
+      toast('La empresa se creó. Recargá la lista para verla.', { icon: 'ℹ️' });
+      load();
     }
   }
 
