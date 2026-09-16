@@ -17,6 +17,19 @@ interface SessionInfo {
   phoneNumberId?: string;
 }
 
+declare global {
+  interface Window {
+    FB?: {
+      init: (options: Record<string, unknown>) => void;
+      login: (
+        callback: (response: { authResponse?: { code?: string } | null }) => void,
+        options: Record<string, unknown>,
+      ) => void;
+    };
+    fbAsyncInit?: () => void;
+  }
+}
+
 export default function EmbeddedSignup({ onConnected }: Props) {
   const [step, setStep]         = useState<Step>('idle');
   const [errorMsg, setErrorMsg] = useState('');
@@ -24,7 +37,9 @@ export default function EmbeddedSignup({ onConnected }: Props) {
   const [isSavingPin, setIsSavingPin] = useState(false);
   const [metaAppId,    setMetaAppId]    = useState('');
   const [metaConfigId, setMetaConfigId] = useState('');
+  const [metaApiVersion, setMetaApiVersion] = useState('v21.0');
   const [configLoaded, setConfigLoaded] = useState(false);
+  const [sdkReady,     setSdkReady]     = useState(false);
   // Distingue "la plataforma no tiene App ID" de "no pude leer la config": antes las
   // dos terminaban en el mismo cartel, y el 403 del endpoint de superadmin se leia
   // como si faltara configurar algo que en realidad ya estaba puesto.
@@ -35,18 +50,46 @@ export default function EmbeddedSignup({ onConnected }: Props) {
       .then((cfg) => {
         setMetaAppId(cfg.metaAppId || '');
         setMetaConfigId(cfg.metaConfigId || cfg.metaAppId || '');
+        if (cfg.metaApiVersion) setMetaApiVersion(cfg.metaApiVersion);
       })
       .catch(() => setConfigError(true))
       .finally(() => setConfigLoaded(true));
   }, []);
 
-  const sessionInfoRef = useRef<SessionInfo>({});
-  const popupRef       = useRef<Window | null>(null);
-  const pollRef        = useRef<ReturnType<typeof setInterval> | null>(null);
-  const stepRef        = useRef<Step>('idle');
+  // ─── SDK de Facebook ──────────────────────────────────────────────────────
+  // Embedded Signup solo funciona a traves del SDK: Meta entrega el codigo
+  // canjeable por el callback de FB.login, y no por un redirect. Abrir a mano la
+  // URL de onboarding deja el alta hecha del lado de Meta y sin terminar del
+  // nuestro — la ventana queda abierta para siempre esperando entregarle el
+  // codigo a un callback que no existe, y aca no llega ni una peticion.
+  //
+  // El appId lo pone la plataforma, asi que el script se carga recien cuando la
+  // config llego, no al montar.
+  useEffect(() => {
+    if (!metaAppId) return;
 
-  // Keep stepRef in sync so interval callbacks read current value
-  useEffect(() => { stepRef.current = step; }, [step]);
+    const init = () => {
+      window.FB?.init({ appId: metaAppId, version: metaApiVersion, xfbml: false, cookie: false });
+      setSdkReady(true);
+    };
+
+    // Otra pantalla pudo haberlo cargado ya: el script se inyecta una sola vez.
+    if (window.FB) { init(); return; }
+
+    window.fbAsyncInit = init;
+
+    if (!document.getElementById('facebook-jssdk')) {
+      const script = document.createElement('script');
+      script.id          = 'facebook-jssdk';
+      script.src         = 'https://connect.facebook.net/en_US/sdk.js';
+      script.async       = true;
+      script.defer       = true;
+      script.crossOrigin = 'anonymous';
+      document.body.appendChild(script);
+    }
+  }, [metaAppId, metaApiVersion]);
+
+  const sessionInfoRef = useRef<SessionInfo>({});
 
   // ─── postMessage handler ─────────────────────────────────────────────────
   // Receives two kinds of messages:
@@ -64,11 +107,9 @@ export default function EmbeddedSignup({ onConnected }: Props) {
             if (waba_id)          sessionInfoRef.current.wabaId         = waba_id;
             if (phone_number_id)  sessionInfoRef.current.phoneNumberId  = phone_number_id;
           } else if (data.event === 'CANCEL') {
-            cleanup();
             setStep('idle');
             toast('Proceso cancelado', { icon: '⚠️' });
           } else if (data.event === 'ERROR') {
-            cleanup();
             setStep('error');
             setErrorMsg(data.data?.error_message || 'Error en el proceso de Meta');
           }
@@ -77,9 +118,10 @@ export default function EmbeddedSignup({ onConnected }: Props) {
       return;
     }
 
-    // OAuth code relayed from our /whatsapp/oauth/callback page
+    // OAuth code relayed from our /whatsapp/oauth/callback page. Con el SDK el codigo
+    // llega por el callback de FB.login, pero se deja esta via porque el propio SDK cae
+    // a un redirect cuando el navegador bloquea las ventanas emergentes.
     if (event.origin === window.location.origin && event.data?.type === 'WA_OAUTH_CODE') {
-      cleanup();
       const { code, error } = event.data;
       if (code) {
         processSignup(code);
@@ -95,66 +137,59 @@ export default function EmbeddedSignup({ onConnected }: Props) {
     return () => window.removeEventListener('message', handleMessage);
   }, [handleMessage]);
 
-  function cleanup() {
-    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-    if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
-    popupRef.current = null;
-  }
-
   // ─── Launch ───────────────────────────────────────────────────────────────
 
   function launchEmbeddedSignup() {
-    if (!metaAppId) {
+    if (!metaAppId || !metaConfigId) {
       toast.error('Configura el Meta App ID en Configuración del sistema');
+      return;
+    }
+    if (!window.FB) {
+      setStep('error');
+      setErrorMsg('El SDK de Facebook no cargó. Recarga la página e intenta de nuevo.');
       return;
     }
 
     sessionInfoRef.current = {};
     setStep('waiting_fb');
 
-    const redirectUri = `${window.location.origin}/whatsapp/oauth/callback`;
-    const extras      = encodeURIComponent(JSON.stringify({ sessionInfoVersion: '3', version: 'v4' }));
-
-    const url =
-      `https://business.facebook.com/messaging/whatsapp/onboard/` +
-      `?app_id=${metaAppId}` +
-      `&config_id=${metaConfigId}` +
-      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-      `&extras=${extras}`;
-
-    const popup = window.open(url, 'wa_embedded_signup', 'width=640,height=720,scrollbars=yes,resizable=yes');
-    popupRef.current = popup;
-
-    if (!popup) {
-      setStep('error');
-      setErrorMsg('El navegador bloqueó el popup. Permite popups para este sitio e intenta de nuevo.');
-      return;
-    }
-
-    // Detect if user closes popup manually without completing
-    pollRef.current = setInterval(() => {
-      if (popup.closed) {
-        cleanup();
-        if (stepRef.current === 'waiting_fb') {
-          // Meta canta "tu linea se ha agregado" apenas manda el FINISH, pero el alta
-          // todavia necesita el codigo OAuth, que solo llega cuando la ventana redirige
-          // sola al callback. Cerrarla en ese punto deja el numero creado en Meta y
-          // ausente aca, sin fila, sin error y sin una linea en el log — porque la
-          // peticion nunca se hizo. Antes esto era un toast que se desvanecia contra un
-          // dialogo de Facebook diciendo "listo", asi que nadie le creia: queda fijo.
-          const { wabaId, phoneNumberId } = sessionInfoRef.current;
-          setStep('error');
-          setErrorMsg(
-            wabaId || phoneNumberId
-              ? 'Meta confirmó el número, pero faltó el último paso: autorizar el acceso. ' +
-                'La ventana se cerró antes de tiempo. Vuelve a conectar, elige el mismo ' +
-                'número y espera a que la ventana se cierre sola.'
-              : 'La ventana se cerró antes de completar el proceso. Vuelve a intentarlo y ' +
-                'espera a que se cierre sola.',
-          );
+    // Los IDs y el codigo son dos canales distintos y pueden llegar en cualquier orden,
+    // o uno sin el otro: los IDs por postMessage desde facebook.com, el codigo por este
+    // callback. Tratarlos como uno solo es el origen de casi todos los bugs de este
+    // flujo, asi que el postMessage se sigue escuchando aparte (handleMessage) y aca
+    // solo se lee lo que haya quedado en el ref.
+    window.FB.login(
+      (response) => {
+        const code = response?.authResponse?.code;
+        if (code) {
+          // El codigo vive 30 segundos: se canjea de una, sin pasos intermedios.
+          processSignup(code);
+          return;
         }
-      }
-    }, 800);
+        // Sin codigo: o lo cancelo, o cerro la ventana. Si igual llego el FINISH,
+        // el numero quedo creado en Meta y solo falto autorizar — que es una
+        // instruccion distinta a no haber llegado nunca hasta ahi.
+        const { wabaId, phoneNumberId } = sessionInfoRef.current;
+        setStep('error');
+        setErrorMsg(
+          wabaId || phoneNumberId
+            ? 'Meta confirmó el número, pero faltó el último paso: autorizar el acceso. ' +
+              'Vuelve a conectar, elige el mismo número y completa el proceso hasta el final.'
+            : 'No se obtuvo la autorización de Meta. El proceso se canceló o se cerró ' +
+              'la ventana antes de terminar.',
+        );
+      },
+      {
+        config_id:                      metaConfigId,
+        response_type:                  'code',
+        override_default_response_type: true,
+        extras: {
+          version:            'v4',
+          sessionInfoVersion: '3',
+          featureType:        'whatsapp_embedded_signup',
+        },
+      },
+    );
   }
 
   // ─── Process OAuth code ───────────────────────────────────────────────────
@@ -305,10 +340,12 @@ export default function EmbeddedSignup({ onConnected }: Props) {
       {(step === 'idle' || step === 'error') && (
         <button
           onClick={launchEmbeddedSignup}
-          disabled={!configLoaded || !metaAppId}
+          disabled={!configLoaded || !metaAppId || !sdkReady}
           className="w-full flex items-center justify-center gap-3 bg-green-500 hover:bg-green-600 disabled:opacity-50 text-white font-semibold py-3 px-6 rounded-xl transition-colors"
         >
-          {!configLoaded
+          {/* El boton espera al SDK: sin el, FB.login no existe y el alta no puede
+              siquiera empezar. */}
+          {!configLoaded || (!!metaAppId && !sdkReady)
             ? <><Loader2 className="w-4 h-4 animate-spin" />Cargando...</>
             : <><MessageSquare className="w-5 h-5" />{step === 'error' ? 'Reintentar conexión' : 'Conectar con WhatsApp Business'}<ArrowRight className="w-4 h-4" /></>
           }
