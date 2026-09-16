@@ -136,8 +136,22 @@ export default function EmbeddedSignup({ onConnected }: Props) {
       if (popup.closed) {
         cleanup();
         if (stepRef.current === 'waiting_fb') {
-          setStep('idle');
-          toast('Ventana cerrada antes de completar el proceso', { icon: '⚠️' });
+          // Meta canta "tu linea se ha agregado" apenas manda el FINISH, pero el alta
+          // todavia necesita el codigo OAuth, que solo llega cuando la ventana redirige
+          // sola al callback. Cerrarla en ese punto deja el numero creado en Meta y
+          // ausente aca, sin fila, sin error y sin una linea en el log — porque la
+          // peticion nunca se hizo. Antes esto era un toast que se desvanecia contra un
+          // dialogo de Facebook diciendo "listo", asi que nadie le creia: queda fijo.
+          const { wabaId, phoneNumberId } = sessionInfoRef.current;
+          setStep('error');
+          setErrorMsg(
+            wabaId || phoneNumberId
+              ? 'Meta confirmó el número, pero faltó el último paso: autorizar el acceso. ' +
+                'La ventana se cerró antes de tiempo. Vuelve a conectar, elige el mismo ' +
+                'número y espera a que la ventana se cierre sola.'
+              : 'La ventana se cerró antes de completar el proceso. Vuelve a intentarlo y ' +
+                'espera a que se cierre sola.',
+          );
         }
       }
     }, 800);
@@ -267,13 +281,23 @@ export default function EmbeddedSignup({ onConnected }: Props) {
 
       {/* Loading */}
       {(step === 'waiting_fb' || step === 'saving') && (
-        <div className="flex items-center justify-center gap-3 py-8 text-gray-500">
-          <Loader2 className="w-5 h-5 animate-spin text-green-500" />
-          <span className="text-sm">
-            {step === 'waiting_fb'
-              ? 'Esperando autorización en Meta...'
-              : 'Guardando configuración de WhatsApp...'}
-          </span>
+        <div className="flex flex-col items-center justify-center gap-2 py-8 text-gray-500">
+          <div className="flex items-center gap-3">
+            <Loader2 className="w-5 h-5 animate-spin text-green-500" />
+            <span className="text-sm">
+              {step === 'waiting_fb'
+                ? 'Esperando autorización en Meta...'
+                : 'Guardando configuración de WhatsApp...'}
+            </span>
+          </div>
+          {/* El aviso va antes del error y no despues: el momento de decirlo es mientras
+              la ventana sigue abierta, que es cuando todavia se puede evitar. */}
+          {step === 'waiting_fb' && (
+            <p className="text-xs text-gray-400 text-center max-w-xs">
+              No cierres la ventana de Meta aunque diga que el número ya se agregó:
+              se cierra sola al terminar.
+            </p>
+          )}
         </div>
       )}
 
