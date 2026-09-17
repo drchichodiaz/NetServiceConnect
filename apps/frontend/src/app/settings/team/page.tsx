@@ -2,9 +2,10 @@
 import { useEffect, useState } from 'react';
 import { usersApi, whatsappApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
-import { UserPlus, Loader2, X, KeyRound, Pencil, Phone, HelpCircle, ChevronDown } from 'lucide-react';
+import { UserPlus, Loader2, X, KeyRound, Pencil, Phone, HelpCircle, ChevronDown, UserCheck, UserX } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { accountLabel, type WhatsAppAccount } from '@/types';
+import { validarPassword, PASSWORD_HINT, PASSWORD_MIN_LENGTH } from '@/lib/password';
 
 interface TeamUser { id: string; name: string; email: string; role: string; isActive: boolean; channelAccountIds?: string[]; }
 
@@ -31,6 +32,7 @@ export default function TeamPage() {
   const [lines,     setLines]     = useState<WhatsAppAccount[]>([]);
   const [editLines, setEditLines] = useState<string[]>([]);
   const [showHelp,  setShowHelp]  = useState(false);
+  const [activeSaving, setActiveSaving] = useState<string | null>(null);
 
   useEffect(() => {
     usersApi.list().then(setUsers).finally(() => setIsLoading(false));
@@ -40,6 +42,11 @@ export default function TeamPage() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
+    const problema = validarPassword(form.password, [form.name, form.email]);
+    if (problema) {
+      toast.error(problema);
+      return;
+    }
     setIsSaving(true);
     try {
       const u = await usersApi.create(form);
@@ -84,9 +91,40 @@ export default function TeamPage() {
     }
   }
 
+  /**
+   * Desactivar deja a la persona afuera del sistema (el login y cada request lo
+   * revalidan) y suelta sus conversaciones abiertas. Se confirma porque no es
+   * reversible en silencio: el resto del equipo va a ver esas conversaciones aparecer.
+   */
+  async function handleToggleActive(u: TeamUser) {
+    const desactivando = u.isActive;
+    if (desactivando && !confirm(`¿Desactivar a ${u.name}? No va a poder entrar y sus conversaciones abiertas quedarán sin asignar.`)) return;
+
+    setActiveSaving(u.id);
+    try {
+      const { conversacionesLiberadas, ...updated } = await usersApi.update(u.id, { isActive: !u.isActive });
+      setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, ...updated } : x)));
+      if (desactivando) {
+        toast.success(
+          conversacionesLiberadas
+            ? `${u.name} quedó inactivo. Se liberaron ${conversacionesLiberadas} conversacion${conversacionesLiberadas === 1 ? '' : 'es'}.`
+            : `${u.name} quedó inactivo.`,
+        );
+      } else {
+        toast.success(`${u.name} puede volver a entrar.`);
+      }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'No se pudo cambiar el estado');
+    } finally {
+      setActiveSaving(null);
+    }
+  }
+
   async function handleChangePassword(id: string) {
-    if (pwValue.length < 6) {
-      toast.error('La contrasena debe tener al menos 6 caracteres');
+    const usuario = users.find((u) => u.id === id);
+    const problema = validarPassword(pwValue, [usuario?.name, usuario?.email]);
+    if (problema) {
+      toast.error(problema);
       return;
     }
     setPwSaving(true);
@@ -219,10 +257,11 @@ export default function TeamPage() {
                 onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} className="input"
               />
               <input
-                required type="password" placeholder="Contrasena" minLength={6} value={form.password}
+                required type="password" placeholder="Contrasena" minLength={PASSWORD_MIN_LENGTH} value={form.password}
                 onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} className="input"
               />
             </div>
+            <p className="text-[11px] text-ink-subtle">{PASSWORD_HINT}</p>
             <select value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))} className="input">
               <option value="AGENT">Agente</option>
               <option value="SUPERVISOR">Supervisor</option>
@@ -252,7 +291,7 @@ export default function TeamPage() {
               const rs = ROLE_STYLES[u.role] ?? ROLE_STYLES.AGENT;
               return (
                 <div key={u.id} className="animate-fade-in" style={{ animationDelay: `${i * 40}ms` }}>
-                  <div className="flex items-center gap-3.5 px-5 py-3.5">
+                  <div className="flex items-center gap-3.5 px-5 py-3.5" style={u.isActive ? undefined : { opacity: 0.55 }}>
                     <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-semibold shrink-0" style={{ background: '#E8FBF0', color: '#128C7E' }}>
                       {u.name[0]?.toUpperCase()}
                     </div>
@@ -260,13 +299,33 @@ export default function TeamPage() {
                       <div className="flex items-center gap-2">
                         <p className="text-sm font-medium text-ink truncate">{u.name}</p>
                         {u.id === me?.id && <span className="text-[10px] text-ink-subtle">(tu)</span>}
-                        {!u.isActive && <span className="text-[10px] text-red-400 font-medium">Inactivo</span>}
+                        {!u.isActive && (
+                          <span className="text-[10px] font-semibold rounded-full px-2 py-0.5" style={{ background: '#FEF2F2', color: '#B91C1C' }}>
+                            Inactivo
+                          </span>
+                        )}
                       </div>
                       <p className="text-xs text-ink-subtle truncate">{u.email}</p>
                     </div>
                     <span className="text-[11px] font-semibold rounded-full px-2.5 py-1 shrink-0" style={{ background: rs.bg, color: rs.color }}>
                       {rs.label}
                     </span>
+                    {canManage && u.id !== me?.id && (
+                      <button
+                        onClick={() => handleToggleActive(u)}
+                        disabled={activeSaving === u.id}
+                        title={u.isActive ? 'Desactivar' : 'Activar'}
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-ink-subtle hover:bg-black/5 shrink-0 disabled:opacity-40"
+                      >
+                        {activeSaving === u.id ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : u.isActive ? (
+                          <UserX className="w-4 h-4 hover:text-red-500" />
+                        ) : (
+                          <UserCheck className="w-4 h-4" style={{ color: '#15803d' }} />
+                        )}
+                      </button>
+                    )}
                     {canManage && (
                       <button
                         onClick={() => (editId === u.id ? setEditId(null) : startEdit(u))}
@@ -350,8 +409,8 @@ export default function TeamPage() {
                       <input
                         autoFocus
                         type="password"
-                        placeholder="Nueva contrasena (min. 6 caracteres)"
-                        minLength={6}
+                        placeholder={`Nueva contrasena (min. ${PASSWORD_MIN_LENGTH} caracteres, letras y numeros)`}
+                        minLength={PASSWORD_MIN_LENGTH}
                         value={pwValue}
                         onChange={(e) => setPwValue(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleChangePassword(u.id)}

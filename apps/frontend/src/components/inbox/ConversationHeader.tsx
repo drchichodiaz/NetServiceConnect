@@ -50,7 +50,10 @@ export default function ConversationHeader({ conversation, sidebarOpen, onToggle
   async function openAssignMenu() {
     if (users.length === 0) {
       const data = await usersApi.list();
-      setUsers(data);
+      // Los desactivados no se ofrecen: no pueden entrar, asi que asignarles una
+      // conversacion equivale a dejarla sin atender sin que se note. El backend tambien
+      // lo rechaza, esto es para no llegar a ofrecerlo.
+      setUsers(data.filter((u: any) => u.isActive !== false));
     }
     setShowAssignMenu(true);
   }

@@ -31,12 +31,12 @@ export class UsersController {
   @Patch(':id')
   @Roles('ADMIN' as any, 'SUPERVISOR' as any)
   update(@CurrentUser() user: any, @Param('id') id: string, @Body() dto: UpdateUserDto) {
-    return this.service.update(user.tenantId, id, dto);
+    return this.service.update(user.tenantId, id, dto, user.id);
   }
 
   @Delete(':id')
   @Roles('ADMIN' as any)
   remove(@CurrentUser() user: any, @Param('id') id: string) {
-    return this.service.remove(user.tenantId, id);
+    return this.service.remove(user.tenantId, id, user.id);
   }
 }

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChannelAccessService } from '../common/services/channel-access.service';
 import { displayId } from '../contacts/contact-identity.service';
@@ -96,6 +96,21 @@ export class ConversationsService {
     const updates: any = {};
 
     if (dto.status !== undefined) updates.status = dto.status;
+
+    // Asignar a alguien desactivado deja la conversacion en manos de quien no puede
+    // entrar: nadie la atiende y no se nota, porque en la bandeja se ve igual que
+    // cualquier otra asignada. Se valida aca y no solo en el panel porque el panel es
+    // una de las formas de llegar, no la unica.
+    if (dto.assignedUserId) {
+      const destinatario = await this.prisma.user.findFirst({
+        where: { id: dto.assignedUserId, tenantId },
+        select: { isActive: true },
+      });
+      if (!destinatario) throw new NotFoundException('Ese usuario no existe en esta empresa');
+      if (!destinatario.isActive) {
+        throw new BadRequestException('Ese usuario está desactivado. Actívalo o elige a otra persona.');
+      }
+    }
     if (dto.assignedUserId !== undefined) updates.assignedUserId = dto.assignedUserId;
 
     await this.prisma.$transaction(async (tx) => {

@@ -70,8 +70,16 @@ export class UsersService {
     return flattenAccess(user);
   }
 
-  async update(tenantId: string, id: string, dto: UpdateUserDto) {
-    await this.findOne(tenantId, id);
+  async update(tenantId: string, id: string, dto: UpdateUserDto, actorId?: string) {
+    const actual = await this.findOne(tenantId, id);
+
+    // Desactivar no es un campo mas: deja a alguien afuera del sistema y puede soltar
+    // conversaciones. Las reglas viven aca y no en el controller para que valgan por
+    // cualquier camino que termine cambiando isActive.
+    let conversacionesLiberadas: number | undefined;
+    if (dto.isActive === false && actual.isActive) {
+      conversacionesLiberadas = await this.desactivar(tenantId, id, actorId);
+    }
 
     // Las lineas van a su propia tabla, no a la fila del usuario. Solo se tocan si el
     // campo vino: mandar [] es "quitarle toda restriccion", no mandarlo es "no cambiar".
@@ -98,15 +106,55 @@ export class UsersService {
       data,
       select: USER_SELECT,
     });
-    return flattenAccess(updated);
+    return { ...flattenAccess(updated), conversacionesLiberadas };
   }
 
-  async remove(tenantId: string, id: string) {
-    await this.findOne(tenantId, id);
-    return this.prisma.user.update({
+  /**
+   * Baja logica. Es la misma operacion que un PATCH con isActive:false — pasa por las
+   * mismas reglas para que no haya una puerta de atras que las esquive.
+   */
+  async remove(tenantId: string, id: string, actorId?: string) {
+    const actual = await this.findOne(tenantId, id);
+    if (actual.isActive) await this.desactivar(tenantId, id, actorId);
+    const user = await this.prisma.user.update({
       where: { id },
       data: { isActive: false },
+      select: USER_SELECT,
     });
+    return flattenAccess(user);
+  }
+
+  /**
+   * Las dos barreras que impiden dejar el sistema sin quien lo administre, y la
+   * liberacion de las conversaciones. Devuelve cuantas se liberaron, para poder decirlo
+   * en pantalla: si desaparecen sin aviso, el equipo no sabe que quedaron libres.
+   */
+  private async desactivar(tenantId: string, id: string, actorId?: string): Promise<number> {
+    // Quien apaga la luz no puede quedarse adentro: sin esto un admin se deja afuera de
+    // su propia empresa de un clic y no hay pantalla para revertirlo.
+    if (actorId && actorId === id) {
+      throw new BadRequestException('No puedes desactivar tu propia cuenta.');
+    }
+
+    const objetivo = await this.prisma.user.findFirst({ where: { id, tenantId }, select: { role: true } });
+    if (objetivo?.role === 'ADMIN') {
+      const adminsActivos = await this.prisma.user.count({
+        where: { tenantId, role: 'ADMIN', isActive: true },
+      });
+      if (adminsActivos <= 1) {
+        throw new BadRequestException(
+          'Tiene que quedar al menos un administrador activo. Nombra a otro antes de desactivar a este.',
+        );
+      }
+    }
+
+    // Solo las vivas. Las cerradas conservan a quien las atendio: es historial, y
+    // borrarlo haria que los informes por agente cambien solos con cada baja.
+    const { count } = await this.prisma.conversation.updateMany({
+      where: { tenantId, assignedUserId: id, status: { in: ['OPEN', 'PENDING'] } },
+      data: { assignedUserId: null },
+    });
+    return count;
   }
 
   /** Que nadie asigne una linea de otro tenant pasandole el id a mano. */
