@@ -5,6 +5,24 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import * as bcrypt from 'bcryptjs';
 
+/**
+ * La forma en que un usuario sale de esta API, en TODOS los endpoints. Vive en un solo
+ * lugar a proposito: cuando cada metodo tenia su propio select, el de `update` se quedo
+ * sin `channelAccess` y devolvia el usuario sin sus lineas. El panel guardaba el cambio
+ * y despues pisaba su estado con esa respuesta incompleta, asi que al reabrir la ficha
+ * las lineas aparecian sin marcar hasta recargar la pantalla.
+ */
+const USER_SELECT = {
+  id: true,
+  email: true,
+  name: true,
+  role: true,
+  isActive: true,
+  createdAt: true,
+  updatedAt: true,
+  channelAccess: { select: { channelAccountId: true } },
+} as const;
+
 @Injectable()
 export class UsersService {
   constructor(
@@ -21,7 +39,7 @@ export class UsersService {
 
     const hash = await bcrypt.hash(dto.password, 10);
 
-    return this.prisma.user.create({
+    const user = await this.prisma.user.create({
       data: {
         tenantId,
         email: dto.email,
@@ -29,18 +47,16 @@ export class UsersService {
         name: dto.name,
         role: (dto.role as any) || 'AGENT',
       },
-      select: { id: true, email: true, name: true, role: true, isActive: true, createdAt: true },
+      select: USER_SELECT,
     });
+    return flattenAccess(user);
   }
 
   async findAll(tenantId: string) {
     const users = await this.prisma.user.findMany({
       where: { tenantId },
       orderBy: { name: 'asc' },
-      select: {
-        id: true, email: true, name: true, role: true, isActive: true, createdAt: true,
-        channelAccess: { select: { channelAccountId: true } },
-      },
+      select: USER_SELECT,
     });
     return users.map(flattenAccess);
   }
@@ -48,10 +64,7 @@ export class UsersService {
   async findOne(tenantId: string, id: string) {
     const user = await this.prisma.user.findFirst({
       where: { id, tenantId },
-      select: {
-        id: true, email: true, name: true, role: true, isActive: true, createdAt: true,
-        channelAccess: { select: { channelAccountId: true } },
-      },
+      select: USER_SELECT,
     });
     if (!user) throw new NotFoundException('User not found');
     return flattenAccess(user);
@@ -80,11 +93,12 @@ export class UsersService {
       data.password = await bcrypt.hash(password, 10);
     }
 
-    return this.prisma.user.update({
+    const updated = await this.prisma.user.update({
       where: { id },
       data,
-      select: { id: true, email: true, name: true, role: true, isActive: true, updatedAt: true },
+      select: USER_SELECT,
     });
+    return flattenAccess(updated);
   }
 
   async remove(tenantId: string, id: string) {
