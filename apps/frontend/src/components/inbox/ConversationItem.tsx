@@ -4,7 +4,6 @@ import { es } from 'date-fns/locale';
 import clsx from 'clsx';
 import { Phone } from 'lucide-react';
 import { Conversation, accountLabel } from '@/types';
-import { useInboxStore } from '@/store/inbox.store';
 
 interface Props {
   conversation: Conversation;
@@ -68,8 +67,8 @@ export default function ConversationItem({ conversation, isSelected, onClick }: 
 
   // El badge de línea solo tiene sentido si el tenant tiene más de un número: con
   // uno solo sería la misma etiqueta repetida en cada fila.
-  const isMultiLine = useInboxStore((s) => s.accounts.length > 1);
-  const showLine = isMultiLine && !!channelAccount;
+  // Siempre, aunque la empresa tenga una sola línea — misma razón que en el encabezado.
+  const showLine = !!channelAccount;
 
   return (
     <button

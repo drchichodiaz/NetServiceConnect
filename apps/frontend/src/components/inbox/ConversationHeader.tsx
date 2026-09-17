@@ -33,10 +33,12 @@ export default function ConversationHeader({ conversation, sidebarOpen, onToggle
   const { contact, channelAccount } = conversation;
   const displayName = contact.displayId || contact.name || contact.phone || 'Contacto';
 
-  // Con varias líneas, el agente necesita ver por cuál sucursal le está escribiendo
-  // el cliente antes de responder — la respuesta sale por esa misma línea.
-  const isMultiLine = useInboxStore((s) => s.accounts.length > 1);
-  const showLine = isMultiLine && !!channelAccount;
+  // La línea por la que entró el mensaje se muestra SIEMPRE, también cuando la empresa
+  // tiene una sola. Antes se ocultaba en ese caso por considerarla información obvia,
+  // pero el agente no tiene por qué saber cuántas líneas hay configuradas: al responder
+  // necesita ver por dónde llegó y por dónde va a salir su respuesta. Que aparezca solo
+  // a veces vuelve el dato poco confiable — deja de leerse cuando siempre está.
+  const showLine = !!channelAccount;
 
   async function handleStatusChange(status: string) {
     setShowStatusMenu(false);
