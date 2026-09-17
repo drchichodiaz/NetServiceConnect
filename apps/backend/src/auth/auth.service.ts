@@ -26,11 +26,11 @@ export class AuthService {
 
     // Un usuario desactivado da el mismo error que uno inexistente: si dijera algo
     // distinto, serviria para averiguar que direcciones existen en el sistema.
-    if (!user || !user.isActive) throw new UnauthorizedException('Invalid credentials');
-    if (!user.tenant.isActive) throw new UnauthorizedException('Tenant is inactive');
+    if (!user || !user.isActive) throw new UnauthorizedException('Email o contraseña incorrectos');
+    if (!user.tenant.isActive) throw new UnauthorizedException('Esta empresa está desactivada. Contacta al administrador.');
 
     const valid = await bcrypt.compare(dto.password, user.password);
-    if (!valid) throw new UnauthorizedException('Invalid credentials');
+    if (!valid) throw new UnauthorizedException('Email o contraseña incorrectos');
 
     return this.signToken(user);
   }
@@ -110,7 +110,7 @@ export class AuthService {
    */
   async changePassword(userId: string, dto: ChangePasswordDto) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user) throw new UnauthorizedException('Invalid credentials');
+    if (!user) throw new UnauthorizedException('No pudimos identificar tu sesión. Vuelve a entrar.');
 
     const valid = await bcrypt.compare(dto.currentPassword, user.password);
     if (!valid) throw new BadRequestException('La contraseña actual no es correcta');

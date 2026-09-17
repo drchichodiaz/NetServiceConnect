@@ -13,13 +13,27 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+/**
+ * Un 401 normalmente significa "la sesion vencio": se limpia y se manda a entrar de nuevo.
+ *
+ * Pero el 401 del PROPIO login significa "credenciales incorrectas", que es otra cosa.
+ * Tratarlo como vencimiento recargaba /login entero, y esa recarga se llevaba puesto el
+ * mensaje de error junto con lo que la persona habia tipeado — aparecia y desaparecia en
+ * una fraccion de segundo. De ahi el reporte de que el aviso era imperceptible.
+ *
+ * Tampoco se redirige si ya se esta en /login: seria recargar la pantalla sobre si misma.
+ */
 api.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401 && typeof window !== 'undefined') {
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('user');
-      window.location.href = '/login';
+      const esIntentoDeLogin = (err.config?.url ?? '').includes('/auth/login');
+      const yaEstaEnLogin = window.location.pathname === '/login';
+      if (!esIntentoDeLogin && !yaEstaEnLogin) {
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('user');
+        window.location.href = '/login';
+      }
     }
     return Promise.reject(err);
   },

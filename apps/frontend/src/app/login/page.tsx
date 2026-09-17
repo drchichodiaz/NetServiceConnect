@@ -1,9 +1,8 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import toast from 'react-hot-toast';
 import { useAuthStore } from '@/store/auth.store';
-import { Loader2, MessageSquare, Check } from 'lucide-react';
+import { Loader2, MessageSquare, Check, AlertCircle } from 'lucide-react';
 import { BRAND } from '@/lib/brand';
 import Link from 'next/link';
 
@@ -18,18 +17,29 @@ export default function LoginPage() {
   const { login, isLoading, hydrate, token } = useAuthStore();
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
+  // El error vive DENTRO de la tarjeta, no en un toast: el toast salia arriba a la
+  // derecha, lejos de donde esta mirando la persona, y se iba solo a los pocos segundos.
+  // Con la clave mal escrita eso se leia como "no paso nada" y se reintentaba a ciegas.
+  const [error, setError] = useState<string | null>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { hydrate(); }, [hydrate]);
   useEffect(() => { if (token) router.replace('/inbox'); }, [token, router]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setError(null);
     try {
       await login(email, password);
       router.replace('/inbox');
     } catch (err: any) {
-      const msg = err?.response?.data?.message || 'Credenciales incorrectas';
-      toast.error(Array.isArray(msg) ? msg.join(', ') : msg);
+      const msg = err?.response?.data?.message;
+      setError(
+        Array.isArray(msg) ? msg.join(', ') : msg || 'No pudimos iniciar sesión. Intenta de nuevo.',
+      );
+      // Deja la contraseña seleccionada para que reescribirla sea escribir, sin borrar.
+      passwordRef.current?.focus();
+      passwordRef.current?.select();
     }
   }
 
@@ -95,6 +105,21 @@ export default function LoginPage() {
               <h2 className="text-xl font-bold text-ink mb-1 tracking-tight">Bienvenido de vuelta</h2>
               <p className="text-[13px] text-ink-muted mb-6">Inicia sesión en tu cuenta de equipo</p>
 
+              {/* role="alert" para que un lector de pantalla lo anuncie: sin esto, quien no
+                  ve la pantalla no se entera de que el intento fallo. */}
+              {error && (
+                <div
+                  role="alert"
+                  className="flex items-start gap-2.5 mb-5 px-3.5 py-3 rounded animate-fade-in"
+                  style={{ background: '#FEF2F2', border: '1px solid #FECACA' }}
+                >
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-px" style={{ color: '#DC2626' }} />
+                  <p className="text-[13px] font-medium leading-snug" style={{ color: '#B91C1C' }}>
+                    {error}
+                  </p>
+                </div>
+              )}
+
               <form onSubmit={handleSubmit} className="flex flex-col gap-3.5">
                 <div className="flex flex-col gap-1.5">
                   <label className="text-[11px] font-semibold text-ink-muted uppercase tracking-wider">
@@ -103,11 +128,12 @@ export default function LoginPage() {
                   <input
                     type="email"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    onChange={(e) => { setEmail(e.target.value); setError(null); }}
                     required
                     placeholder="agente@empresa.com"
                     className="input"
-                    style={{ borderRadius: 4 }}
+                    aria-invalid={!!error}
+                    style={{ borderRadius: 4, ...(error ? { borderColor: '#FCA5A5' } : {}) }}
                   />
                 </div>
 
@@ -121,13 +147,15 @@ export default function LoginPage() {
                     </Link>
                   </div>
                   <input
+                    ref={passwordRef}
                     type="password"
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    onChange={(e) => { setPassword(e.target.value); setError(null); }}
                     required
                     placeholder="••••••••"
                     className="input"
-                    style={{ borderRadius: 4 }}
+                    aria-invalid={!!error}
+                    style={{ borderRadius: 4, ...(error ? { borderColor: '#FCA5A5' } : {}) }}
                   />
                 </div>
 
