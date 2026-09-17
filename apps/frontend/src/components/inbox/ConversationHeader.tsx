@@ -52,10 +52,20 @@ export default function ConversationHeader({ conversation, sidebarOpen, onToggle
   async function openAssignMenu() {
     if (users.length === 0) {
       const data = await usersApi.list();
-      // Los desactivados no se ofrecen: no pueden entrar, asi que asignarles una
-      // conversacion equivale a dejarla sin atender sin que se note. El backend tambien
-      // lo rechaza, esto es para no llegar a ofrecerlo.
-      setUsers(data.filter((u: any) => u.isActive !== false));
+      // Dos motivos para no ofrecer a alguien, y los dos terminan igual: la conversacion
+      // queda a su nombre y sin que nadie la mire. Un desactivado no puede entrar; uno
+      // limitado a otra linea tiene esta conversacion filtrada de su bandeja. Sin filas
+      // de acceso ve todas las lineas, que es el default. El backend rechaza los dos
+      // casos igual — esto es para no llegar a ofrecerlos.
+      const linea = conversation.channelAccountId;
+      setUsers(
+        data.filter((u: any) => {
+          if (u.isActive === false) return false;
+          if (!linea) return true;
+          const suyas: string[] = u.channelAccountIds ?? [];
+          return suyas.length === 0 || suyas.includes(linea);
+        }),
+      );
     }
     setShowAssignMenu(true);
   }

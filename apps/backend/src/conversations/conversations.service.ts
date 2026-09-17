@@ -110,8 +110,31 @@ export class ConversationsService {
       if (!destinatario.isActive) {
         throw new BadRequestException('Ese usuario está desactivado. Actívalo o elige a otra persona.');
       }
+      // Y que pueda ver la linea por la que entro esta conversacion. A alguien limitado
+      // a otra sucursal la conversacion le queda filtrada de la bandeja: quedaria a su
+      // nombre y fuera de su vista al mismo tiempo.
+      if (!(await this.channelAccess.canAccessAccount(dto.assignedUserId, conv.channelAccountId))) {
+        throw new BadRequestException(
+          'Esa persona no tiene acceso a la línea de esta conversación. Dale acceso desde Equipo o elige a otra.',
+        );
+      }
     }
-    if (dto.assignedUserId !== undefined) updates.assignedUserId = dto.assignedUserId;
+    if (dto.assignedUserId !== undefined) {
+      updates.assignedUserId = dto.assignedUserId;
+
+      // Se marca el traspaso solo cuando la conversacion cambia de manos hacia OTRA
+      // persona. Tomarla uno mismo no se marca (ya sabe que la tiene), y reasignar a
+      // quien ya la tenia tampoco: seria hacerle parpadear algo que no cambio.
+      const cambiaDeDueno = dto.assignedUserId && dto.assignedUserId !== conv.assignedUserId;
+      if (cambiaDeDueno && dto.assignedUserId !== actorId) {
+        updates.assignedAt = new Date();
+        updates.assignedSeenAt = null;
+      } else if (dto.assignedUserId !== conv.assignedUserId) {
+        // Se la queda quien la asigna, o se deja sin asignar: no hay traspaso que avisar.
+        updates.assignedAt = null;
+        updates.assignedSeenAt = null;
+      }
+    }
 
     await this.prisma.$transaction(async (tx) => {
       if (Object.keys(updates).length > 0) {
@@ -153,7 +176,7 @@ export class ConversationsService {
   }
 
   async markRead(tenantId: string, id: string, requester?: any) {
-    return this.prisma.conversation.updateMany({
+    const resultado = await this.prisma.conversation.updateMany({
       where: {
         id,
         tenantId,
@@ -161,6 +184,17 @@ export class ConversationsService {
       },
       data: { unreadCount: 0 },
     });
+
+    // La marca de traspaso la limpia unicamente quien la tiene asignada, al abrirla.
+    // Si la mira un supervisor no se apaga: el aviso es para el destinatario, y
+    // apagarselo desde otra pantalla es como perder la conversacion otra vez.
+    if (requester?.id) {
+      await this.prisma.conversation.updateMany({
+        where: { id, tenantId, assignedUserId: requester.id },
+        data: { assignedSeenAt: new Date() },
+      });
+    }
+    return resultado;
   }
 }
 

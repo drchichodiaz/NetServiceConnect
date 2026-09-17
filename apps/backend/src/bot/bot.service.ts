@@ -650,14 +650,31 @@ ${knowledgeBase}
       data: { tenantId, conversationId, action: 'bot.handoff_requested', metadata: { reason } },
     });
 
-    const assignedUserId = await this.assignmentService.findLeastBusyAgent(tenantId);
+    // El reparto automatico tiene que respetar los permisos por linea igual que el
+    // manual: si no, el cliente que escribe a una sucursal cae en manos de alguien que
+    // no puede ver esa linea, y la conversacion queda asignada y sin nadie mirandola.
+    const conv = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { channelAccountId: true },
+    });
+    const assignedUserId = await this.assignmentService.findLeastBusyAgent(
+      tenantId,
+      conv?.channelAccountId ?? null,
+    );
 
     // Guard atómico: si dos disparadores de handoff casi simultáneos (ej: falla de
     // envío + el cliente tocando "hablar con un agente" a la vez) llegan acá, solo
     // el primero en commitear gana — el segundo ve count 0 y no duplica nada.
     const updated = await this.prisma.conversation.updateMany({
       where: { id: conversationId, mode: 'BOT' },
-      data: { mode: 'AGENT', botState: null, assignedUserId },
+      data: {
+        mode: 'AGENT',
+        botState: null,
+        assignedUserId,
+        // Le cae en la bandeja sin que nadie se lo diga: se marca igual que un traspaso
+        // hecho a mano, o el agente no tiene forma de notar que le llego.
+        ...(assignedUserId ? { assignedAt: new Date(), assignedSeenAt: null } : {}),
+      },
     });
     if (updated.count === 0) return;
 

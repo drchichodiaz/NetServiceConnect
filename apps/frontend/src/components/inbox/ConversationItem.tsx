@@ -2,7 +2,7 @@
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
 import clsx from 'clsx';
-import { Phone } from 'lucide-react';
+import { Phone, ArrowRightLeft } from 'lucide-react';
 import { Conversation, accountLabel } from '@/types';
 
 interface Props {
@@ -59,16 +59,20 @@ function SLABadge({ lastInboundAt }: { lastInboundAt: string }) {
 }
 
 export default function ConversationItem({ conversation, isSelected, onClick }: Props) {
-  const { contact, lastMessageText, lastMessageAt, lastInboundAt, unreadCount, assignedUser, status, channelAccount } = conversation;
+  const { contact, lastMessageText, lastMessageAt, lastInboundAt, unreadCount, assignedUser, status, channelAccount, assignedAt, assignedSeenAt } = conversation;
   const name = contact.displayId || contact.name || contact.phone || 'Contacto';
 
   // Mostrar SLA solo en conversaciones abiertas/pendientes con mensajes entrantes sin responder
   const showSLA = status !== 'CLOSED' && !!lastInboundAt && unreadCount > 0;
 
-  // El badge de línea solo tiene sentido si el tenant tiene más de un número: con
-  // uno solo sería la misma etiqueta repetida en cada fila.
   // Siempre, aunque la empresa tenga una sola línea — misma razón que en el encabezado.
   const showLine = !!channelAccount;
+
+  // Le pasaron esta conversación y todavía no la abrió. Sin esta marca un traspaso es
+  // invisible: la fila aparece en la bandeja igual que las demás y la conversación se
+  // pierde. Se apaga sola cuando quien la tiene asignada la abre.
+  const transferida =
+    !!assignedAt && (!assignedSeenAt || new Date(assignedSeenAt) < new Date(assignedAt));
 
   return (
     <button
@@ -92,7 +96,7 @@ export default function ConversationItem({ conversation, isSelected, onClick }: 
       <div className="flex-1 min-w-0">
         {/* Row 1: name + time */}
         <div className="flex items-center justify-between gap-2 mb-0.5">
-          <span className={clsx('text-sm truncate', unreadCount > 0 ? 'font-semibold text-ink' : 'font-medium text-ink')}>
+          <span className={clsx('text-sm truncate', unreadCount > 0 || transferida ? 'font-semibold text-ink' : 'font-medium text-ink')}>
             {name}
           </span>
           {lastMessageAt && (
@@ -117,9 +121,19 @@ export default function ConversationItem({ conversation, isSelected, onClick }: 
           )}
         </div>
 
-        {/* Row 3: línea + assignee + SLA */}
-        {(assignedUser || showSLA || showLine) && (
+        {/* Row 3: traspaso + línea + assignee + SLA */}
+        {(transferida || assignedUser || showSLA || showLine) && (
           <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+            {transferida && (
+              <span
+                className="flex items-center gap-1 text-[10px] rounded-full pl-1.5 pr-2 py-0.5 font-bold"
+                style={{ background: '#FEF3C7', color: '#B45309' }}
+                title="Te pasaron esta conversación y todavía no la abriste"
+              >
+                <ArrowRightLeft className="w-2.5 h-2.5 shrink-0" />
+                Transferida
+              </span>
+            )}
             {showLine && (
               <span
                 className="flex items-center gap-1 text-[10px] rounded-full pl-1.5 pr-2 py-0.5 font-semibold max-w-[140px]"

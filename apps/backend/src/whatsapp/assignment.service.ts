@@ -8,10 +8,29 @@ export class AssignmentService {
   /**
    * Asigna al agente activo con menor cantidad de conversaciones abiertas/pendientes
    * en el tenant. Empate se resuelve por orden de creación del usuario (más antiguo primero).
+   *
+   * `channelAccountId` es la linea por la que entro la conversacion. Solo se consideran
+   * los agentes que pueden ver esa linea: a uno limitado a otra sucursal la conversacion
+   * le queda invisible, asi que asignarsela es dejarla sin atender sin que nadie lo note.
+   * Un agente sin restricciones ve todas las lineas y siempre entra en el reparto.
    */
-  async findLeastBusyAgent(tenantId: string): Promise<string | null> {
+  async findLeastBusyAgent(tenantId: string, channelAccountId?: string | null): Promise<string | null> {
     const agents = await this.prisma.user.findMany({
-      where: { tenantId, role: 'AGENT', isActive: true },
+      where: {
+        tenantId,
+        role: 'AGENT',
+        isActive: true,
+        // Sin linea (conversaciones previas al multi-numero) no hay a quien excluir:
+        // esas son visibles para todos, misma regla que ChannelAccessService.
+        ...(channelAccountId
+          ? {
+              OR: [
+                { channelAccess: { none: {} } },
+                { channelAccess: { some: { channelAccountId } } },
+              ],
+            }
+          : {}),
+      },
       select: { id: true },
       orderBy: { createdAt: 'asc' },
     });

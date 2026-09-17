@@ -279,6 +279,14 @@ model Conversation {
   lastMessageText  String?
   lastInboundAt    DateTime?
   unreadCount      Int                   @default(0)
+  // Traspaso: cuando la conversacion paso a manos de esta persona, y cuando ella la
+  // abrio despues de ese traspaso. Mientras assignedSeenAt sea null o anterior a
+  // assignedAt, la bandeja la marca como recien transferida. Son dos campos y no un
+  // booleano para que un segundo traspaso vuelva a marcarla aunque el primero ya se
+  // hubiera visto. No se mezcla con unreadCount, que cuenta mensajes sin leer del
+  // cliente: una conversacion puede estar al dia y aun asi ser nueva para quien la recibe.
+  assignedAt       DateTime?
+  assignedSeenAt   DateTime?
   createdAt        DateTime              @default(now())
   updatedAt        DateTime              @updatedAt
 

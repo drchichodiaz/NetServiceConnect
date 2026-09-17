@@ -52,6 +52,10 @@ export interface Conversation {
   lastMessageText?: string;
   lastInboundAt?: string;
   unreadCount: number;
+  /** Cuando la conversacion paso a manos de quien la tiene asignada. */
+  assignedAt?: string | null;
+  /** Cuando esa persona la abrio despues de ese traspaso. */
+  assignedSeenAt?: string | null;
   createdAt: string;
   updatedAt: string;
   _count?: { messages: number; notes: number };
