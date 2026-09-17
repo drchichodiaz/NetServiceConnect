@@ -400,6 +400,11 @@ model InternalNote {
 }
 
 // ─── Tag ──────────────────────────────────────────────────────────────────────
+//
+// El modulo de etiquetas se retiro del producto (2026-09-17): nadie lo entendia y
+// confundia mas de lo que ayudaba. Las dos tablas quedan a proposito, con los datos
+// que los tenants ya habian cargado, por si algun dia se reintroduce. Ningun codigo
+// las consulta — si al final se decide que no vuelve, se borran con una migracion.
 
 model Tag {
   id        String   @id @default(cuid())

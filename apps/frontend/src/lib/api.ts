@@ -331,11 +331,3 @@ export const quickRepliesApi = {
     api.patch(`/quick-replies/${id}`, data).then((r) => r.data),
   remove: (id: string) => api.delete(`/quick-replies/${id}`).then((r) => r.data),
 };
-
-// ─── Tags ─────────────────────────────────────────────────────────────────────
-
-export const tagsApi = {
-  list: () => api.get('/tags').then((r) => r.data),
-  create: (data: { name: string; color?: string }) =>
-    api.post('/tags', data).then((r) => r.data),
-};

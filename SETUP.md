@@ -136,8 +136,8 @@ ngrok http 3001
 - `POST /api/conversations/:id/notes`
 - `DELETE /api/conversations/:id/notes/:noteId`
 
-### Usuarios, Tags, Tenants
-- CRUD estándar en `/api/users`, `/api/tags`, `/api/tenants`
+### Usuarios, Tenants
+- CRUD estándar en `/api/users`, `/api/tenants`
 
 ## Multi-tenancy
 

@@ -60,7 +60,7 @@ function SLABadge({ lastInboundAt }: { lastInboundAt: string }) {
 }
 
 export default function ConversationItem({ conversation, isSelected, onClick }: Props) {
-  const { contact, lastMessageText, lastMessageAt, lastInboundAt, unreadCount, tags, assignedUser, status, channelAccount } = conversation;
+  const { contact, lastMessageText, lastMessageAt, lastInboundAt, unreadCount, assignedUser, status, channelAccount } = conversation;
   const name = contact.displayId || contact.name || contact.phone || 'Contacto';
 
   // Mostrar SLA solo en conversaciones abiertas/pendientes con mensajes entrantes sin responder
@@ -118,8 +118,8 @@ export default function ConversationItem({ conversation, isSelected, onClick }: 
           )}
         </div>
 
-        {/* Row 3: línea + tags + assignee + SLA */}
-        {(tags.length > 0 || assignedUser || showSLA || showLine) && (
+        {/* Row 3: línea + assignee + SLA */}
+        {(assignedUser || showSLA || showLine) && (
           <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
             {showLine && (
               <span
@@ -137,15 +137,6 @@ export default function ConversationItem({ conversation, isSelected, onClick }: 
                 {assignedUser.name.split(' ')[0]}
               </span>
             )}
-            {tags.slice(0, 2).map(({ tag }) => (
-              <span
-                key={tag.id}
-                className="text-[10px] rounded-full px-2 py-0.5 font-medium"
-                style={{ background: `${tag.color}18`, color: tag.color }}
-              >
-                {tag.name}
-              </span>
-            ))}
           </div>
         )}
       </div>

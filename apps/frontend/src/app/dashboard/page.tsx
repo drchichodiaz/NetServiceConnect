@@ -5,7 +5,7 @@ import {
   Tooltip, ResponsiveContainer,
 } from 'recharts';
 import {
-  MessageSquare, Clock, Tag, Users, Bot, Phone,
+  MessageSquare, Clock, Users, Bot, Phone,
   TrendingUp, TrendingDown, ChevronDown, RefreshCw,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/auth.store';
@@ -139,14 +139,12 @@ export default function DashboardPage() {
   const conv  = stats?.conversations ?? {};
   const chart = stats?.chart ?? [];
   const agents = stats?.agents ?? [];
-  const tags  = stats?.tags ?? [];
   const lines: any[] = stats?.lines ?? [];
   // Con una sola linea no hay nada que comparar — misma regla que el badge del inbox.
   const showLines = lines.length > 1;
   // La altura incluye la banda del eje X: si se fija solo el area de barras, las
   // etiquetas del eje quedan afuera y la tarjeta se llena de scroll interno.
   const linesChartHeight = Math.max(220, lines.length * 34 + 48);
-  const maxTagCount = tags[0]?.count ?? 1;
 
   const periodLabel = PERIODS.find((p) => p.key === period)?.label ?? '';
 
@@ -216,7 +214,7 @@ export default function DashboardPage() {
         </div>
 
         {/* ── Metric cards ─────────────────────────────────────────────────── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
           {[
             {
               label: 'Conversaciones',
@@ -231,13 +229,6 @@ export default function DashboardPage() {
               sub:   conv.total ? `${Math.round(((conv.closed ?? 0) / conv.total) * 100)}% tasa de resolución` : '—',
               icon:  Clock,
               accentColor: '#3B82F6',
-            },
-            {
-              label: 'Etiquetas en uso',
-              value: String(tags.length),
-              sub:   tags[0] ? `Top: ${tags[0].name}` : 'Sin etiquetas',
-              icon:  Tag,
-              accentColor: '#8B5CF6',
             },
             {
               label: 'Agentes con actividad',
@@ -454,10 +445,10 @@ export default function DashboardPage() {
         )}
 
         {/* ── Bottom row ───────────────────────────────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 gap-4">
 
-          {/* Agent table — 3/5 */}
-          <div className="card overflow-hidden lg:col-span-3 animate-fade-in" style={{ animationDelay: '160ms' }}>
+          {/* Agent table */}
+          <div className="card overflow-hidden animate-fade-in" style={{ animationDelay: '160ms' }}>
             <div className="px-5 py-4" style={{ borderBottom: '1px solid var(--border)' }}>
               <h2 className="font-semibold text-ink text-sm">Productividad de agentes</h2>
               <p className="text-xs text-ink-muted mt-0.5">{periodLabel}</p>
@@ -523,64 +514,6 @@ export default function DashboardPage() {
                   </div>
                 ))}
               </div>
-            )}
-          </div>
-
-          {/* Top tags — 2/5 */}
-          <div className="card overflow-hidden lg:col-span-2 animate-fade-in" style={{ animationDelay: '180ms' }}>
-            <div className="px-5 py-4" style={{ borderBottom: '1px solid var(--border)' }}>
-              <h2 className="font-semibold text-ink text-sm">Top etiquetas</h2>
-              <p className="text-xs text-ink-muted mt-0.5">Por volumen de conversaciones</p>
-            </div>
-
-            {loading ? (
-              <div className="px-5 py-4 space-y-4">
-                {[1, 2, 3, 4].map((i) => (
-                  <div key={i} className="space-y-1.5">
-                    <div className="h-3 w-24 rounded bg-surface-muted animate-pulse" />
-                    <div className="h-1.5 rounded-full bg-surface-muted animate-pulse" />
-                  </div>
-                ))}
-              </div>
-            ) : tags.length === 0 ? (
-              <div className="px-5 py-10 text-center text-sm text-ink-muted">
-                Sin etiquetas asignadas
-              </div>
-            ) : (
-              <>
-                <div className="px-5 py-4 space-y-4">
-                  {tags.map((tag: any, i: number) => (
-                    <div key={tag.id} className="animate-fade-in" style={{ animationDelay: `${220 + i * 50}ms` }}>
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-xs font-medium text-ink truncate pr-2 flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full shrink-0" style={{ background: tag.color }} />
-                          {tag.name}
-                        </span>
-                        <span className="text-xs font-semibold text-ink-muted shrink-0">{tag.count}</span>
-                      </div>
-                      <div className="h-1.5 rounded-full bg-surface-subtle overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-all duration-700"
-                          style={{
-                            width: `${Math.round((tag.count / maxTagCount) * 100)}%`,
-                            background: tag.color,
-                          }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <div
-                  className="mx-5 mb-5 rounded-xl p-3.5 text-center"
-                  style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)' }}
-                >
-                  <p className="text-xl font-bold text-ink" style={{ letterSpacing: '-0.03em' }}>
-                    {tags.reduce((s: number, t: any) => s + t.count, 0)}
-                  </p>
-                  <p className="text-xs text-ink-muted mt-0.5">conversaciones etiquetadas</p>
-                </div>
-              </>
             )}
           </div>
 

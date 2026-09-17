@@ -38,16 +38,6 @@ export interface Contact {
 
 export type ConversationStatus = 'OPEN' | 'PENDING' | 'CLOSED';
 
-export interface Tag {
-  id: string;
-  name: string;
-  color: string;
-}
-
-export interface ConversationTag {
-  tag: Tag;
-}
-
 export interface Conversation {
   id: string;
   tenantId: string;
@@ -64,7 +54,6 @@ export interface Conversation {
   unreadCount: number;
   createdAt: string;
   updatedAt: string;
-  tags: ConversationTag[];
   _count?: { messages: number; notes: number };
 }
 

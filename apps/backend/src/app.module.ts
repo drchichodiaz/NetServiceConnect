@@ -13,7 +13,6 @@ import { ConversationsModule } from './conversations/conversations.module';
 import { MessagesModule } from './messages/messages.module';
 import { NotesModule } from './notes/notes.module';
 import { AiModule } from './ai/ai.module';
-import { TagsModule } from './tags/tags.module';
 import { AuditModule } from './audit/audit.module';
 import { StatsModule } from './stats/stats.module';
 import { QuickRepliesModule } from './quick-replies/quick-replies.module';
@@ -42,7 +41,6 @@ import { MailModule } from './mail/mail.module';
     MessagesModule,
     NotesModule,
     AiModule,
-    TagsModule,
     AuditModule,
     StatsModule,
     QuickRepliesModule,

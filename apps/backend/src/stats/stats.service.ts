@@ -29,7 +29,6 @@ export class StatsService {
       messages,
       chartMessages,
       agentData,
-      tagData,
       users,
       lineConvData,
       lineBotData,
@@ -58,15 +57,6 @@ export class StatsService {
         this.prisma.conversation.findMany({
           where: { tenantId, assignedUserId: { not: null }, ...convFilter },
           select: { assignedUserId: true, status: true, createdAt: true },
-        }),
-
-        // Tag stats
-        this.prisma.conversationTag.groupBy({
-          by: ['tagId'],
-          where: { conversation: { tenantId, ...convFilter } },
-          _count: { tagId: true },
-          orderBy: { _count: { tagId: 'desc' } },
-          take: 6,
         }),
 
         // Users list
@@ -165,27 +155,6 @@ export class StatsService {
       .filter((a) => a.total > 0)
       .sort((a, b) => b.total - a.total);
 
-    // ── Tag stats ────────────────────────────────────────────────────────────
-    const tagIds = tagData.map((t) => t.tagId);
-    const tagDetails = tagIds.length
-      ? await this.prisma.tag.findMany({
-          where: { id: { in: tagIds } },
-          select: { id: true, name: true, color: true },
-        })
-      : [];
-
-    const maxTagCount = tagData[0]?._count.tagId ?? 1;
-    const tags = tagData.map((t) => {
-      const detail = tagDetails.find((d) => d.id === t.tagId);
-      return {
-        id:    t.tagId,
-        name:  detail?.name  ?? 'Etiqueta',
-        color: detail?.color ?? '#25D366',
-        count: t._count.tagId,
-        pct:   Math.round((t._count.tagId / maxTagCount) * 100),
-      };
-    });
-
     // ── Comparativa por linea ────────────────────────────────────────────────
     // Se incluye una fila "Sin linea" si quedaron conversaciones sin asignar (previas
     // al multi-numero, o huerfanas al desconectar una linea): preferimos que los
@@ -251,7 +220,6 @@ export class StatsService {
       messages: messages._count,
       chart,
       agents,
-      tags,
       lines,
     };
   }

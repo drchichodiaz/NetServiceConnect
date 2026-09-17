@@ -1,4 +1,4 @@
-import { IsOptional, IsIn, IsString, IsArray } from 'class-validator';
+import { IsOptional, IsIn, IsString } from 'class-validator';
 
 export class UpdateConversationDto {
   @IsOptional()
@@ -8,9 +8,4 @@ export class UpdateConversationDto {
   @IsOptional()
   @IsString()
   assignedUserId?: string;
-
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  tagIds?: string[];
 }

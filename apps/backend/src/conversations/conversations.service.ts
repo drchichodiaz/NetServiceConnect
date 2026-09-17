@@ -62,7 +62,6 @@ export class ConversationsService {
         },
         channelAccount: { select: { id: true, label: true, phoneNumber: true, channel: true } },
         assignedUser: { select: { id: true, name: true } },
-        tags: { include: { tag: true } },
         _count: { select: { messages: true, notes: true } },
       },
     });
@@ -77,7 +76,6 @@ export class ConversationsService {
         contact: { include: { identities: { select: { channel: true, externalId: true, handle: true } } } },
         channelAccount: { select: { id: true, label: true, phoneNumber: true, channel: true } },
         assignedUser: { select: { id: true, name: true, email: true } },
-        tags: { include: { tag: true } },
         _count: { select: { messages: true, notes: true } },
       },
     });
@@ -103,15 +101,6 @@ export class ConversationsService {
     await this.prisma.$transaction(async (tx) => {
       if (Object.keys(updates).length > 0) {
         await tx.conversation.update({ where: { id }, data: updates });
-      }
-
-      if (dto.tagIds !== undefined) {
-        await tx.conversationTag.deleteMany({ where: { conversationId: id } });
-        if (dto.tagIds.length > 0) {
-          await tx.conversationTag.createMany({
-            data: dto.tagIds.map((tagId) => ({ conversationId: id, tagId })),
-          });
-        }
       }
 
       // Audit trail
