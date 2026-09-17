@@ -6,6 +6,7 @@ import { authApi } from '@/lib/api';
 import { Loader2, ShieldCheck } from 'lucide-react';
 import { BRAND } from '@/lib/brand';
 import toast from 'react-hot-toast';
+import { validarPassword, PASSWORD_HINT, PASSWORD_MIN_LENGTH } from '@/lib/password';
 
 function ResetPasswordForm() {
   const router = useRouter();
@@ -20,6 +21,11 @@ function ResetPasswordForm() {
     e.preventDefault();
     if (password !== repeat) {
       toast.error('Las dos contraseñas no coinciden');
+      return;
+    }
+    const problema = validarPassword(password);
+    if (problema) {
+      toast.error(problema);
       return;
     }
     setSaving(true);
@@ -70,18 +76,18 @@ function ResetPasswordForm() {
     <form onSubmit={handleSubmit} className="card p-6 mt-6 space-y-4">
       <div>
         <p className="text-sm font-semibold text-ink mb-1">Elegí una contraseña nueva</p>
-        <p className="text-sm text-ink-muted leading-relaxed">Mínimo 6 caracteres.</p>
+        <p className="text-sm text-ink-muted leading-relaxed">{PASSWORD_HINT}</p>
       </div>
 
       <input
         required autoFocus type="password" placeholder="Contraseña nueva"
-        minLength={6} autoComplete="new-password"
+        minLength={PASSWORD_MIN_LENGTH} autoComplete="new-password"
         value={password} onChange={(e) => setPassword(e.target.value)}
         className="input w-full"
       />
       <input
         required type="password" placeholder="Repetila"
-        minLength={6} autoComplete="new-password"
+        minLength={PASSWORD_MIN_LENGTH} autoComplete="new-password"
         value={repeat} onChange={(e) => setRepeat(e.target.value)}
         className="input w-full"
       />

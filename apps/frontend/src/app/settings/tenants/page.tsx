@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { tenantsApi } from '@/lib/api';
 import { Building2, Plus, Loader2, X, Copy, Check, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { validarPassword, PASSWORD_MIN_LENGTH } from '@/lib/password';
 
 interface TenantRow {
   id: string;
@@ -38,11 +39,37 @@ function slugify(value: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
-function generatePassword(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
-  const bytes = new Uint32Array(12);
+// Sin caracteres ambiguos (I/l/1, O/0): esta contrasena se dicta o se copia a mano.
+const MAYUS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+const MINUS = 'abcdefghijkmnpqrstuvwxyz';
+const NUMS = '23456789';
+const SIMBOLOS = '!@#$%';
+
+function tomar(set: string, n: number): string[] {
+  const bytes = new Uint32Array(n);
   crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => chars[b % chars.length]).join('');
+  return Array.from(bytes, (b) => set[b % set.length]);
+}
+
+function generatePassword(): string {
+  // Una de cada clase asegurada, y el resto libre. Cuando eran 12 caracteres tomados al
+  // azar del alfabeto entero, casi 1 de cada 5 salia sin ningun numero — inofensivo
+  // antes, pero la regla de contrasenas pide letras Y numeros y las habria rechazado.
+  const chars = [
+    ...tomar(MAYUS, 1),
+    ...tomar(MINUS, 1),
+    ...tomar(NUMS, 1),
+    ...tomar(MAYUS + MINUS + NUMS + SIMBOLOS, 9),
+  ];
+
+  // Fisher-Yates, para que las tres aseguradas no queden siempre en las mismas posiciones.
+  const idx = new Uint32Array(chars.length);
+  crypto.getRandomValues(idx);
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = idx[i] % (i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join('');
 }
 
 export default function TenantsPage() {
@@ -71,6 +98,11 @@ export default function TenantsPage() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
+    const problema = validarPassword(form.adminPassword, [form.adminName, form.adminEmail]);
+    if (problema) {
+      toast.error(problema);
+      return;
+    }
     setIsSaving(true);
 
     // El try cubre SOLO la llamada. Cuando abarcaba tambien lo de abajo, un error al
@@ -171,7 +203,7 @@ export default function TenantsPage() {
             />
             <div className="flex gap-2">
               <input
-                required placeholder="Contraseña temporal" minLength={6} value={form.adminPassword}
+                required placeholder="Contraseña temporal" minLength={PASSWORD_MIN_LENGTH} value={form.adminPassword}
                 onChange={(e) => setForm((f) => ({ ...f, adminPassword: e.target.value }))} className="input flex-1 font-mono"
               />
               <button

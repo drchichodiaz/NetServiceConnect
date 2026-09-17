@@ -1,4 +1,5 @@
 import { IsString, MinLength, Matches, IsOptional, IsEmail } from 'class-validator';
+import { IsStrongPassword } from '../../common/validators/is-strong-password.validator';
 
 export class CreateTenantDto {
   @IsString()
@@ -20,6 +21,6 @@ export class CreateTenantDto {
   adminEmail: string;
 
   @IsString()
-  @MinLength(6)
+  @IsStrongPassword()
   adminPassword: string;
 }

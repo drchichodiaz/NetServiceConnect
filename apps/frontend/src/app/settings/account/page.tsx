@@ -4,6 +4,7 @@ import { authApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth.store';
 import { Loader2, Check, KeyRound, UserCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { validarPassword, PASSWORD_HINT, PASSWORD_MIN_LENGTH } from '@/lib/password';
 
 const ROLE_LABELS: Record<string, string> = {
   ADMIN: 'Administrador',
@@ -42,6 +43,11 @@ export default function AccountPage() {
     e.preventDefault();
     if (next !== repeat) {
       toast.error('La contraseña nueva y su repetición no coinciden');
+      return;
+    }
+    const problema = validarPassword(next, [user?.name, user?.email]);
+    if (problema) {
+      toast.error(problema);
       return;
     }
     setSavingPw(true);
@@ -123,7 +129,7 @@ export default function AccountPage() {
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-ink-subtle">Nueva</label>
             <input
-              required type="password" minLength={6} autoComplete="new-password"
+              required type="password" minLength={PASSWORD_MIN_LENGTH} autoComplete="new-password"
               value={next} onChange={(e) => setNext(e.target.value)}
               className="input w-full"
             />
@@ -131,7 +137,7 @@ export default function AccountPage() {
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-ink-subtle">Repetir la nueva</label>
             <input
-              required type="password" minLength={6} autoComplete="new-password"
+              required type="password" minLength={PASSWORD_MIN_LENGTH} autoComplete="new-password"
               value={repeat} onChange={(e) => setRepeat(e.target.value)}
               className="input w-full"
             />
@@ -139,7 +145,7 @@ export default function AccountPage() {
         </div>
 
         <p className="text-[11px] text-ink-subtle">
-          Mínimo 6 caracteres. Las sesiones que ya tengas abiertas en otros dispositivos
+          {PASSWORD_HINT} Las sesiones que ya tengas abiertas en otros dispositivos
           siguen activas hasta que venzan.
         </p>
 

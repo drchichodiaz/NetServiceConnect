@@ -1,4 +1,5 @@
-import { IsString, IsOptional, IsIn, IsBoolean, IsEmail, MinLength, IsArray } from 'class-validator';
+import { IsString, IsOptional, IsIn, IsBoolean, IsEmail, IsArray } from 'class-validator';
+import { IsStrongPassword } from '../../common/validators/is-strong-password.validator';
 
 export class UpdateUserDto {
   @IsOptional()
@@ -19,7 +20,7 @@ export class UpdateUserDto {
 
   @IsOptional()
   @IsString()
-  @MinLength(6)
+  @IsStrongPassword()
   password?: string;
 
   /**

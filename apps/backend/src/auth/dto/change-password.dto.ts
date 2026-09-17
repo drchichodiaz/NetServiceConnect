@@ -1,4 +1,5 @@
-import { IsString, MinLength } from 'class-validator';
+import { IsString } from 'class-validator';
+import { IsStrongPassword } from '../../common/validators/is-strong-password.validator';
 
 export class ChangePasswordDto {
   /** La actual. Se pide aunque la sesion ya este iniciada: sin esto, cualquiera que
@@ -7,6 +8,6 @@ export class ChangePasswordDto {
   currentPassword: string;
 
   @IsString()
-  @MinLength(6)
+  @IsStrongPassword()
   newPassword: string;
 }
