@@ -1,4 +1,5 @@
-import { Module, MiddlewareConsumer, RequestMethod } from '@nestjs/common';
+import { Module, NestModule, MiddlewareConsumer, RequestMethod } from '@nestjs/common';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
 
@@ -25,6 +26,9 @@ import { BotsModule } from './bots/bots.module';
 import { MenuNodesModule } from './menu-nodes/menu-nodes.module';
 import { ChannelAccessModule } from './common/services/channel-access.module';
 import { MailModule } from './mail/mail.module';
+import { SupportModule } from './support/support.module';
+import { RequestIdMiddleware } from './common/request-id.middleware';
+import { RequestLogInterceptor } from './common/request-log.interceptor';
 
 @Module({
   imports: [
@@ -53,6 +57,16 @@ import { MailModule } from './mail/mail.module';
     CampaignsModule,
     BotsModule,
     MenuNodesModule,
+    SupportModule,
+  ],
+  providers: [
+    // Escribe una linea por pedido fallido, con el id que le pone RequestIdMiddleware:
+    // es lo que permite encontrar en los logs el error que cita un reporte de soporte.
+    { provide: APP_INTERCEPTOR, useClass: RequestLogInterceptor },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(RequestIdMiddleware).forRoutes({ path: '*', method: RequestMethod.ALL });
+  }
+}

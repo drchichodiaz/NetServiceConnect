@@ -42,6 +42,7 @@ model Tenant {
   menuNodes        TenantMenuNode[]
   bots             Bot[]
   contactTags      ContactTag[]
+  supportRequests  SupportRequest[]
 }
 
 // ─── User ─────────────────────────────────────────────────────────────────────
@@ -68,6 +69,7 @@ model User {
   messages      Message[]
   internalNotes InternalNote[]
   auditLogs     AuditLog[]
+  supportRequests SupportRequest[]
 
   // Unico en todo el sistema, no por empresa: con el email repetido entre empresas el
   // login no puede saber a cual entrar (se quedaba con el primero que encontraba) y
@@ -713,6 +715,46 @@ model SystemConfig {
   mailUser         String?
   mailPass         String?
   mailFrom         String?
+  // ─── Soporte ───
+  // A donde llegan los reportes del boton de soporte. Es por entorno y no por empresa
+  // a proposito: quien atiende el reporte es quien opera ESTE servidor, no el tenant.
+  supportEmail     String?
+}
+
+// ─── Soporte ──────────────────────────────────────────────────────────────────
+
+/// Un reporte del boton "Soporte".
+///
+/// Se guarda ANTES de mandar el correo, y se guarda aunque el correo falle: un envio
+/// es "lo tiro y espero", asi que si el SMTP esta caido o sin configurar en este
+/// entorno, el reporte se perderia entero y la persona creeria que llego. Con la fila
+/// en la base se puede reenviar o leerlo a mano.
+model SupportRequest {
+  id       String @id @default(cuid())
+  tenantId String
+  userId   String?
+
+  /// Que estaba haciendo y que paso, tal cual lo escribio la persona.
+  activity String
+  problem  String
+  /// Si puede seguir trabajando. Sirve para priorizar sin leer todo el texto.
+  blocking Boolean @default(false)
+
+  /// Lo que se adjunto solo: pantalla, navegador, version, ultimos errores de API.
+  /// Nunca contenido de conversaciones ni datos de contactos — eso es de los clientes
+  /// del tenant y no hace falta para diagnosticar.
+  context Json?
+
+  /// Si el correo salio, y por que no si fallo. Null en emailError = no hubo problema.
+  emailSent  Boolean @default(false)
+  emailError String?
+
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
 }
 
 // ─── Audit Log ────────────────────────────────────────────────────────────────

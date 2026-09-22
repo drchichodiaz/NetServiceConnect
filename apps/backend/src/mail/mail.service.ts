@@ -7,6 +7,13 @@ export interface MailMessage {
   subject: string;
   html: string;
   text: string;
+  /**
+   * A quien le contesta el "Responder" del cliente de correo. Lo usan los reportes de
+   * soporte: el correo sale del dominio del sistema (es el unico que puede firmar),
+   * pero responderlo tiene que escribirle a la persona que reporto, no al buzon del
+   * sistema, que no lee nadie.
+   */
+  replyTo?: string;
 }
 
 export interface MailSendResult {
@@ -65,6 +72,7 @@ export class MailService {
       const info = await transporter.sendMail({
         from: cfg.from || cfg.user,
         to: message.to,
+        ...(message.replyTo && { replyTo: message.replyTo }),
         subject: message.subject,
         text: message.text,
         html: message.html,

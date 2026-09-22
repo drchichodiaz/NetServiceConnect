@@ -23,9 +23,57 @@ api.interceptors.request.use((config) => {
  *
  * Tampoco se redirige si ya se esta en /login: seria recargar la pantalla sobre si misma.
  */
+/**
+ * Los últimos pedidos que fallaron en esta sesión.
+ *
+ * Existe para el botón de soporte: un reporte que dice "no me deja crear la campaña"
+ * no se puede reproducir, y el mismo reporte con `POST /campaigns 400 — falta indicar
+ * de dónde sale {{1}}` y el id del pedido se diagnostica sin preguntar nada. Vive en
+ * memoria y se pierde al recargar, que es justo lo que se quiere: no es un historial,
+ * son los errores de lo que la persona acaba de hacer.
+ */
+export interface FailedCall {
+  method: string;
+  url: string;
+  status: number;
+  requestId?: string;
+  message?: string;
+  at: string;
+}
+
+const MAX_REMEMBERED_ERRORS = 10;
+const recentErrors: FailedCall[] = [];
+
+export function getRecentErrors(): FailedCall[] {
+  return [...recentErrors];
+}
+
+function rememberError(err: any) {
+  try {
+    const res = err?.response;
+    const raw = res?.data?.message;
+    recentErrors.unshift({
+      method: (err?.config?.method ?? '?').toUpperCase(),
+      // Sin el baseURL: el dominio ya se sabe y hace la línea ilegible.
+      url: (err?.config?.url ?? '?').slice(0, 300),
+      // 0 = ni siquiera hubo respuesta (backend caído, sin internet), que es un dato
+      // en sí mismo y hay que poder distinguirlo de un 500.
+      status: res?.status ?? 0,
+      requestId: res?.headers?.['x-request-id'],
+      message: (Array.isArray(raw) ? raw.join('; ') : raw ?? err?.message ?? '').slice(0, 500),
+      at: new Date().toISOString(),
+    });
+    if (recentErrors.length > MAX_REMEMBERED_ERRORS) recentErrors.length = MAX_REMEMBERED_ERRORS;
+  } catch {
+    // Registrar el error nunca puede romper el manejo del error original.
+  }
+}
+
 api.interceptors.response.use(
   (res) => res,
   (err) => {
+    rememberError(err);
+
     if (err.response?.status === 401 && typeof window !== 'undefined') {
       const esIntentoDeLogin = (err.config?.url ?? '').includes('/auth/login');
       const yaEstaEnLogin = window.location.pathname === '/login';
@@ -284,6 +332,7 @@ export const systemConfigApi = {
     metaVerifyToken?: string;
     metaApiVersion?: string;
     mediaStoragePath?: string;
+    supportEmail?: string;
   }) => api.patch('/system-config', data).then((r) => r.data),
 };
 
@@ -578,4 +627,28 @@ export const campaignsApi = {
   start:  (id: string) => api.post(`/campaigns/${id}/start`).then((r) => r.data),
   pause:  (id: string) => api.post(`/campaigns/${id}/pause`).then((r) => r.data),
   cancel: (id: string) => api.post(`/campaigns/${id}/cancel`).then((r) => r.data),
+};
+
+// ─── Soporte ──────────────────────────────────────────────────────────────────
+
+export const supportApi = {
+  /**
+   * Manda el reporte con el contexto técnico que el panel puede juntar solo. Lo arma
+   * acá y no en el modal para que cualquier pantalla que quiera reportar mande
+   * exactamente lo mismo.
+   */
+  send: (data: { activity: string; problem: string; blocking?: boolean }): Promise<{ ticket: string; emailSent: boolean }> =>
+    api
+      .post('/support', {
+        ...data,
+        context: {
+          url: typeof window !== 'undefined' ? window.location.href : undefined,
+          userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
+          viewport: typeof window !== 'undefined' ? `${window.innerWidth}x${window.innerHeight}` : undefined,
+          language: typeof navigator !== 'undefined' ? navigator.language : undefined,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          recentErrors: getRecentErrors(),
+        },
+      })
+      .then((r) => r.data),
 };

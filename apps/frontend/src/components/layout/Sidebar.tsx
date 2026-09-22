@@ -1,8 +1,10 @@
 'use client';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { MessageSquare, Users, Settings, LogOut, LayoutDashboard, Zap, Sparkles, BookUser, ShieldCheck, Building2, FileText, Bot, UserCircle, Megaphone } from 'lucide-react';
+import { MessageSquare, Users, Settings, LogOut, LayoutDashboard, Zap, Sparkles, BookUser, ShieldCheck, Building2, FileText, Bot, UserCircle, Megaphone, LifeBuoy } from 'lucide-react';
+import { useState } from 'react';
 import { useAuthStore } from '@/store/auth.store';
+import SupportModal from '@/components/support/SupportModal';
 import { User } from '@/types';
 import clsx from 'clsx';
 
@@ -27,6 +29,9 @@ export default function Sidebar({ user }: Props) {
   const pathname = usePathname();
   const router   = useRouter();
   const logout   = useAuthStore((s) => s.logout);
+  // El boton de soporte vive aca y no en una pantalla: un error puede pasar en
+  // cualquier lado, y si hay que ir a buscar el formulario, nadie lo reporta.
+  const [showSupport, setShowSupport] = useState(false);
   const visibleItems = navItems.filter((item) => {
     if (item.superAdminOnly) return !!user?.isSuperAdmin;
     if (item.roles) return !!user?.role && (item.roles as string[]).includes(user.role);
@@ -113,6 +118,31 @@ export default function Sidebar({ user }: Props) {
 
       {/* Footer */}
       <div className="flex flex-col items-center gap-2 w-full px-2">
+        {/* Soporte */}
+        <div className="relative group">
+          <button
+            onClick={() => setShowSupport(true)}
+            className="flex items-center justify-center w-9 h-9 rounded-lg text-gray-500 hover:text-gray-300 transition-all duration-150"
+            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--sidebar-hover)'; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = ''; }}
+          >
+            <LifeBuoy className="w-4 h-4" />
+          </button>
+          <div
+            className="absolute left-full ml-3 top-1/2 -translate-y-1/2 z-50
+                       bg-gray-900 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg
+                       whitespace-nowrap pointer-events-none
+                       opacity-0 group-hover:opacity-100 transition-all duration-150 shadow-float"
+            style={{ border: '1px solid #21262D' }}
+          >
+            Reportar un problema
+            <span
+              className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent"
+              style={{ borderRightColor: '#111827' }}
+            />
+          </div>
+        </div>
+
         {/* Mi cuenta */}
         <div className="relative group">
           <button
@@ -165,6 +195,8 @@ export default function Sidebar({ user }: Props) {
           {initials}
         </div>
       </div>
+
+      {showSupport && <SupportModal onClose={() => setShowSupport(false)} />}
     </aside>
   );
 }

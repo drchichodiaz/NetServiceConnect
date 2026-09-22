@@ -7,4 +7,6 @@ export class UpdateSystemConfigDto {
   @IsOptional() @IsString() metaVerifyToken?: string;
   @IsOptional() @IsString() metaApiVersion?: string;
   @IsOptional() @IsString() mediaStoragePath?: string;
+  /** A donde llegan los reportes de soporte. Vacio = la del entorno (SUPPORT_EMAIL). */
+  @IsOptional() @IsString() supportEmail?: string;
 }

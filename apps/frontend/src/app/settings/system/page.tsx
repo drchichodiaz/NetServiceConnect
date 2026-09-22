@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { systemConfigApi, type MailConfig } from '@/lib/api';
-import { Shield, Eye, EyeOff, Save, RefreshCw, CheckCircle, AlertCircle, Loader2, FolderCog, Mail, Send } from 'lucide-react';
+import { Shield, Eye, EyeOff, Save, RefreshCw, CheckCircle, AlertCircle, Loader2, FolderCog, Mail, Send, LifeBuoy } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface Config {
@@ -13,6 +13,8 @@ interface Config {
   metaApiVersion: string;
   mediaStoragePath: string;
   mediaStoragePathDefault: string;
+  supportEmail: string;
+  supportEmailDefault: string;
   source: 'db' | 'env';
 }
 
@@ -28,6 +30,7 @@ export default function SystemConfigPage() {
   const [apiVersion,  setApiVersion]  = useState('v19.0');
   const [showSecret,  setShowSecret]  = useState(false);
   const [mediaPath,   setMediaPath]   = useState('');
+  const [supportEmail, setSupportEmail] = useState('');
 
   async function load() {
     setLoading(true);
@@ -39,6 +42,7 @@ export default function SystemConfigPage() {
       setVerifyToken(data.metaVerifyToken || '');
       setApiVersion(data.metaApiVersion || 'v19.0');
       setMediaPath(data.mediaStoragePath || '');
+      setSupportEmail(data.supportEmail || '');
       setAppSecret('');
     } catch { toast.error('Error al cargar configuración'); }
     finally { setLoading(false); }
@@ -59,6 +63,8 @@ export default function SystemConfigPage() {
       // A diferencia de los campos de arriba, este SI se manda vacio a proposito:
       // vacio = volver a usar la ruta por defecto (ver placeholder abajo).
       payload.mediaStoragePath = mediaPath;
+      // Igual que la ruta: vacio significa "usa la del entorno", no "borrala".
+      payload.supportEmail = supportEmail;
 
       await systemConfigApi.update(payload);
       toast.success('Configuración guardada');
@@ -230,6 +236,30 @@ export default function SystemConfigPage() {
             por sub-carpeta de empresa adentro). Dejar vacío usa la ruta por defecto de arriba.
             Si migrás a otro servidor, solo hay que poner acá la ruta nueva — no requiere
             reiniciar ni tocar variables de entorno.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 pb-2 pt-2" style={{ borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
+          <LifeBuoy className="w-4 h-4 text-ink-muted" />
+          <p className="text-xs font-semibold text-ink-muted uppercase tracking-wider">
+            Soporte
+          </p>
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-ink">Correo que recibe los reportes</label>
+          <input
+            type="email"
+            value={supportEmail}
+            onChange={(e) => setSupportEmail(e.target.value)}
+            placeholder={config?.supportEmailDefault || 'soporte@ejemplo.com'}
+            className="input w-full text-sm"
+          />
+          <p className="text-[11px] text-ink-subtle">
+            A donde llegan los reportes del botón «Reportar un problema». Es por servidor, no por
+            empresa: lo atiende quien opera esta instalación. Vacío usa la dirección del entorno
+            ({config?.supportEmailDefault || 'sin definir'}); si las dos están vacías, los reportes
+            se guardan igual pero no se envía el aviso.
           </p>
         </div>
 

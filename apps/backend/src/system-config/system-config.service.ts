@@ -48,6 +48,16 @@ export class SystemConfigService {
     );
   }
 
+  /**
+   * A donde llegan los reportes del boton de soporte en ESTE entorno. Vacio = no se
+   * envian (se guardan igual). Prioridad: base > SUPPORT_EMAIL del entorno, como el
+   * resto de la configuracion.
+   */
+  async getSupportEmail(): Promise<string> {
+    const record = await this.prisma.systemConfig.findUnique({ where: { id: '1' } });
+    return record?.supportEmail || this.config.get<string>('SUPPORT_EMAIL') || '';
+  }
+
   async getForFrontend() {
     const record = await this.prisma.systemConfig.findUnique({ where: { id: '1' } });
     const cfg = await this.get();
@@ -61,6 +71,8 @@ export class SystemConfigService {
       metaApiVersion:       cfg.metaApiVersion,
       mediaStoragePath:        record?.mediaStoragePath || '',
       mediaStoragePathDefault: this.config.get('MEDIA_STORAGE_PATH') || this.defaultMediaStoragePath,
+      supportEmail:        record?.supportEmail || '',
+      supportEmailDefault: this.config.get<string>('SUPPORT_EMAIL') || '',
       source: fromDb ? 'db' : 'env',
     };
   }
@@ -89,6 +101,8 @@ export class SystemConfigService {
     if (data.metaApiVersion  !== undefined && data.metaApiVersion  !== '') payload.metaApiVersion  = data.metaApiVersion;
     if (data.metaAppSecret && !data.metaAppSecret.startsWith('...')) payload.metaAppSecret = data.metaAppSecret;
     if (data.mediaStoragePath !== undefined) payload.mediaStoragePath = data.mediaStoragePath || null;
+    // Vaciar el campo vuelve a la del entorno, no deja el sistema sin direccion.
+    if (data.supportEmail !== undefined) payload.supportEmail = data.supportEmail.trim() || null;
 
     return this.prisma.systemConfig.upsert({
       where:  { id: '1' },
