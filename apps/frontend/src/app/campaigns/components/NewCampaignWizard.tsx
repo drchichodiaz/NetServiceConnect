@@ -5,6 +5,7 @@ import type { Campaign, CampaignPreview, MessageTemplate, VariableMapping } from
 import { Upload, Loader2, AlertTriangle, CheckCircle2, FileSpreadsheet, X, Search, BookUser } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { TemplatePreview } from '@/app/settings/templates/components/TemplatePreview';
+import TagPicker, { useContactTags } from '@/components/contacts/TagPicker';
 
 /**
  * Campos del propio contacto, usables como valor de una variable sin que esten en
@@ -45,6 +46,11 @@ export function NewCampaignWizard({ onClose, onCreated }: Props) {
   // Arranca en contactos del sistema: es el caso mas comun y no pide preparar nada.
   const [source, setSource] = useState<Source>('CONTACTS');
   const [contactSearch, setContactSearch] = useState('');
+  // Segmentacion por etiquetas: a quienes incluir, a quienes dejar afuera, y si hay
+  // que tener todas las incluidas o alcanza con una.
+  const [tagIds, setTagIds] = useState<string[]>([]);
+  const [excludeTagIds, setExcludeTagIds] = useState<string[]>([]);
+  const [tagMatch, setTagMatch] = useState<'ANY' | 'ALL'>('ANY');
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<CampaignPreview | null>(null);
   const [isPreviewing, setIsPreviewing] = useState(false);
@@ -55,6 +61,7 @@ export function NewCampaignWizard({ onClose, onCreated }: Props) {
   const [mapping, setMapping] = useState<Record<string, string>>({});
 
   const template = templates.find((t) => t.id === templateId) ?? null;
+  const allTags = useContactTags();
 
   useEffect(() => {
     whatsappApi
@@ -84,6 +91,12 @@ export function NewCampaignWizard({ onClose, onCreated }: Props) {
     setMapping({});
     setPreview(null);
   }, [templateId, source]);
+
+  // Tocar las etiquetas invalida el conteo ya revisado: sin esto se podria crear la
+  // campaña mirando un "van a recibir 120" que corresponde a otro filtro.
+  useEffect(() => {
+    setPreview(null);
+  }, [tagIds, excludeTagIds, tagMatch]);
 
   /** De donde puede salir el valor de una variable, segun la fuente elegida. */
   const columns = useMemo(
@@ -156,6 +169,9 @@ export function NewCampaignWizard({ onClose, onCreated }: Props) {
       const result = await campaignsApi.previewContacts({
         templateId,
         contactSearch: contactSearch.trim() || undefined,
+        tagIds: tagIds.length ? tagIds : undefined,
+        excludeTagIds: excludeTagIds.length ? excludeTagIds : undefined,
+        tagMatch,
       });
       setPreview(result);
       guessMapping(result);
@@ -184,7 +200,12 @@ export function NewCampaignWizard({ onClose, onCreated }: Props) {
         source,
         ...(source === 'FILE'
           ? { file: file! }
-          : { contactSearch: contactSearch.trim() || undefined }),
+          : {
+              contactSearch: contactSearch.trim() || undefined,
+              tagIds: tagIds.length ? tagIds : undefined,
+              excludeTagIds: excludeTagIds.length ? excludeTagIds : undefined,
+              tagMatch,
+            }),
       });
       toast.success('Campaña creada. Revisala y arrancala cuando quieras.');
       onCreated(campaign);
@@ -307,6 +328,42 @@ export function NewCampaignWizard({ onClose, onCreated }: Props) {
                     Ver a cuántos
                   </button>
                 </div>
+                {/* Segmentacion por etiquetas. Si el tenant todavia no cargo ninguna,
+                    no se muestra nada: seria una fila muerta. */}
+                {allTags.length > 0 && (
+                  <div className="mt-2.5 space-y-2 rounded-lg p-2.5" style={{ background: 'var(--surface-muted)' }}>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[11px] text-ink-muted w-16 shrink-0">Que tengan</span>
+                      <TagPicker
+                        value={tagIds}
+                        onChange={setTagIds}
+                        allowCreate={false}
+                        emptyLabel="cualquier etiqueta"
+                        placeholder="Buscar etiqueta…"
+                      />
+                      {tagIds.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setTagMatch((m) => (m === 'ANY' ? 'ALL' : 'ANY'))}
+                          className="text-[10px] text-ink-muted hover:text-ink underline decoration-dotted"
+                        >
+                          {tagMatch === 'ANY' ? 'alguna de estas' : 'todas estas'}
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[11px] text-ink-muted w-16 shrink-0">Menos</span>
+                      <TagPicker
+                        value={excludeTagIds}
+                        onChange={setExcludeTagIds}
+                        allowCreate={false}
+                        emptyLabel="nadie"
+                        placeholder="Buscar etiqueta…"
+                      />
+                    </div>
+                  </div>
+                )}
+
                 <p className="text-[11px] text-ink-subtle mt-1">
                   Solo entran los contactos que tienen WhatsApp. Las variables de la plantilla se llenan
                   con los datos de su ficha (nombre, empresa…) o con un texto igual para todos.

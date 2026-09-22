@@ -2,6 +2,8 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { contactsApi, conversationsApi, templatesApi, whatsappApi, ImportContactsResult } from '@/lib/api';
+import TagPicker, { TagChip, reloadContactTags, useContactTags } from '@/components/contacts/TagPicker';
+import TagManager from '@/components/contacts/TagManager';
 import type { MessageTemplate } from '@/lib/api';
 import { TemplatePreview } from '@/app/settings/templates/components/TemplatePreview';
 import { useAuthedMedia } from '@/hooks/useAuthedMedia';
@@ -11,6 +13,7 @@ import {
   Search, Phone, Mail, Building2, MessageSquare,
   Pencil, Check, X, ChevronRight, Users, MessageCirclePlus, Loader2,
   Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle2,
+  Tag as TagIcon, Settings2,
 } from 'lucide-react';
 import { formatDistanceToNow, format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -74,20 +77,30 @@ export default function ContactsPage() {
   // Importar contactos
   const [showImport, setShowImport] = useState(false);
 
-  const load = useCallback(async (q?: string) => {
+  // Etiquetas: filtro de la lista, selección múltiple para etiquetar en lote, y la
+  // ventana de administración (renombrar / color / borrar).
+  const allTags = useContactTags();
+  const [filterTagIds, setFilterTagIds] = useState<string[]>([]);
+  const [tagMatch, setTagMatch] = useState<'ANY' | 'ALL'>('ANY');
+  const [picked, setPicked] = useState<string[]>([]);
+  const [showTagManager, setShowTagManager] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  const load = useCallback(async (q?: string, tagIds: string[] = [], match: 'ANY' | 'ALL' = 'ANY') => {
     setLoading(true);
-    try { setContacts(await contactsApi.list(q)); }
+    try { setContacts(await contactsApi.list(q, { tagIds, tagMatch: match })); }
     catch { toast.error('Error al cargar contactos'); }
     finally { setLoading(false); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
-  // Debounce search
+  // Debounce search. El filtro por etiquetas entra por el mismo camino: cambiarlo
+  // recarga la lista igual que escribir en el buscador.
   useEffect(() => {
-    const t = setTimeout(() => load(search || undefined), 300);
+    const t = setTimeout(() => load(search || undefined, filterTagIds, tagMatch), 300);
     return () => clearTimeout(t);
-  }, [search, load]);
+  }, [search, filterTagIds, tagMatch, load]);
 
   async function selectContact(c: Contact) {
     setSelected(c);
@@ -127,6 +140,55 @@ export default function ContactsPage() {
     }
   }
 
+  /** Las etiquetas de la ficha abierta. Guarda en el momento, sin botón de confirmar. */
+  async function saveTags(tagIds: string[]) {
+    if (!selected) return;
+    const previous = selected.tags ?? [];
+    // Optimista: la pastilla aparece apenas se elige. Si el guardado falla se vuelve
+    // atrás, que es mejor que una espera de medio segundo en cada clic.
+    const optimistic = tagIds
+      .map((id) => allTags.find((t) => t.id === id))
+      .filter(Boolean) as typeof previous;
+    setSelected({ ...selected, tags: optimistic });
+    setContacts((prev) => prev.map((c) => (c.id === selected.id ? { ...c, tags: optimistic } : c)));
+    try {
+      const updated = await contactsApi.setTags(selected.id, tagIds);
+      setSelected((cur) => (cur && cur.id === updated.id ? { ...cur, tags: updated.tags } : cur));
+      setContacts((prev) => prev.map((c) => (c.id === updated.id ? { ...c, tags: updated.tags } : c)));
+      // Los contadores de cada etiqueta cambiaron.
+      reloadContactTags().catch(() => {});
+    } catch {
+      toast.error('No se pudieron guardar las etiquetas');
+      setSelected((cur) => (cur && cur.id === selected.id ? { ...cur, tags: previous } : cur));
+      setContacts((prev) => prev.map((c) => (c.id === selected.id ? { ...c, tags: previous } : c)));
+    }
+  }
+
+  /** Suma una etiqueta a todos los contactos tildados. */
+  async function bulkAddTag(tagId: string) {
+    if (picked.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const res = await contactsApi.bulkTag({ contactIds: picked, addTagIds: [tagId] });
+      const name = allTags.find((t) => t.id === tagId)?.name ?? 'la etiqueta';
+      toast.success(
+        res.added === 0
+          ? `Todos los seleccionados ya tenían «${name}»`
+          : `«${name}» agregada a ${res.added} contacto${res.added === 1 ? '' : 's'}`,
+      );
+      setPicked([]);
+      await Promise.all([load(search || undefined, filterTagIds, tagMatch), reloadContactTags()]);
+    } catch {
+      toast.error('No se pudo etiquetar');
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  function togglePicked(id: string) {
+    setPicked((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
+  }
+
   async function handleConversationStarted(conversationId: string) {
     setShowNewConv(false);
     setNewConvContact(null);
@@ -156,6 +218,13 @@ export default function ContactsPage() {
                 {contacts.length}
               </span>
               <button
+                onClick={() => setShowTagManager(true)}
+                title="Administrar etiquetas"
+                className="w-7 h-7 rounded-lg flex items-center justify-center text-ink-subtle hover:text-ink hover:bg-black/5"
+              >
+                <TagIcon className="w-4 h-4" />
+              </button>
+              <button
                 onClick={() => setShowImport(true)}
                 title="Importar contactos desde Excel"
                 className="w-7 h-7 rounded-lg flex items-center justify-center text-ink-subtle hover:text-ink hover:bg-black/5"
@@ -181,6 +250,66 @@ export default function ContactsPage() {
               className="input w-full pl-9 text-sm"
             />
           </div>
+
+          {/* Filtro por etiquetas. Solo aparece si hay alguna: sin etiquetas cargadas
+              sería una fila vacía que no hace nada. */}
+          {allTags.length > 0 && (
+            <div className="mt-2 flex items-center gap-2 flex-wrap">
+              <TagPicker
+                value={filterTagIds}
+                onChange={setFilterTagIds}
+                allowCreate={false}
+                emptyLabel="Filtrar por etiqueta"
+                placeholder="Buscar etiqueta…"
+              />
+              {/* Con una sola etiqueta elegida los dos modos dan lo mismo. */}
+              {filterTagIds.length > 1 && (
+                <button
+                  onClick={() => setTagMatch((m) => (m === 'ANY' ? 'ALL' : 'ANY'))}
+                  className="text-[10px] text-ink-muted hover:text-ink underline decoration-dotted"
+                  title="Cambiar entre tener alguna o tenerlas todas"
+                >
+                  {tagMatch === 'ANY' ? 'con alguna' : 'con todas'}
+                </button>
+              )}
+              {filterTagIds.length > 0 && (
+                <button
+                  onClick={() => setFilterTagIds([])}
+                  className="text-[10px] text-ink-subtle hover:text-ink"
+                >
+                  Limpiar
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Barra de acciones en lote: solo existe mientras haya algo tildado. */}
+          {picked.length > 0 && (
+            <div
+              className="mt-2 flex items-center gap-2 rounded-lg px-2.5 py-2"
+              style={{ background: 'var(--surface-muted)' }}
+            >
+              <span className="text-[11px] font-medium text-ink">
+                {picked.length} seleccionado{picked.length === 1 ? '' : 's'}
+              </span>
+              {bulkBusy ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-ink-muted" />
+              ) : (
+                <TagPicker
+                  value={[]}
+                  onChange={(ids) => { const added = ids[ids.length - 1]; if (added) bulkAddTag(added); }}
+                  emptyLabel="Etiquetar"
+                  placeholder="Buscar o crear etiqueta…"
+                />
+              )}
+              <button
+                onClick={() => setPicked([])}
+                className="text-[10px] text-ink-subtle hover:text-ink ml-auto"
+              >
+                Cancelar
+              </button>
+            </div>
+          )}
         </div>
 
         {/* List */}
@@ -207,12 +336,18 @@ export default function ContactsPage() {
             contacts.map((c) => {
               const name = c.name || c.phone || 'Contacto sin nombre';
               const isSelected = selected?.id === c.id;
+              const isPicked = picked.includes(c.id);
               return (
-                <button
+                // Fila y no <button>: adentro va el tilde de selección múltiple, y un
+                // botón dentro de otro botón no es HTML válido.
+                <div
                   key={c.id}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => selectContact(c)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectContact(c); } }}
                   className={clsx(
-                    'w-full flex items-center gap-3 px-4 py-3 text-left transition-all',
+                    'group w-full flex items-center gap-3 px-4 py-3 text-left transition-all cursor-pointer',
                     isSelected ? 'bg-green-50' : 'hover:bg-surface-muted',
                   )}
                   style={{ borderBottom: '1px solid var(--border)' }}
@@ -220,12 +355,35 @@ export default function ContactsPage() {
                   {isSelected && (
                     <span className="absolute left-0 w-[3px] h-10 rounded-r-full" style={{ background: '#25D366' }} />
                   )}
+                  {/* El tilde aparece al pasar el mouse, o queda fijo si ya hay algo
+                      seleccionado: mientras no se etiquete en lote no estorba. */}
+                  <input
+                    type="checkbox"
+                    checked={isPicked}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={() => togglePicked(c.id)}
+                    aria-label={`Seleccionar ${name}`}
+                    className={clsx(
+                      'w-3.5 h-3.5 shrink-0 accent-green-600 cursor-pointer',
+                      isPicked || picked.length > 0 ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+                    )}
+                  />
                   <Avatar name={name} size="sm" />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-ink truncate">{name}</p>
                     <p className="text-xs text-ink-muted truncate">
                       {c.company ? `${c.company} · ` : ''}{c.phone}
                     </p>
+                    {(c.tags?.length ?? 0) > 0 && (
+                      <div className="flex items-center gap-1 mt-1 flex-wrap">
+                        {c.tags!.slice(0, 3).map((t) => (
+                          <TagChip key={t.id} tag={t} size="sm" />
+                        ))}
+                        {c.tags!.length > 3 && (
+                          <span className="text-[10px] text-ink-subtle">+{c.tags!.length - 3}</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
                     {(c._count?.conversations ?? 0) > 0 && (
@@ -236,7 +394,7 @@ export default function ContactsPage() {
                     )}
                     <ChevronRight className="w-3.5 h-3.5 text-ink-subtle" />
                   </div>
-                </button>
+                </div>
               );
             })
           )}
@@ -320,6 +478,19 @@ export default function ContactsPage() {
                     value={String(selected._count?.conversations ?? history.length)} />
                 </div>
               )}
+
+              {/* Etiquetas. Fuera del modo edición a propósito: se ponen y se sacan en
+                  el momento, sin entrar a editar ni guardar el formulario. */}
+              <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
+                <p className="text-[10px] font-semibold text-ink-muted uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <TagIcon className="w-3 h-3" />
+                  Etiquetas
+                </p>
+                <TagPicker
+                  value={(selected.tags ?? []).map((t) => t.id)}
+                  onChange={saveTags}
+                />
+              </div>
             </div>
 
             {/* Conversation history */}
@@ -390,9 +561,15 @@ export default function ContactsPage() {
       {showImport && (
         <ImportContactsModal
           onClose={() => setShowImport(false)}
-          onImported={() => load(search || undefined)}
+          onImported={() => {
+            // El archivo pudo haber creado etiquetas nuevas, así que se recargan las dos cosas.
+            load(search || undefined, filterTagIds, tagMatch);
+            reloadContactTags().catch(() => {});
+          }}
         />
       )}
+
+      {showTagManager && <TagManager onClose={() => setShowTagManager(false)} />}
     </div>
   );
 }
@@ -778,6 +955,16 @@ function ImportContactsModal({ onClose, onImported }: { onClose: () => void; onI
                 <p className="text-[10px] text-ink-muted mt-0.5">Inválidos</p>
               </div>
             </div>
+
+            {/* Las etiquetas se aplican también a los que ya existían, así que esto
+                puede ser mayor que "Creados" — y es justamente para lo que sirve volver
+                a subir una lista: etiquetar gente que ya estaba cargada. */}
+            {result.tagged > 0 && (
+              <div className="flex items-center gap-2 text-xs text-ink-muted">
+                <TagIcon className="w-3.5 h-3.5" style={{ color: '#6366f1' }} />
+                {result.tagged} contacto{result.tagged === 1 ? '' : 's'} quedaron etiquetados desde la columna «Etiquetas».
+              </div>
+            )}
 
             {result.created > 0 && result.errors.length === 0 && (
               <div className="flex items-center gap-2 text-xs text-ink-muted">

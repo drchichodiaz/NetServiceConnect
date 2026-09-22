@@ -1,10 +1,11 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Conversation } from '@/types';
+import { Conversation, ContactTag } from '@/types';
 import { useInboxStore } from '@/store/inbox.store';
-import { conversationsApi } from '@/lib/api';
+import { conversationsApi, contactsApi } from '@/lib/api';
+import TagPicker, { reloadContactTags } from '@/components/contacts/TagPicker';
 import {
-  Phone, Mail, MessageSquare, StickyNote,
+  Phone, Mail, MessageSquare, StickyNote, Tag as TagIcon,
   CheckCircle, Clock, XCircle, ChevronRight, X,
   User, Calendar,
 } from 'lucide-react';
@@ -32,6 +33,36 @@ export default function ContactSidebar({ conversation, onClose }: Props) {
 
   const [history, setHistory] = useState<Conversation[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
+
+  // Las etiquetas no vienen dentro de la conversacion: se piden aparte para no engordar
+  // el payload de la bandeja, que trae decenas de conversaciones.
+  const [tags, setTags] = useState<ContactTag[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    contactsApi
+      .get(contact.id)
+      .then((c) => { if (!cancelled) setTags(c.tags ?? []); })
+      .catch(() => { if (!cancelled) setTags([]); });
+    return () => { cancelled = true; };
+  }, [contact.id]);
+
+  /**
+   * Etiquetar desde la conversacion es el caso que mas importa: el agente se entera
+   * aca de que la persona es mayorista, y si para anotarlo tiene que irse a Contactos,
+   * no lo anota nunca.
+   */
+  async function saveTags(tagIds: string[]) {
+    const previous = tags;
+    try {
+      const updated = await contactsApi.setTags(contact.id, tagIds);
+      setTags(updated.tags ?? []);
+      reloadContactTags().catch(() => {});
+    } catch {
+      toast.error('No se pudieron guardar las etiquetas');
+      setTags(previous);
+    }
+  }
 
   useEffect(() => {
     setLoadingHistory(true);
@@ -97,6 +128,14 @@ export default function ContactSidebar({ conversation, onClose }: Props) {
                 fila no se muestra en vez de quedar vacia. */}
             {contact.phone && <ContactRow icon={Phone} value={contact.phone} copyable />}
             {contact.email && <ContactRow icon={Mail} value={contact.email} copyable />}
+          </div>
+
+          <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
+            <p className="text-[10px] font-semibold text-ink-muted uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+              <TagIcon className="w-3 h-3" />
+              Etiquetas
+            </p>
+            <TagPicker value={tags.map((t) => t.id)} onChange={saveTags} />
           </div>
         </div>
 

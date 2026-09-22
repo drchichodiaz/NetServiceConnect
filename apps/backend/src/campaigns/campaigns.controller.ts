@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
-import { CampaignsService } from './campaigns.service';
+import { CampaignsService, ContactFilter } from './campaigns.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -53,11 +53,14 @@ export class CampaignsController {
   @Post('preview-contacts')
   previewContacts(
     @CurrentUser() user: any,
-    @Body() body: { templateId: string; contactIds?: string[]; contactSearch?: string },
+    @Body() body: { templateId: string } & ContactFilter,
   ) {
     return this.service.previewContacts(user.tenantId, body.templateId, {
       contactIds: body.contactIds,
       contactSearch: body.contactSearch,
+      tagIds: body.tagIds,
+      excludeTagIds: body.excludeTagIds,
+      tagMatch: body.tagMatch,
     });
   }
 

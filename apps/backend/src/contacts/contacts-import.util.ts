@@ -10,6 +10,12 @@ export interface ParsedContactRow {
   email?: string;
   company?: string;
   /**
+   * Las etiquetas de la columna "Etiquetas", separadas por coma o punto y coma. Vienen
+   * como texto tal cual lo escribieron: quien importa las convierte en ContactTag,
+   * creando las que falten.
+   */
+  tags: string[];
+  /**
    * Las columnas que NO son name/phone/email/company, con su encabezado original
    * como clave. El import de contactos las ignora; las campañas las usan como los
    * valores de las variables de la plantilla, que cambian fila por fila.
@@ -27,7 +33,7 @@ export interface ParseResult {
   errors: ParseRowError[];
 }
 
-type KnownField = 'name' | 'phone' | 'email' | 'company';
+type KnownField = 'name' | 'phone' | 'email' | 'company' | 'tags';
 
 const HEADER_ALIASES: Record<string, KnownField> = {
   nombre: 'name',
@@ -39,7 +45,22 @@ const HEADER_ALIASES: Record<string, KnownField> = {
   correo: 'email',
   empresa: 'company',
   company: 'company',
+  // Tratar "Etiquetas" como columna conocida se la saca de `extra`, o sea que en un
+  // Excel de campaña deja de poder mapearse a una variable de la plantilla. Se acepta
+  // a proposito: una columna llamada asi son etiquetas mucho mas seguido de lo que es
+  // el valor de un {{1}}, y para eso ultimo alcanza con llamarla de otra forma.
+  etiquetas: 'tags',
+  etiqueta: 'tags',
+  tags: 'tags',
 };
+
+/** "vip, mayorista; moroso" → ["vip", "mayorista", "moroso"]. */
+export function splitTagCell(raw: string): string[] {
+  return raw
+    .split(/[,;]/)
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
 
 /**
  * Deja solo dígitos (sin "+") — los Excel reales casi siempre traen espacios/guiones/
@@ -147,7 +168,15 @@ export async function parseWorkbookRows(buffer: Buffer, filename: string): Promi
       return;
     }
 
-    rows.push({ row: rowNumber, name: values.name, phone, email: values.email, company: values.company, extra });
+    rows.push({
+      row: rowNumber,
+      name: values.name,
+      phone,
+      email: values.email,
+      company: values.company,
+      tags: values.tags ? splitTagCell(values.tags) : [],
+      extra,
+    });
   });
 
   return { rows, errors };
@@ -162,8 +191,17 @@ export async function buildTemplateWorkbook(): Promise<Buffer> {
     { header: 'Telefono', key: 'phone', width: 18 },
     { header: 'Email', key: 'email', width: 28 },
     { header: 'Empresa', key: 'company', width: 24 },
+    // Separadas por coma. Las que no existan se crean solas al importar, asi que la
+    // planilla es tambien la forma mas rapida de cargar las primeras etiquetas.
+    { header: 'Etiquetas', key: 'tags', width: 30 },
   ];
-  sheet.addRow({ name: 'Juan Pérez', phone: '50760000000', email: 'juan@ejemplo.com', company: 'Ejemplo S.A.' });
+  sheet.addRow({
+    name: 'Juan Pérez',
+    phone: '50760000000',
+    email: 'juan@ejemplo.com',
+    company: 'Ejemplo S.A.',
+    tags: 'mayorista, cliente vip',
+  });
   sheet.getRow(1).font = { bold: true };
   const buffer = await workbook.xlsx.writeBuffer();
   return Buffer.from(buffer);

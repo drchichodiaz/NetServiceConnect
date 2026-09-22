@@ -41,6 +41,7 @@ model Tenant {
   branches         TenantBranch[]
   menuNodes        TenantMenuNode[]
   bots             Bot[]
+  contactTags      ContactTag[]
 }
 
 // ─── User ─────────────────────────────────────────────────────────────────────
@@ -239,6 +240,7 @@ model Contact {
   conversations Conversation[]
   identities    ContactIdentity[]
   campaignItems CampaignRecipient[]
+  tags          ContactTagLink[]
 
   // Se queda tal cual aunque phone sea nullable: en Postgres varios NULL no colisionan,
   // asi que esto sigue impidiendo dos contactos de WhatsApp con el mismo numero y no
@@ -461,6 +463,49 @@ model ConversationTag {
   tag          Tag          @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
   @@id([conversationId, tagId])
+}
+
+// ─── Contact Tag ──────────────────────────────────────────────────────────────
+//
+// Etiquetas de CONTACTO ("mayorista", "moroso", "cliente VIP"): con que se segmenta
+// una campaña. No confundir con Tag/ConversationTag, que son las etiquetas de
+// conversacion retiradas del producto: aquellas describian un chat puntual, estas
+// describen a la persona y sobreviven a la conversacion.
+
+model ContactTag {
+  id       String @id @default(cuid())
+  tenantId String
+  name     String
+  // El nombre normalizado (minusculas, sin tildes, sin espacios de sobra). Es lo que
+  // lleva el unique, no `name`: sin esto un tenant termina con "VIP", "vip" y "Vip"
+  // como tres etiquetas distintas y ningun filtro sirve. `name` guarda como lo
+  // escribieron, que es lo que se muestra.
+  slug     String
+  color    String @default("#6366f1")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contacts ContactTagLink[]
+
+  @@unique([tenantId, slug])
+  @@index([tenantId])
+}
+
+// Que contacto lleva que etiqueta. Tabla aparte y no un array en Contact para poder
+// renombrar una etiqueta en un solo lugar y filtrar por ella con un indice.
+model ContactTagLink {
+  contactId String
+  tagId     String
+  createdAt DateTime @default(now())
+
+  contact Contact    @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tag     ContactTag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([contactId, tagId])
+  // Por aca busca el filtro de campañas: todos los contactos de una etiqueta.
+  @@index([tagId])
 }
 
 // ─── Quick Reply ──────────────────────────────────────────────────────────────
@@ -734,6 +779,12 @@ model Campaign {
 
   // Por que se freno sola (limite diario de Meta, token vencido…), para poder decirlo.
   pausedReason String?
+
+  /// Con que se armo la lista: { source, tagIds, excludeTagIds, tagMatch, search }.
+  /// Los destinatarios se congelan al crear la campaña, asi que esto no se usa para
+  /// enviar — es para poder mirar despues a quienes se les escribio y por que, y para
+  /// repetir la misma segmentacion sin volver a armarla a mano.
+  recipientFilter Json?
 
   createdAt  DateTime  @default(now())
   startedAt  DateTime?

@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { WhatsAppAccount } from '@/types';
+import { WhatsAppAccount, Contact, ContactTag } from '@/types';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
@@ -381,14 +381,34 @@ export interface ImportContactsResult {
   created: number;
   skippedDuplicate: number;
   skippedInvalid: number;
+  /** Contactos que recibieron alguna etiqueta de la columna "Etiquetas". */
+  tagged: number;
   errors: { row: number; reason: string }[];
   truncatedErrors: boolean;
 }
 
 export const contactsApi = {
-  list: (search?: string) =>
-    api.get('/contacts', { params: search ? { search } : {} }).then((r) => r.data),
-  get: (id: string) => api.get(`/contacts/${id}`).then((r) => r.data),
+  list: (search?: string, filter?: { tagIds?: string[]; tagMatch?: 'ANY' | 'ALL' }) =>
+    api
+      .get('/contacts', {
+        params: {
+          ...(search ? { search } : {}),
+          // Como querystring: una lista separada por comas, no un array repetido.
+          ...(filter?.tagIds?.length ? { tagIds: filter.tagIds.join(','), tagMatch: filter.tagMatch ?? 'ANY' } : {}),
+        },
+      })
+      .then((r) => r.data),
+  /** Deja al contacto con exactamente estas etiquetas. */
+  setTags: (id: string, tagIds: string[]): Promise<Contact> =>
+    api.put(`/contacts/${id}/tags`, { tagIds }).then((r) => r.data),
+  /** Etiqueta y desetiqueta varios de una. Devuelve cuantos vinculos cambiaron. */
+  bulkTag: (data: {
+    contactIds: string[];
+    addTagIds?: string[];
+    removeTagIds?: string[];
+  }): Promise<{ contacts: number; added: number; removed: number }> =>
+    api.post('/contacts/tags/bulk', data).then((r) => r.data),
+  get: (id: string): Promise<Contact> => api.get(`/contacts/${id}`).then((r) => r.data),
   update: (id: string, data: { name?: string; email?: string; company?: string }) =>
     api.patch(`/contacts/${id}`, data).then((r) => r.data),
   import: (file: File): Promise<ImportContactsResult> => {
@@ -409,6 +429,19 @@ export const contactsApi = {
     a.remove();
     URL.revokeObjectURL(url);
   },
+};
+
+// ─── Etiquetas de contacto ────────────────────────────────────────────────────
+
+export const contactTagsApi = {
+  list: (): Promise<ContactTag[]> => api.get('/contact-tags').then((r) => r.data),
+  // Crear una que ya existe devuelve la existente, no un error: el buscador crea al
+  // escribir y dos personas pueden escribir "mayorista" el mismo dia.
+  create: (name: string, color?: string): Promise<ContactTag> =>
+    api.post('/contact-tags', { name, ...(color && { color }) }).then((r) => r.data),
+  update: (id: string, data: { name?: string; color?: string }): Promise<ContactTag> =>
+    api.patch(`/contact-tags/${id}`, data).then((r) => r.data),
+  remove: (id: string) => api.delete(`/contact-tags/${id}`).then((r) => r.data),
 };
 
 // ─── Quick Replies ────────────────────────────────────────────────────────────
@@ -464,6 +497,16 @@ export interface Campaign {
   template?: { name: string; language: string };
   channelAccount?: { label?: string | null; phoneNumber?: string | null };
   createdBy?: { name?: string | null };
+  /** Con que se armo la lista. Las campañas anteriores a las etiquetas no lo tienen. */
+  recipientFilter?: {
+    source?: 'FILE' | 'CONTACTS';
+    contactSearch?: string;
+    tagIds?: string[];
+    excludeTagIds?: string[];
+    tagMatch?: 'ANY' | 'ALL';
+    handPicked?: number;
+    fileName?: string;
+  } | null;
   counts?: Record<string, number>;
 }
 
@@ -491,6 +534,9 @@ export const campaignsApi = {
     templateId: string;
     contactIds?: string[];
     contactSearch?: string;
+    tagIds?: string[];
+    excludeTagIds?: string[];
+    tagMatch?: 'ANY' | 'ALL';
   }): Promise<CampaignPreview> => api.post('/campaigns/preview-contacts', data).then((r) => r.data),
 
   create: (data: {
@@ -504,6 +550,9 @@ export const campaignsApi = {
     file?: File;
     contactIds?: string[];
     contactSearch?: string;
+    tagIds?: string[];
+    excludeTagIds?: string[];
+    tagMatch?: 'ANY' | 'ALL';
   }): Promise<Campaign & { invalidRows: number }> => {
     const form = new FormData();
     // Va como multipart en los dos casos: con contactos simplemente no hay archivo,
@@ -512,6 +561,10 @@ export const campaignsApi = {
     if (data.source) form.append('source', data.source);
     if (data.contactIds?.length) form.append('contactIds', JSON.stringify(data.contactIds));
     if (data.contactSearch) form.append('contactSearch', data.contactSearch);
+    // Como JSON dentro del multipart, igual que contactIds: el DTO los parsea.
+    if (data.tagIds?.length) form.append('tagIds', JSON.stringify(data.tagIds));
+    if (data.excludeTagIds?.length) form.append('excludeTagIds', JSON.stringify(data.excludeTagIds));
+    if (data.tagIds?.length) form.append('tagMatch', data.tagMatch ?? 'ANY');
     form.append('name', data.name);
     form.append('templateId', data.templateId);
     form.append('channelAccountId', data.channelAccountId);

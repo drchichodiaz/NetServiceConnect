@@ -18,6 +18,15 @@ export interface Tenant {
 
 export type Channel = 'WHATSAPP' | 'MESSENGER' | 'INSTAGRAM';
 
+/** Una etiqueta de contacto. `contactCount` solo viene en la lista de etiquetas. */
+export interface ContactTag {
+  id: string;
+  name: string;
+  slug?: string;
+  color: string;
+  contactCount?: number;
+}
+
 export interface Contact {
   id: string;
   tenantId: string;
@@ -33,6 +42,8 @@ export interface Contact {
   company?: string;
   avatarUrl?: string;
   createdAt?: string;
+  /** Siempre viene en la lista y en la ficha; puede no venir en payloads de conversacion. */
+  tags?: ContactTag[];
   _count?: { conversations: number };
 }
 

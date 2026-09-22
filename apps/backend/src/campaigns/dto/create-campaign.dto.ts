@@ -66,11 +66,37 @@ export class CreateCampaignDto {
 
   /**
    * Solo con source CONTACTS: el mismo texto de busqueda de la lista de contactos.
-   * Vacio y sin contactIds = todos los contactos con WhatsApp del tenant.
+   * Vacio y sin contactIds ni etiquetas = todos los contactos con WhatsApp del tenant.
    */
   @IsOptional()
   @IsString()
   contactSearch?: string;
+
+  /**
+   * Solo con source CONTACTS: las etiquetas que tiene que tener el contacto para
+   * entrar. Se combina con contactSearch (las dos condiciones a la vez).
+   */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @Transform(({ value }) => (typeof value === 'string' ? safeParse(value) : value), { toClassOnly: true })
+  tagIds?: string[];
+
+  /**
+   * Etiquetas que dejan a alguien AFUERA aunque cumpla el resto del filtro. Es lo que
+   * permite "todos los mayoristas menos los que ya compraron" sin armar el Excel a
+   * mano. Gana sobre tagIds: si un contacto tiene las dos, no recibe.
+   */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @Transform(({ value }) => (typeof value === 'string' ? safeParse(value) : value), { toClassOnly: true })
+  excludeTagIds?: string[];
+
+  /** ALL = tiene que tener todas las de tagIds; ANY (default) = alguna alcanza. */
+  @IsOptional()
+  @IsIn(['ANY', 'ALL'])
+  tagMatch?: 'ANY' | 'ALL';
 
   @IsString()
   templateId: string;

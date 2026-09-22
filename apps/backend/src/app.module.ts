@@ -9,6 +9,7 @@ import { TenantsModule } from './tenants/tenants.module';
 import { UsersModule } from './users/users.module';
 import { WhatsAppModule } from './whatsapp/whatsapp.module';
 import { ContactsModule } from './contacts/contacts.module';
+import { ContactTagsModule } from './contact-tags/contact-tags.module';
 import { ConversationsModule } from './conversations/conversations.module';
 import { MessagesModule } from './messages/messages.module';
 import { NotesModule } from './notes/notes.module';
@@ -38,6 +39,7 @@ import { MailModule } from './mail/mail.module';
     UsersModule,
     WhatsAppModule,
     ContactsModule,
+    ContactTagsModule,
     ConversationsModule,
     MessagesModule,
     NotesModule,

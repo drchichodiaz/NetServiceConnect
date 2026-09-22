@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards,
+  Controller, Get, Post, Patch, Put, Delete, Body, Param, Query, UseGuards,
   UseInterceptors, UploadedFile, ParseFilePipeBuilder, Res, StreamableFile,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -7,6 +7,7 @@ import { memoryStorage } from 'multer';
 import type { Response } from 'express';
 import { ContactsService } from './contacts.service';
 import { CreateContactDto } from './dto/create-contact.dto';
+import { SetContactTagsDto, BulkTagContactsDto } from '../contact-tags/dto/contact-tag.dto';
 import { buildTemplateWorkbook } from './contacts-import.util';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -43,9 +44,30 @@ export class ContactsController {
     return this.service.importContacts(user.tenantId, file.buffer, file.originalname);
   }
 
+  /**
+   * `tagIds` llega como lista separada por comas (es un querystring, no un body) y
+   * `tagMatch` dice si hay que tener todas o alguna.
+   */
   @Get()
-  findAll(@CurrentUser() user: any, @Query('search') search?: string) {
-    return this.service.findAll(user.tenantId, search);
+  findAll(
+    @CurrentUser() user: any,
+    @Query('search') search?: string,
+    @Query('tagIds') tagIds?: string,
+    @Query('tagMatch') tagMatch?: 'ANY' | 'ALL',
+  ) {
+    return this.service.findAll(user.tenantId, search, {
+      tagIds: tagIds ? tagIds.split(',').filter(Boolean) : undefined,
+      tagMatch: tagMatch === 'ALL' ? 'ALL' : 'ANY',
+    });
+  }
+
+  /**
+   * Etiquetar en lote. Va antes de las rutas con :id porque si no, Nest lee "tags"
+   * como el id de un contacto y este endpoint nunca se alcanza.
+   */
+  @Post('tags/bulk')
+  bulkTag(@CurrentUser() user: any, @Body() dto: BulkTagContactsDto) {
+    return this.service.bulkTag(user.tenantId, dto.contactIds, dto.addTagIds, dto.removeTagIds);
   }
 
   @Get(':id')
@@ -56,6 +78,12 @@ export class ContactsController {
   @Patch(':id')
   update(@CurrentUser() user: any, @Param('id') id: string, @Body() dto: Partial<CreateContactDto>) {
     return this.service.update(user.tenantId, id, dto);
+  }
+
+  /** Las etiquetas que quedan en el contacto. Reemplaza las que tenia. */
+  @Put(':id/tags')
+  setTags(@CurrentUser() user: any, @Param('id') id: string, @Body() dto: SetContactTagsDto) {
+    return this.service.setTags(user.tenantId, id, dto.tagIds);
   }
 
   @Delete(':id')

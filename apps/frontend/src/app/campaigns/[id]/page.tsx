@@ -4,9 +4,10 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { campaignsApi } from '@/lib/api';
 import type { Campaign } from '@/lib/api';
-import { ArrowLeft, Play, Pause, XCircle, Loader2, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Play, Pause, XCircle, Loader2, AlertTriangle, Tag } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { STATUS_STYLES } from '../status';
+import { useContactTags } from '@/components/contacts/TagPicker';
 
 export default function CampaignDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -83,6 +84,7 @@ export default function CampaignDetailPage() {
             {campaign.channelAccount?.label?.trim() || campaign.channelAccount?.phoneNumber}
             {campaign.createdBy?.name && <> · creada por {campaign.createdBy.name}</>}
           </p>
+          <RecipientFilterLine filter={campaign.recipientFilter} />
         </div>
 
         <div className="flex gap-2 shrink-0">
@@ -167,5 +169,36 @@ function Stat({ label, value, color }: { label: string; value: number; color: st
       <p className="text-lg font-bold" style={{ color }}>{value}</p>
       <p className="text-[11px] text-ink-subtle">{label}</p>
     </div>
+  );
+}
+
+/**
+ * Con que se armo la lista de destinatarios. Los destinatarios quedaron congelados al
+ * crear la campaña, asi que esto es historia, no un filtro vivo — se dice tal cual para
+ * que nadie espere que editar una etiqueta cambie a quien le llega.
+ */
+function RecipientFilterLine({ filter }: { filter?: Campaign['recipientFilter'] }) {
+  const tags = useContactTags();
+  if (!filter) return null; // campañas anteriores a esto
+
+  const nameOf = (id: string) => tags.find((t) => t.id === id)?.name ?? 'etiqueta borrada';
+  const parts: string[] = [];
+
+  if (filter.handPicked) parts.push(`${filter.handPicked} contactos elegidos a mano`);
+  if (filter.tagIds?.length) {
+    parts.push(
+      `${filter.tagMatch === 'ALL' ? 'con todas' : 'con'} ${filter.tagIds.map(nameOf).join(filter.tagMatch === 'ALL' ? ' y ' : ' o ')}`,
+    );
+  }
+  if (filter.excludeTagIds?.length) parts.push(`sin ${filter.excludeTagIds.map(nameOf).join(' ni ')}`);
+  if (filter.contactSearch) parts.push(`que coinciden con «${filter.contactSearch}»`);
+  if (filter.fileName) parts.push(`desde el archivo ${filter.fileName}`);
+  if (parts.length === 0) parts.push(filter.source === 'CONTACTS' ? 'todos los contactos con WhatsApp' : 'desde un archivo');
+
+  return (
+    <p className="text-xs text-ink-subtle mt-1 flex items-center gap-1.5">
+      <Tag className="w-3 h-3 shrink-0" />
+      Se envió a: {parts.join(', ')}
+    </p>
   );
 }

@@ -7,6 +7,7 @@ import { ChannelAccessService } from '../common/services/channel-access.service'
 import { parseWorkbookRows, ParsedContactRow } from '../contacts/contacts-import.util';
 import { describeSendVariables, TemplateButton } from '../templates/template-components';
 import { CreateCampaignDto, VariableMappingDto } from './dto/create-campaign.dto';
+import { buildContactTagWhere } from '../contact-tags/contact-tags.service';
 
 /** Tope de filas por campaña. Mas que esto es un problema de otra escala (y de costo). */
 const MAX_RECIPIENTS = 20000;
@@ -30,6 +31,19 @@ interface Candidate {
   /** Si ya existe en la base. Los del Excel pueden no existir todavia. */
   contactId?: string;
   optedOutAt?: Date | null;
+}
+
+/**
+ * Como se elige a quien le llega, cuando la lista sale de los contactos del sistema.
+ * Todo lo de aca se combina: las etiquetas acotan, el texto acota mas, y una seleccion
+ * explicita de contactos reemplaza a las dos.
+ */
+export interface ContactFilter {
+  contactIds?: string[];
+  contactSearch?: string;
+  tagIds?: string[];
+  excludeTagIds?: string[];
+  tagMatch?: 'ANY' | 'ALL';
 }
 
 export interface CampaignPreview {
@@ -81,7 +95,7 @@ export class CampaignsService {
   async previewContacts(
     tenantId: string,
     templateId: string,
-    filter: { contactIds?: string[]; contactSearch?: string },
+    filter: ContactFilter,
   ): Promise<CampaignPreview> {
     const template = await this.templates.findApprovedOrThrow(tenantId, templateId);
     const candidates = await this.candidatesFromContacts(tenantId, filter);
@@ -181,6 +195,19 @@ export class CampaignsService {
         channelAccountId: account.id,
         createdById: userId,
         ratePerMinute: dto.ratePerMinute ?? 20,
+        // Para poder mirar despues a quienes se le escribio y por que. No se usa para
+        // enviar: los destinatarios ya quedaron congelados en CampaignRecipient.
+        recipientFilter: {
+          source: dto.source ?? 'FILE',
+          ...(fromContacts && {
+            contactSearch: dto.contactSearch?.trim() || undefined,
+            tagIds: dto.tagIds?.length ? dto.tagIds : undefined,
+            excludeTagIds: dto.excludeTagIds?.length ? dto.excludeTagIds : undefined,
+            tagMatch: dto.tagIds?.length ? (dto.tagMatch ?? 'ANY') : undefined,
+            handPicked: dto.contactIds?.length ? dto.contactIds.length : undefined,
+          }),
+          ...(!fromContacts && { fileName: file?.originalname }),
+        } as any,
       },
     });
 
@@ -369,26 +396,30 @@ export class CampaignsService {
    */
   private async candidatesFromContacts(
     tenantId: string,
-    filter: { contactIds?: string[]; contactSearch?: string },
+    filter: ContactFilter,
   ): Promise<Candidate[]> {
     const search = filter.contactSearch?.trim();
+    const explicit = !!filter.contactIds?.length;
+
     const contacts = await this.prisma.contact.findMany({
       where: {
         tenantId,
         identities: { some: { channel: 'WHATSAPP' } },
-        // Una seleccion explicita gana sobre la busqueda: es lo que el usuario marco.
-        ...(filter.contactIds?.length
+        // Una seleccion explicita gana sobre todo lo demas: es lo que el usuario marco
+        // una por una, y filtrarla de nuevo solo podria sacar a alguien que eligio.
+        ...(explicit
           ? { id: { in: filter.contactIds } }
-          : search
-            ? {
+          : {
+              ...buildContactTagWhere(filter.tagIds, filter.tagMatch, filter.excludeTagIds),
+              ...(search && {
                 OR: [
                   { name: { contains: search, mode: 'insensitive' as const } },
                   { phone: { contains: search } },
                   { email: { contains: search, mode: 'insensitive' as const } },
                   { company: { contains: search, mode: 'insensitive' as const } },
                 ],
-              }
-            : {}),
+              }),
+            }),
       },
       select: { id: true, phone: true, name: true, email: true, company: true, optedOutAt: true },
       orderBy: { createdAt: 'desc' },
