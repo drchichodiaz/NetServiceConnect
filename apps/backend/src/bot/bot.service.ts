@@ -276,12 +276,12 @@ export class BotService {
 
     const bot = await this.getBot(tenantId, conversationId);
     const knowledgeBase = bot.aiKnowledgeBase?.trim();
-    const resolved = knowledgeBase ? await this.openaiClient.getClient(tenantId) : null;
+    const resolved = await this.openaiClient.getClient(tenantId);
 
     // Sin info del negocio o sin clave de OpenAI resoluble, no tiene sentido entrar
     // al modo — el bot "conversaría" sin nada que decir. Se deriva directo.
     if (!knowledgeBase || !resolved) {
-      return this.handoffToHuman(tenantId, conversationId, 'ai_not_configured');
+      return this.handoffAiNotConfigured(tenantId, conversationId, phone, acc, bot.name, !knowledgeBase, !resolved);
     }
 
     const contactName = await this.getContactName(conversationId);
@@ -331,10 +331,10 @@ export class BotService {
     // corrigiendo la info del negocio a mitad de conversación tenga efecto inmediato.
     const bot = await this.getBot(tenantId, conversationId);
     const knowledgeBase = bot.aiKnowledgeBase?.trim();
-    const resolved = knowledgeBase ? await this.openaiClient.getClient(tenantId) : null;
+    const resolved = await this.openaiClient.getClient(tenantId);
 
     if (!knowledgeBase || !resolved) {
-      return this.handoffToHuman(tenantId, conversationId, 'ai_not_configured');
+      return this.handoffAiNotConfigured(tenantId, conversationId, phone, account, bot.name, !knowledgeBase, !resolved);
     }
 
     // Acotado por aiSince: no queremos que el historial incluya resúmenes de listas
@@ -378,6 +378,27 @@ export class BotService {
     }
     // Se queda en AWAITING_AI_CHAT — sin límite de turnos (el costo no es una
     // preocupación acá), la salida es siempre iniciada por el cliente vía palabra clave.
+  }
+
+  /**
+   * El modo IA no tiene con qué responder. Antes se derivaba en silencio: el cliente
+   * tocaba la opción y no recibía nada, y como no quedaba ni un log, desde afuera solo
+   * se veía que "el bot no funciona". Ahora se le avisa que lo atiende una persona y
+   * queda escrito qué falta configurar.
+   */
+  private async handoffAiNotConfigured(
+    tenantId: string,
+    conversationId: string,
+    phone: string,
+    account: WhatsAppAccountCreds,
+    botName: string,
+    missingKnowledgeBase: boolean,
+    missingKey: boolean,
+  ) {
+    const missing = [missingKnowledgeBase && 'información del negocio', missingKey && 'clave de OpenAI'].filter(Boolean).join(' y ');
+    this.logger.warn(`Modo IA sin configurar en el bot "${botName}" (tenant ${tenantId}): falta ${missing}. Se deriva a un agente.`);
+    await this.sendText(tenantId, conversationId, phone, account, 'En este momento no puedo responderte por acá. Ya te paso con un agente.');
+    return this.handoffToHuman(tenantId, conversationId, 'ai_not_configured');
   }
 
   private buildAiSystemPrompt(knowledgeBase: string, contactName: string | null): string {

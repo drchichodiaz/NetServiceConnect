@@ -24,10 +24,18 @@ const DEFAULT_TITLE: Record<MenuNodeType, string> = {
   MENU: 'Nuevo submenú',
   ORDER_LOOKUP: 'Consultar mi orden',
   AGENT: 'Hablar con un agente',
-  AI_CHAT: 'Pregúntame lo que quieras',
+  // Hasta 24 caracteres: es lo que muestra WhatsApp en la lista, el resto lo corta.
+  AI_CHAT: 'Pregúntame lo que sea',
 };
 
-export default function MenuTreeEditor({ botId, onCountChange }: { botId: string; onCountChange?: (count: number) => void }) {
+export default function MenuTreeEditor({
+  botId, onCountChange, aiMissing = [],
+}: {
+  botId: string;
+  onCountChange?: (count: number) => void;
+  /** Lo que le falta al modo IA de este bot para funcionar; vacío = está completo. */
+  aiMissing?: string[];
+}) {
   const [nodes, setNodes] = useState<MenuNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -246,6 +254,7 @@ export default function MenuTreeEditor({ botId, onCountChange }: { botId: string
                       selected={node.id === selectedId}
                       collapsed={collapsed.has(node.id)}
                       hasChildren={(childCountByParent.get(node.id) ?? 0) > 0}
+                      incomplete={node.type === 'AI_CHAT' && aiMissing.length > 0}
                       onSelect={() => setSelectedId(node.id)}
                       onToggleCollapse={() => toggleCollapse(node.id)}
                     />
@@ -274,6 +283,7 @@ export default function MenuTreeEditor({ botId, onCountChange }: { botId: string
           <NodeEditPanel
             node={selectedNode}
             descendantCount={countDescendants(nodes, selectedNode.id)}
+            aiMissing={aiMissing}
             saving={saving}
             onSave={(patch) => handleUpdate(selectedNode.id, patch)}
             onDelete={() => handleDelete(selectedNode.id)}

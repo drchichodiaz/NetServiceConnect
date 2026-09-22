@@ -44,11 +44,13 @@ interface Props {
   selected: boolean;
   collapsed: boolean;
   hasChildren: boolean;
+  /** Opción que no va a funcionar tal como está (hoy: modo IA sin configurar). */
+  incomplete?: boolean;
   onSelect: () => void;
   onToggleCollapse: () => void;
 }
 
-export default function MenuNodeRow({ node, selected, collapsed, hasChildren, onSelect, onToggleCollapse }: Props) {
+export default function MenuNodeRow({ node, selected, collapsed, hasChildren, incomplete, onSelect, onToggleCollapse }: Props) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: node.id });
   const Icon = TYPE_ICON[node.type];
 
@@ -99,6 +101,15 @@ export default function MenuNodeRow({ node, selected, collapsed, hasChildren, on
         </span>
       </button>
 
+      {incomplete && node.active && (
+        <span
+          className="text-[10px] font-semibold rounded-full px-2 py-0.5 shrink-0"
+          style={{ background: '#FEF2F2', color: '#B91C1C' }}
+          title="Le falta configuración: si un cliente la elige, pasa directo a un agente"
+        >
+          Incompleta
+        </span>
+      )}
       {!node.active && (
         <span
           className="text-[10px] font-semibold rounded-full px-2 py-0.5 shrink-0"

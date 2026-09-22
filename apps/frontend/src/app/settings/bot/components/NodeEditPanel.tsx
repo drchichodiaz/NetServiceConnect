@@ -26,7 +26,12 @@ interface Props {
   onDelete: () => void;
   onAddChild: (type: MenuNodeType) => void;
   onClose: () => void;
+  /** Lo que le falta al modo IA del bot; vacío = completo. */
+  aiMissing?: string[];
 }
+
+// Lo que muestra WhatsApp de cada fila de una lista; el resto lo corta.
+const TITLE_MAX = 24;
 
 function toForm(node: MenuNode): FormState {
   return {
@@ -38,7 +43,7 @@ function toForm(node: MenuNode): FormState {
   };
 }
 
-export default function NodeEditPanel({ node, descendantCount, saving, onSave, onDelete, onAddChild, onClose }: Props) {
+export default function NodeEditPanel({ node, descendantCount, saving, onSave, onDelete, onAddChild, onClose, aiMissing = [] }: Props) {
   const [form, setForm] = useState<FormState>(toForm(node));
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [showAddMenu, setShowAddMenu] = useState(false);
@@ -82,6 +87,11 @@ export default function NodeEditPanel({ node, descendantCount, saving, onSave, o
           className="input w-full text-sm"
           placeholder="Ej: Horarios"
         />
+        {form.title.length > TITLE_MAX && (
+          <p className="text-[11px]" style={{ color: '#B45309' }}>
+            Tiene {form.title.length} caracteres: el cliente va a ver &quot;{form.title.slice(0, TITLE_MAX)}&quot;.
+          </p>
+        )}
       </div>
 
       {(node.type === 'TEXT' || node.type === 'MENU') && (
@@ -123,6 +133,16 @@ export default function NodeEditPanel({ node, descendantCount, saving, onSave, o
             className="input w-full text-sm"
             placeholder="Lo que responde el bot cuando el cliente elige esta opción"
           />
+        </div>
+      )}
+
+      {node.type === 'AI_CHAT' && aiMissing.length > 0 && (
+        <div className="flex items-start gap-2 rounded-xl p-3 text-xs" style={{ background: '#FEF2F2', color: '#991B1B' }}>
+          <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+          <span>
+            <strong>Esta opción todavía no funciona.</strong> Falta {aiMissing.join(' y ')}. Mientras tanto, el cliente
+            que la elija recibe un aviso y pasa directo a un agente.
+          </span>
         </div>
       )}
 

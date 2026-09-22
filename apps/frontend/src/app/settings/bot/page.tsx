@@ -283,7 +283,14 @@ export default function BotSettingsPage() {
             </div>
           )}
 
-          <MenuTreeEditor botId={selected.id} onCountChange={(nodeCount) => patchSelected({ nodeCount })} />
+          <MenuTreeEditor
+            botId={selected.id}
+            onCountChange={(nodeCount) => patchSelected({ nodeCount })}
+            aiMissing={[
+              ...(!selected.aiKnowledgeBase?.trim() ? ['la información del negocio (más abajo en esta página)'] : []),
+              ...(!hasOpenaiKey ? ['la clave de OpenAI (Configuración → IA)'] : []),
+            ]}
+          />
 
           <AiCard
             key={selected.id}
