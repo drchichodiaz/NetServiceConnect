@@ -55,6 +55,13 @@ Keep the response under 200 words. Do not add any explanation, just the reply te
           'No hay una clave de OpenAI configurada. Agrégala en Configuración → IA.',
         );
       }
+      if (result.reason === 'NO_CREDITS' || result.reason === 'AI_DISABLED') {
+        // Acá sí se nombra: quien lo lee es un agente de la empresa con sesión
+        // iniciada, no el cliente final de la conversación.
+        throw new BadRequestException(
+          'Se agotaron los créditos de IA de la empresa. Contacta al administrador para recargarlos.',
+        );
+      }
       if (result.reason === 'EMPTY_RESPONSE') {
         throw new BadRequestException('AI returned empty response');
       }

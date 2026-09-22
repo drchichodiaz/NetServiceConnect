@@ -284,6 +284,12 @@ export class BotService {
       return this.handoffAiNotConfigured(tenantId, conversationId, phone, acc, bot.name, !knowledgeBase, !hasKey);
     }
 
+    // Sin saldo tampoco tiene sentido entrar: sería darle la bienvenida a un cliente
+    // para dejarlo sin respuesta en el mensaje siguiente.
+    if (!(await this.ai.hasCredits(tenantId))) {
+      return this.handoffAiNoCredits(tenantId, conversationId, phone, acc, bot.name);
+    }
+
     const contactName = await this.getContactName(conversationId);
     const baseWelcome = node?.bodyText?.trim() || 'Cuéntame en qué te puedo ayudar.';
     const welcome = contactName ? `¡Hola ${contactName}! ${baseWelcome}` : baseWelcome;
@@ -364,6 +370,10 @@ export class BotService {
       temperature: 0.6,
       conversationId,
     });
+    if (!result.ok && (result.reason === 'NO_CREDITS' || result.reason === 'AI_DISABLED')) {
+      return this.handoffAiNoCredits(tenantId, conversationId, phone, account, bot.name);
+    }
+
     const reply = result.ok ? result.text : undefined;
 
     if (!reply) {
@@ -385,6 +395,26 @@ export class BotService {
    * se veía que "el bot no funciona". Ahora se le avisa que lo atiende una persona y
    * queda escrito qué falta configurar.
    */
+  /**
+   * Se acabaron los créditos de IA de la empresa.
+   *
+   * Al cliente final se le dice exactamente lo mismo que cuando el modo IA no está
+   * configurado: él no es nuestro cliente, no sabe que existimos y no tiene nada que
+   * ver con la cuenta de su proveedor. Quien tiene que enterarse es el admin del
+   * tenant, por log hoy y por correo cuando estén las alertas.
+   */
+  private async handoffAiNoCredits(
+    tenantId: string,
+    conversationId: string,
+    phone: string,
+    account: WhatsAppAccountCreds,
+    botName: string,
+  ) {
+    this.logger.warn(`Sin créditos de IA en el bot "${botName}" (tenant ${tenantId}). Se deriva a un agente.`);
+    await this.sendText(tenantId, conversationId, phone, account, 'En este momento no puedo responderte por acá. Ya te paso con un agente.');
+    return this.handoffToHuman(tenantId, conversationId, 'ai_no_credits');
+  }
+
   private async handoffAiNotConfigured(
     tenantId: string,
     conversationId: string,

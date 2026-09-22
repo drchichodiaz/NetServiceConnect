@@ -16,27 +16,32 @@ datasource db {
 // ─── Tenant ───────────────────────────────────────────────────────────────────
 
 model Tenant {
-  id           String   @id @default(cuid())
-  name         String
-  slug         String   @unique
-  plan         String   @default("starter")
-  isActive     Boolean  @default(true)
-  openaiApiKey String?
-  openaiModel  String?
+  id            String        @id @default(cuid())
+  name          String
+  slug          String        @unique
+  plan          String        @default("starter")
+  isActive      Boolean       @default(true)
+  openaiApiKey  String?
+  openaiModel   String?
+  /// Quien paga la IA de esta empresa. BYOK = trae su propia clave y le factura el
+  /// proveedor directamente, que es como estaban todas antes de esto; PLATFORM = usa
+  /// nuestra clave y consume creditos. Arranca en BYOK para que el despliegue no le
+  /// cambie nada a nadie: se pasa cliente por cliente, cuando se decide.
+  aiBillingMode AiBillingMode @default(BYOK)
   // Quien vendio esta cuenta. Null = venta directa, que es como estan todas las que ya
   // existian. Se puede corregir despues: el primer tiempo la atribucion se carga a mano
   // mirando papeles, y equivocarse una vez no puede ser irreversible.
-  partnerId    String?
+  partnerId     String?
   // Cuando se cerro la venta. Puede no coincidir con createdAt: el partner vende y
   // avisa, y el alta la hacemos nosotros despues.
-  soldAt       DateTime?
+  soldAt        DateTime?
   // Lo acordado para ESTA venta en particular, cuando difiere del trato general del
   // partner (que vive en Partner.agreement). Texto libre a proposito: el sistema no
   // calcula comisiones — no hay precios modelados — y un campo numerico daria a
   // entender que si.
-  partnerNote  String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  partnerNote   String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
   users            User[]
   channelAccounts  ChannelAccount[]
@@ -56,6 +61,10 @@ model Tenant {
   contactTags      ContactTag[]
   supportRequests  SupportRequest[]
   aiUsages         AiUsage[]
+  aiWallet         AiWallet?
+  aiCreditLots     AiCreditLot[]
+  aiCreditEntries  AiCreditEntry[]
+  aiHolds          AiHold[]
   partner          Partner?          @relation(fields: [partnerId], references: [id], onDelete: SetNull)
 
   @@index([partnerId])
@@ -73,12 +82,12 @@ model Tenant {
 /// de User justamente para que el dia que se le quiera dar acceso alcance con
 /// asociarle un usuario, sin rehacer la atribucion que ya este cargada.
 model Partner {
-  id       String  @id @default(cuid())
-  name     String
-  email    String?
-  phone    String?
+  id        String  @id @default(cuid())
+  name      String
+  email     String?
+  phone     String?
   /// Cedula o RUC. En Panama es lo que hace falta para poder pagarle.
-  taxId    String?
+  taxId     String?
   /// El trato general: "20% los primeros 12 meses". Texto libre y no un porcentaje
   /// numerico porque el sistema no liquida nada — no hay precios modelados — y un
   /// numero prometeria un calculo que no existe.
@@ -112,14 +121,14 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  tenant        Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  assignedConvs Conversation[]       @relation("AssignedAgent")
-  campaigns     Campaign[]
-  channelAccess UserChannelAccount[]
-  resetTokens   PasswordResetToken[]
-  messages      Message[]
-  internalNotes InternalNote[]
-  auditLogs     AuditLog[]
+  tenant          Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assignedConvs   Conversation[]       @relation("AssignedAgent")
+  campaigns       Campaign[]
+  channelAccess   UserChannelAccount[]
+  resetTokens     PasswordResetToken[]
+  messages        Message[]
+  internalNotes   InternalNote[]
+  auditLogs       AuditLog[]
   supportRequests SupportRequest[]
   aiUsages        AiUsage[]
 
@@ -750,38 +759,47 @@ enum MenuNodeType {
 // ─── System Config (global, singleton) ───────────────────────────────────────
 
 model SystemConfig {
-  id               String   @id @default("1")
-  metaAppId        String?
-  metaConfigId     String?
-  metaAppSecret    String?
-  metaVerifyToken  String?
-  metaApiVersion   String   @default("v19.0")
-  mediaStoragePath String?
-  updatedAt        DateTime @updatedAt
+  id                String   @id @default("1")
+  metaAppId         String?
+  metaConfigId      String?
+  metaAppSecret     String?
+  metaVerifyToken   String?
+  metaApiVersion    String   @default("v19.0")
+  mediaStoragePath  String?
+  updatedAt         DateTime @updatedAt
   // ─── Correo saliente ───
   // Lo de aca tiene prioridad sobre las variables MAIL_* del entorno, igual que pasa
   // con las credenciales de Meta: quien tiene acceso al servidor usa el .env, quien no,
   // el panel. mailPass va CIFRADO (ver CryptoService) — es lo unico que permite mandar
   // correo firmado con el dominio del sistema.
-  mailHost         String?
-  mailPort         Int?
-  mailUser         String?
-  mailPass         String?
-  mailFrom         String?
+  mailHost          String?
+  mailPort          Int?
+  mailUser          String?
+  mailPass          String?
+  mailFrom          String?
   // ─── Soporte ───
   // A donde llegan los reportes del boton de soporte. Es por entorno y no por empresa
   // a proposito: quien atiende el reporte es quien opera ESTE servidor, no el tenant.
-  supportEmail     String?
+  supportEmail      String?
   // ─── Creditos de IA ───
   // Parametros comerciales del motor de creditos. Viven en la base y no en el codigo
   // porque son precio, no logica: se ajustan sin redeploy y quedan igual en los dos
   // entornos. Un crédito vale aiCreditUsdValue dolares de venta; el markup es lo que
   // se le aplica al costo real del proveedor antes de convertirlo a creditos.
-  aiMarkupFactor    Decimal @default(2)     @db.Decimal(6, 3)
-  aiCreditUsdValue  Decimal @default(0.001) @db.Decimal(12, 6)
+  aiMarkupFactor    Decimal  @default(2) @db.Decimal(6, 3)
+  aiCreditUsdValue  Decimal  @default(0.001) @db.Decimal(12, 6)
   // Piso por operacion: sin esto, las llamadas mas baratas redondean a cero creditos
   // y se regalan.
-  aiMinCreditsPerOp Int     @default(1)
+  aiMinCreditsPerOp Int      @default(1)
+  /// La clave de OpenAI con la que se atiende a los tenants en modo PLATFORM. Va
+  /// CIFRADA (CryptoService), igual que mailPass y por la misma razon: en claro, una
+  /// copia de la base alcanza para gastar con nuestra cuenta. La clave de un tenant en
+  /// modo BYOK sigue siendo suya y no pasa por aca.
+  aiPlatformApiKey  String?
+  /// El modelo que se usa en modo PLATFORM. Lo decide la plataforma y no el cliente:
+  /// con nuestra clave, esa eleccion regula nuestro costo. Medido contra un bot real,
+  /// el modelo economico acerto 22 de 24 contra 23 del caro, costando 17 veces menos.
+  aiPlatformModel   String   @default("gpt-4o-mini")
 }
 
 // ─── Soporte ──────────────────────────────────────────────────────────────────
@@ -793,7 +811,7 @@ model SystemConfig {
 /// entorno, el reporte se perderia entero y la persona creeria que llego. Con la fila
 /// en la base se puede reenviar o leerlo a mano.
 model SupportRequest {
-  id       String @id @default(cuid())
+  id       String  @id @default(cuid())
   tenantId String
   userId   String?
 
@@ -996,15 +1014,18 @@ model AiUsage {
 
   /// Costo del proveedor en millonesimas de dolar (1.000.000 = US$1). Entero para que
   /// sumar un mes no arrastre error de coma flotante.
-  costMicros   Int      @default(0)
+  costMicros   Int     @default(0)
   priceId      String?
-  markupFactor Decimal  @db.Decimal(6, 3)
+  markupFactor Decimal @db.Decimal(6, 3)
 
   /// Lo que corresponde cobrar por esta operacion. En la fase de medicion se calcula
   /// pero no se descuenta de ningun saldo: billed queda en false y el numero sirve
   /// para ver cuanto se facturaria si el cobro estuviera activo.
   credits Int     @default(0)
   billed  Boolean @default(false)
+  /// La reserva con la que se autorizo. Null = no hubo cobro (modo BYOK, o una llamada
+  /// anterior al motor de creditos).
+  holdId  String?
 
   /// Idempotencia: un reintento con el mismo requestId no puede registrarse dos veces.
   requestId         String  @unique
@@ -1018,12 +1039,193 @@ model AiUsage {
 
   createdAt DateTime @default(now())
 
-  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  price        AiPrice?      @relation(fields: [priceId], references: [id])
-  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
-  user         User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  tenant        Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  price         AiPrice?        @relation(fields: [priceId], references: [id])
+  hold          AiHold?         @relation(fields: [holdId], references: [id], onDelete: SetNull)
+  creditEntries AiCreditEntry[]
+  conversation  Conversation?   @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  user          User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, createdAt])
   @@index([tenantId, feature, createdAt])
   @@index([createdAt])
+}
+
+// ─── Saldo de creditos de IA ──────────────────────────────────────────────────
+
+enum AiBillingMode {
+  /// Bring your own key: el tenant trae su clave y le factura el proveedor.
+  BYOK
+  /// Usa nuestra clave y consume creditos.
+  PLATFORM
+}
+
+/// El saldo de una empresa, en una sola fila.
+///
+/// Existe por una razon precisa y no por comodidad: es el **punto unico de
+/// serializacion**. Toda autorizacion es un UPDATE condicional sobre esta fila, asi que
+/// dos conversaciones simultaneas del mismo tenant se ordenan solas y las de tenants
+/// distintos no se estorban. Sumar los lotes en cada turno seria correcto pero no
+/// serializable, que es justo lo que hace falta.
+///
+/// `spendable` esta materializado (= balance - reserved) porque Prisma no sabe comparar
+/// dos columnas en un where: teniendolo aparte, la autorizacion entera es una sola
+/// escritura atomica, sin SELECT FOR UPDATE ni transaccion larga.
+model AiWallet {
+  tenantId String @id
+
+  /// Creditos que la empresa posee (suma de lo que queda en sus lotes vivos).
+  balance   Int @default(0)
+  /// Retenidos por operaciones en vuelo.
+  reserved  Int @default(0)
+  /// Lo autorizable ahora mismo. Invariante: spendable = balance - reserved.
+  spendable Int @default(0)
+
+  /// Corte manual, independiente del saldo: permite apagarle la IA a una empresa sin
+  /// tocarle los creditos que ya pago.
+  aiEnabled Boolean @default(true)
+
+  /// Hasta que umbral de consumo ya se aviso (50, 75, 90, 100).
+  ///
+  /// Subir un escalon manda el aviso; bajar (una recarga, un ajuste) mueve el umbral
+  /// hacia abajo EN SILENCIO, para que el aviso vuelva a estar disponible cuando el
+  /// consumo suba otra vez sin mandar un "usaste la mitad" en el momento de recargar.
+  /// Es lo que cumple "una sola vez por umbral y por ciclo" sin necesitar un motor de
+  /// suscripciones, que hoy no existe.
+  lastAlertThreshold Int       @default(0)
+  lastAlertAt        DateTime?
+
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+enum AiLotKind {
+  /// Incluidos en la mensualidad. Vencen al cerrar el periodo.
+  MONTHLY_ALLOCATION
+  /// Comprados aparte. No vencen, salvo que la politica comercial lo diga.
+  PURCHASE
+  /// Regalados: prueba, compensacion, promocion.
+  BONUS
+  /// Correccion manual hacia arriba.
+  ADJUSTMENT
+}
+
+/// Un lote de creditos acreditado, con su propio vencimiento.
+///
+/// Reemplaza a las dos bolsas (mensuales / comprados) de la especificacion original.
+/// Con lotes, "los incluidos vencen y los comprados no" deja de ser una rama del codigo
+/// y pasa a ser un dato (expiresAt), y el orden de consumo es simplemente "primero el
+/// que vence antes". Una promo o un bono futuro es un lote mas, sin codigo nuevo.
+model AiCreditLot {
+  id       String    @id @default(cuid())
+  tenantId String
+  kind     AiLotKind
+
+  /// Lo acreditado, y lo que queda. remaining nunca baja de cero.
+  credits   Int
+  remaining Int
+
+  /// Null = no vence.
+  expiresAt DateTime?
+  /// Cuando se vacio o vencio. Cerrado = no se vuelve a mirar.
+  closedAt  DateTime?
+
+  /// A que ciclo pertenece, para medir el consumo del periodo contra lo asignado.
+  periodId        String?
+  note            String?
+  /// Quien lo cargo. Null = lo genero el sistema (asignacion mensual, vencimiento).
+  createdByUserId String?
+
+  createdAt DateTime @default(now())
+
+  tenant  Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  entries AiCreditEntry[]
+
+  /// Por aca se elige de que lote descontar: los vivos, del que vence antes al que no
+  /// vence nunca.
+  @@index([tenantId, closedAt, expiresAt])
+}
+
+enum AiHoldStatus {
+  HELD
+  SETTLED
+  RELEASED
+  EXPIRED
+}
+
+/// Creditos retenidos mientras una operacion esta en vuelo.
+///
+/// Sin esto, dos turnos simultaneos con saldo para uno solo se autorizan los dos. Y sin
+/// expiresAt, un contenedor reiniciado a mitad de llamada deja esos creditos retenidos
+/// para siempre: el cliente reclama creditos que nunca uso y no hay como explicarselo.
+/// Un barrido libera las vencidas.
+model AiHold {
+  id       String       @id @default(cuid())
+  tenantId String
+  status   AiHoldStatus @default(HELD)
+
+  /// Lo reservado, calculado por el PEOR caso (entrada estimada + maximo de salida).
+  /// Que sea el techo y no un promedio es lo que hace que el consumo real nunca lo
+  /// supere, y por eso el saldo no se va a negativo por el camino normal.
+  credits Int
+
+  feature        String
+  model          String
+  conversationId String?
+  userId         String?
+
+  expiresAt DateTime
+  settledAt DateTime?
+  createdAt DateTime  @default(now())
+
+  tenant Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  usages AiUsage[]
+
+  /// El barrido busca por aca: reservas vivas que ya vencieron.
+  @@index([status, expiresAt])
+  @@index([tenantId, createdAt])
+}
+
+enum AiCreditEntryKind {
+  MONTHLY_ALLOCATION
+  PURCHASE
+  BONUS
+  AI_USAGE
+  EXPIRATION
+  REFUND
+  ADJUSTMENT
+}
+
+/// El libro mayor. Nunca se edita ni se borra una fila: una correccion es un movimiento
+/// compensatorio.
+///
+/// Es la autoridad comercial frente al cliente — no el proveedor, que factura con otro
+/// criterio y con otra fecha. balanceBefore/balanceAfter se guardan aunque sean
+/// derivables: permiten auditar la secuencia sin recalcular todo el historico.
+model AiCreditEntry {
+  id       String            @id @default(cuid())
+  tenantId String
+  kind     AiCreditEntryKind
+
+  /// Positivo suma, negativo resta.
+  credits       Int
+  balanceBefore Int
+  balanceAfter  Int
+
+  /// De que lote salieron o a que lote entraron. Un consumo que toca dos lotes escribe
+  /// dos filas, una por lote.
+  lotId   String?
+  /// El uso que lo genero, cuando es un consumo.
+  usageId String?
+
+  note            String?
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+
+  tenant Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lot    AiCreditLot? @relation(fields: [lotId], references: [id], onDelete: SetNull)
+  usage  AiUsage?     @relation(fields: [usageId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
 }

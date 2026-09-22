@@ -1,10 +1,12 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { settingsApi } from '@/lib/api';
+import { settingsApi, aiCreditsApi, type MyAiCredits } from '@/lib/api';
 import {
   Sparkles, Eye, EyeOff, Check, Loader2,
-  AlertCircle, CheckCircle, ChevronDown, Trash2,
+  AlertCircle, CheckCircle, ChevronDown, Trash2, Coins,
 } from 'lucide-react';
+import { format } from 'date-fns';
+import { es } from 'date-fns/locale';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
 
@@ -26,6 +28,9 @@ export default function AiSettingsPage() {
   // Form state
   const [apiKey,      setApiKey]      = useState('');
   const [showKey,     setShowKey]     = useState(false);
+  // Saldo de creditos. Solo existe si la empresa esta en modo plataforma; si trae su
+  // propia clave, este bloque no aparece y la pantalla es la de siempre.
+  const [credits,     setCredits]     = useState<MyAiCredits | null>(null);
 
   useEffect(() => { load(); }, []);
 
@@ -37,6 +42,9 @@ export default function AiSettingsPage() {
       setKeySource(data.keySource);
       setKeyPreview(data.openaiKeyPreview);
       setModel(data.openaiModel);
+
+      const mine = await aiCreditsApi.me().catch(() => null);
+      setCredits(mine && mine.billingMode === 'PLATFORM' ? mine : null);
     } catch {
       toast.error('Error al cargar configuración');
     } finally {
@@ -120,6 +128,10 @@ export default function AiSettingsPage() {
         </p>
       </div>
 
+      {credits && <CreditsCard credits={credits} />}
+
+      {!credits && (
+      <>
       {/* Status card */}
       <div
         className="card p-4 flex items-center gap-3 mb-6"
@@ -259,6 +271,104 @@ export default function AiSettingsPage() {
           GPT-4o Mini es suficiente para sugerencias de soporte. Usa GPT-4o si necesitas respuestas más elaboradas.
         </p>
       </div>
+      </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * El saldo de la empresa.
+ *
+ * No muestra costos del proveedor ni márgenes: eso es información de quien opera el
+ * servicio. Acá solo se ve cuánto queda, cuánto se usó y cuándo vence.
+ */
+function CreditsCard({ credits }: { credits: MyAiCredits }) {
+  const total = credits.balance + credits.creditsUsed;
+  const low = credits.balance <= 0 || credits.usagePercent >= 90;
+  const color = credits.balance <= 0 ? '#DC2626' : credits.usagePercent >= 90 ? '#D97706' : '#9333EA';
+
+  return (
+    <div className="card p-5 mb-6">
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: '#F3E8FF' }}>
+            <Coins className="w-4 h-4" style={{ color: '#9333EA' }} />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-ink">Créditos de IA</p>
+            <p className="text-xs text-ink-muted">
+              {credits.enabled ? 'Tu plan incluye el uso de IA' : 'La IA está suspendida en tu cuenta'}
+            </p>
+          </div>
+        </div>
+        <div className="text-right">
+          <p className="text-xl font-bold text-ink" style={{ letterSpacing: '-0.02em' }}>
+            {credits.balance.toLocaleString('es')}
+          </p>
+          <p className="text-[11px] text-ink-subtle">disponibles</p>
+        </div>
+      </div>
+
+      <div className="h-2 rounded-full overflow-hidden mb-2" style={{ background: 'var(--surface-muted)' }}>
+        <div
+          className="h-full rounded-full transition-all"
+          style={{ width: `${Math.min(100, credits.usagePercent)}%`, background: color }}
+        />
+      </div>
+
+      <div className="flex items-center justify-between text-[11px] text-ink-subtle mb-3">
+        <span>
+          {credits.creditsUsed.toLocaleString('es')} usados
+          {total > 0 ? ` de ${total.toLocaleString('es')}` : ''} ({credits.usagePercent}%)
+        </span>
+        {credits.nextExpiration && (
+          <span>
+            Vencen el {format(new Date(credits.nextExpiration), "d 'de' MMMM", { locale: es })}
+          </span>
+        )}
+      </div>
+
+      {low && (
+        <div
+          className="flex items-start gap-2 p-2.5 rounded-lg mb-3"
+          style={{ background: credits.balance <= 0 ? '#FEF2F2' : '#FFFBEB' }}
+        >
+          <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" style={{ color }} />
+          <p className="text-[11px]" style={{ color: credits.balance <= 0 ? '#991B1B' : '#92400E' }}>
+            {credits.balance <= 0
+              ? 'Se agotaron tus créditos. El bot deriva las consultas a un agente hasta que se recarguen. El resto del sistema sigue funcionando normalmente.'
+              : 'Te queda poco saldo de IA. Cuando llegue a cero, las consultas pasan a un agente.'}
+          </p>
+        </div>
+      )}
+
+      {credits.entries.length > 0 && (
+        <details className="group">
+          <summary className="text-xs text-ink-muted cursor-pointer list-none flex items-center gap-1.5">
+            <ChevronDown className="w-3.5 h-3.5 transition-transform group-open:rotate-0 -rotate-90" />
+            Ver movimientos
+          </summary>
+          <div className="divide-y divide-border mt-2">
+            {credits.entries.map((e) => (
+              <div key={e.id} className="flex items-center justify-between py-1.5">
+                <p className="text-[11px] text-ink-muted">
+                  {format(new Date(e.createdAt), 'd MMM HH:mm', { locale: es })}
+                  {e.note ? ` · ${e.note}` : ''}
+                </p>
+                <p className="text-[11px] text-ink">
+                  {e.credits >= 0 ? '+' : ''}{e.credits.toLocaleString('es')}
+                </p>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+
+      <p className="text-[11px] text-ink-subtle mt-3">
+        Cada respuesta de IA consume créditos según lo que necesite para responder. Para recargar,
+        escribinos.
+      </p>
     </div>
   );
 }

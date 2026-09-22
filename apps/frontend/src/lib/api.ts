@@ -384,6 +384,93 @@ export const tenantsApi = {
 
 // ─── Partners (quién vendió cada cuenta — solo operador de la plataforma) ──────
 
+// ─── Créditos de IA ────────────────────────────────────────────────────────────
+
+export interface AiPlatformSettings {
+  hasPlatformKey: boolean;
+  platformKeyPreview: string | null;
+  platformModel: string;
+  markupFactor: number;
+  creditUsdValue: number;
+  minCreditsPerOp: number;
+}
+
+export interface AiCreditTenantRow {
+  tenantId: string;
+  name: string;
+  billingMode: 'BYOK' | 'PLATFORM';
+  aiEnabled: boolean;
+  balance: number;
+  reserved: number;
+  spendable: number;
+  calls: number;
+  creditsUsed: number;
+  costUsd: number;
+  revenueUsd: number;
+  marginUsd: number;
+}
+
+export interface AiCreditLot {
+  id: string;
+  kind: 'MONTHLY_ALLOCATION' | 'PURCHASE' | 'BONUS' | 'ADJUSTMENT';
+  credits: number;
+  remaining: number;
+  expiresAt: string | null;
+  createdAt: string;
+  note?: string | null;
+}
+
+export interface AiCreditEntry {
+  id: string;
+  kind: string;
+  credits: number;
+  balanceAfter: number;
+  note: string | null;
+  createdAt: string;
+}
+
+export interface MyAiCredits {
+  billingMode: 'BYOK' | 'PLATFORM';
+  enabled: boolean;
+  balance: number;
+  reserved: number;
+  creditsUsed: number;
+  calls: number;
+  usagePercent: number;
+  nextExpiration: string | null;
+  lots: AiCreditLot[];
+  entries: AiCreditEntry[];
+}
+
+export const aiCreditsApi = {
+  /** Lo que ve la empresa de su propio saldo. */
+  me: (period = 'month'): Promise<MyAiCredits> =>
+    api.get('/ai-credits/me', { params: { period } }).then((r) => r.data),
+
+  getSettings: (): Promise<AiPlatformSettings> => api.get('/ai-credits/settings').then((r) => r.data),
+  updateSettings: (data: {
+    platformApiKey?: string; platformModel?: string;
+    markupFactor?: number; creditUsdValue?: number; minCreditsPerOp?: number;
+  }): Promise<AiPlatformSettings> => api.patch('/ai-credits/settings', data).then((r) => r.data),
+
+  overview: (period = 'month'): Promise<{
+    period: string; from: string; creditUsdValue: number; tenants: AiCreditTenantRow[];
+  }> => api.get('/ai-credits/overview', { params: { period } }).then((r) => r.data),
+
+  tenantDetail: (id: string): Promise<{
+    tenant: { id: string; name: string; aiBillingMode: 'BYOK' | 'PLATFORM' };
+    wallet: { balance: number; reserved: number; spendable: number; aiEnabled: boolean };
+    lots: AiCreditLot[];
+    entries: AiCreditEntry[];
+  }> => api.get(`/ai-credits/tenants/${id}`).then((r) => r.data),
+
+  grant: (id: string, data: { credits: number; kind?: string; expiresAt?: string | null; note?: string }) =>
+    api.post(`/ai-credits/tenants/${id}/grant`, data).then((r) => r.data),
+
+  updateTenant: (id: string, data: { billingMode?: 'BYOK' | 'PLATFORM'; aiEnabled?: boolean }) =>
+    api.patch(`/ai-credits/tenants/${id}`, data).then((r) => r.data),
+};
+
 export const partnersApi = {
   list: (): Promise<Partner[]> => api.get('/partners').then((r) => r.data),
   get: (id: string): Promise<Partner & { tenants: any[] }> =>
