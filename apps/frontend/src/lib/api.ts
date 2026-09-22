@@ -98,6 +98,8 @@ export const whatsappApi = {
     name?: string;
     templateId: string;
     variables?: string[];
+    headerVariables?: string[];
+    buttonVariables?: { index: number; value: string }[];
     channelAccountId?: string;
   }) => api.post('/whatsapp/start-conversation', data).then((r) => r.data),
 
@@ -285,6 +287,51 @@ export const tenantsApi = {
 
 // ─── Message Templates ─────────────────────────────────────────────────────────
 
+export type TemplateButtonType = 'QUICK_REPLY' | 'URL' | 'PHONE_NUMBER';
+
+export interface TemplateButton {
+  type: TemplateButtonType;
+  text: string;
+  url?: string;
+  urlExample?: string;
+  phoneNumber?: string;
+}
+
+export interface MessageTemplate {
+  id: string;
+  name: string;
+  language: string;
+  category: string;
+  status: string;
+  rejectReason?: string | null;
+  wabaId?: string | null;
+  headerFormat?: 'TEXT' | 'IMAGE' | null;
+  headerText?: string | null;
+  headerMediaPath?: string | null;
+  footerText?: string | null;
+  buttons?: TemplateButton[] | null;
+  bodyText: string;
+  variableCount: number;
+  createdAt: string;
+}
+
+export interface CreateTemplatePayload {
+  name: string;
+  language: string;
+  category: string;
+  bodyText: string;
+  wabaId?: string;
+  exampleValues?: string[];
+  headerFormat?: 'TEXT' | 'IMAGE';
+  headerText?: string;
+  headerExampleValues?: string[];
+  headerMediaHandle?: string;
+  headerMediaPath?: string;
+  headerMediaMime?: string;
+  footerText?: string;
+  buttons?: TemplateButton[];
+}
+
 export const templatesApi = {
   // Con channelAccountId: solo las plantillas del WABA de esa linea. Meta guarda las
   // plantillas por WABA, asi que ofrecer una de otro WABA termina en error 132001.
@@ -292,10 +339,23 @@ export const templatesApi = {
     api.get('/whatsapp/templates', {
       params: opts?.channelAccountId ? { channelAccountId: opts.channelAccountId } : undefined,
     }).then((r) => r.data),
-  create: (data: { name: string; language: string; category: string; bodyText: string; wabaId?: string; exampleValues?: string[] }) =>
-    api.post('/whatsapp/templates', data).then((r) => r.data),
+  create: (data: CreateTemplatePayload) => api.post('/whatsapp/templates', data).then((r) => r.data),
   refresh: (id: string) => api.patch(`/whatsapp/templates/${id}/refresh`).then((r) => r.data),
   remove: (id: string) => api.delete(`/whatsapp/templates/${id}`).then((r) => r.data),
+
+  // Sube la imagen del encabezado ANTES de crear la plantilla: Meta pide un "handle"
+  // suyo para poder aprobarla, que no es lo mismo que el media id de un mensaje.
+  uploadHeaderMedia: (file: File): Promise<{ handle: string; path: string; mime: string }> => {
+    const form = new FormData();
+    form.append('file', file);
+    return api
+      .post('/whatsapp/templates/header-media', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+      .then((r) => r.data);
+  },
+
+  // Ruta (relativa a la API) de la imagen del encabezado de una plantilla ya creada.
+  // Se pide con useAuthedMedia, no como <img src> directo: el endpoint va con JWT.
+  headerMediaPath: (id: string) => `/whatsapp/templates/${id}/header-media`,
 };
 
 // ─── Contacts ─────────────────────────────────────────────────────────────────

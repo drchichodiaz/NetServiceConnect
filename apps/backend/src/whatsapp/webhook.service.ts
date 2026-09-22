@@ -238,6 +238,12 @@ export class WebhookService {
       case 'document':  return msg.document?.filename || '[documento]';
       case 'video':     return msg.video?.caption || '[video]';
       case 'sticker':   return '[sticker]';
+      // Cuando el cliente toca una respuesta rapida de una PLANTILLA, Meta manda
+      // type 'button' (no 'interactive', que es el de los botones del bot). Sin este
+      // caso caia en el default y la bandeja mostraba "[mensaje]": el agente sabia
+      // que el cliente habia respondido, pero no que opcion habia elegido.
+      case 'button':
+        return msg.button?.text || '[respuesta]';
       case 'interactive': {
         const reply = msg.interactive?.button_reply ?? msg.interactive?.list_reply;
         return reply?.title || '[interactivo]';
@@ -266,6 +272,7 @@ export class WebhookService {
       video:       'VIDEO',
       sticker:     'STICKER',
       interactive: 'TEXT',
+      button:      'TEXT',
     };
     return map[type] || 'TEXT';
   }

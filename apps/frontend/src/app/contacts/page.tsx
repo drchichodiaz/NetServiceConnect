@@ -2,6 +2,9 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { contactsApi, conversationsApi, templatesApi, whatsappApi, ImportContactsResult } from '@/lib/api';
+import type { MessageTemplate } from '@/lib/api';
+import { TemplatePreview } from '@/app/settings/templates/components/TemplatePreview';
+import { useAuthedMedia } from '@/hooks/useAuthedMedia';
 import { useInboxStore } from '@/store/inbox.store';
 import { Contact, Conversation } from '@/types';
 import {
@@ -14,16 +17,12 @@ import { es } from 'date-fns/locale';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
 
-interface Template {
-  id: string;
-  // WABA dueño de la plantilla — Meta las guarda por cuenta, no por tenant.
-  wabaId?: string | null;
-  name: string;
-  language: string;
-  category: string;
-  bodyText: string;
-  variableCount: number;
-  status: string;
+// El tipo vive en lib/api: la plantilla tiene encabezado, pie y botones, y una copia
+// local de la forma se desactualizaba cada vez que se agregaba un componente.
+type Template = MessageTemplate;
+
+function countVars(text: string) {
+  return new Set(text.match(/\{\{\d+\}\}/g) ?? []).size;
 }
 
 const STATUS_CONFIG = {
@@ -440,6 +439,10 @@ function NewConversationModal({ contact, onClose, onSent }: {
   const [loadingTemplates, setLoadingTemplates] = useState(true);
   const [templateId, setTemplateId] = useState('');
   const [variables, setVariables] = useState<string[]>([]);
+  // Una plantilla completa puede pedir valores en tres lugares distintos: el encabezado
+  // de texto, el cuerpo y la URL de cada boton de enlace dinamico.
+  const [headerVariables, setHeaderVariables] = useState<string[]>([]);
+  const [buttonVariables, setButtonVariables] = useState<{ index: number; value: string }[]>([]);
   const [sending, setSending] = useState(false);
 
   // Línea desde la que sale el mensaje. Importa por dos motivos: el cliente recibe el
@@ -465,6 +468,8 @@ function NewConversationModal({ contact, onClose, onSent }: {
     setLoadingTemplates(true);
     setTemplateId('');
     setVariables([]);
+    setHeaderVariables([]);
+    setButtonVariables([]);
     Promise.all([templatesApi.list({ channelAccountId: accountId }), templatesApi.list()])
       .then(([forLine, all]: [Template[], Template[]]) => {
         const usable = forLine.filter((t) => t.status === 'APPROVED');
@@ -477,11 +482,22 @@ function NewConversationModal({ contact, onClose, onSent }: {
   }, [accountId]);
 
   const selectedTemplate = templates.find((t) => t.id === templateId) || null;
+  // La imagen del encabezado va detras del JWT, asi que no sirve como <img src> directo.
+  const { url: headerImageUrl } = useAuthedMedia(
+    selectedTemplate?.headerFormat === 'IMAGE' ? templatesApi.headerMediaPath(selectedTemplate.id) : null,
+  );
 
   function handleSelectTemplate(id: string) {
     setTemplateId(id);
     const t = templates.find((tpl) => tpl.id === id);
     setVariables(t ? Array(t.variableCount).fill('') : []);
+    setHeaderVariables(t?.headerFormat === 'TEXT' && countVars(t.headerText ?? '') > 0 ? [''] : []);
+    setButtonVariables(
+      (t?.buttons ?? [])
+        .map((b, index) => ({ button: b, index }))
+        .filter(({ button }) => button.type === 'URL' && (button.url ?? '').includes('{{1}}'))
+        .map(({ index }) => ({ index, value: '' })),
+    );
   }
 
   async function handleSend() {
@@ -496,6 +512,8 @@ function NewConversationModal({ contact, onClose, onSent }: {
         name: contact ? undefined : (name.trim() || undefined),
         templateId,
         variables,
+        headerVariables: headerVariables.length > 0 ? headerVariables : undefined,
+        buttonVariables: buttonVariables.length > 0 ? buttonVariables : undefined,
         channelAccountId: accountId || undefined,
       });
       toast.success('Conversación iniciada');
@@ -580,20 +598,69 @@ function NewConversationModal({ contact, onClose, onSent }: {
           )}
 
           {selectedTemplate && (
-            <div className="rounded-lg p-3 text-xs text-ink-muted" style={{ background: 'var(--surface-muted)' }}>
-              {selectedTemplate.bodyText}
+            <TemplatePreview
+              headerFormat={selectedTemplate.headerFormat}
+              headerText={selectedTemplate.headerText}
+              headerImageUrl={headerImageUrl}
+              bodyText={selectedTemplate.bodyText}
+              footerText={selectedTemplate.footerText}
+              buttons={selectedTemplate.buttons}
+              exampleValues={variables}
+              headerExampleValues={headerVariables}
+            />
+          )}
+
+          {/* Los valores van agrupados por componente: con encabezado y botones en juego,
+              una lista plana de "Variable {{1}}" no deja saber cual es cual. */}
+          {headerVariables.length > 0 && (
+            <div>
+              <label className="text-xs font-semibold text-ink block mb-1.5">Encabezado</label>
+              <input
+                placeholder="Valor de {{1}} del encabezado"
+                value={headerVariables[0] ?? ''}
+                onChange={(e) => setHeaderVariables([e.target.value])}
+                className="input w-full"
+              />
             </div>
           )}
 
-          {variables.map((v, i) => (
-            <input
-              key={i}
-              placeholder={`Variable {{${i + 1}}}`}
-              value={v}
-              onChange={(e) => setVariables((prev) => prev.map((val, idx) => (idx === i ? e.target.value : val)))}
-              className="input w-full"
-            />
-          ))}
+          {variables.length > 0 && (
+            <div>
+              <label className="text-xs font-semibold text-ink block mb-1.5">Cuerpo</label>
+              <div className="space-y-2">
+                {variables.map((v, i) => (
+                  <input
+                    key={i}
+                    placeholder={`Variable {{${i + 1}}}`}
+                    value={v}
+                    onChange={(e) => setVariables((prev) => prev.map((val, idx) => (idx === i ? e.target.value : val)))}
+                    className="input w-full"
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {buttonVariables.length > 0 && (
+            <div>
+              <label className="text-xs font-semibold text-ink block mb-1.5">Enlaces de los botones</label>
+              <div className="space-y-2">
+                {buttonVariables.map((bv) => (
+                  <input
+                    key={bv.index}
+                    placeholder={`Valor del enlace de "${selectedTemplate?.buttons?.[bv.index]?.text ?? 'botón'}"`}
+                    value={bv.value}
+                    onChange={(e) =>
+                      setButtonVariables((prev) =>
+                        prev.map((item) => (item.index === bv.index ? { ...item, value: e.target.value } : item)),
+                      )
+                    }
+                    className="input w-full"
+                  />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex gap-2 mt-5">

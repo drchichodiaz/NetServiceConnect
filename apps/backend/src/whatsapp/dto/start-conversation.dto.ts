@@ -1,4 +1,15 @@
-import { IsString, IsOptional, IsArray } from 'class-validator';
+import { IsString, IsOptional, IsArray, ValidateNested, IsInt, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+
+export class ButtonVariableDto {
+  // Posicion del boton en la plantilla (0-based), que es el `index` que espera Meta.
+  @IsInt()
+  @Min(0)
+  index: number;
+
+  @IsString()
+  value: string;
+}
 
 export class StartConversationDto {
   @IsOptional()
@@ -22,7 +33,20 @@ export class StartConversationDto {
   @IsString()
   channelAccountId?: string;
 
+  // Valores de las {{n}} del cuerpo, en orden.
   @IsOptional()
   @IsArray()
   variables?: string[];
+
+  // Valor del {{1}} del encabezado, si la plantilla tiene encabezado de texto con variable.
+  @IsOptional()
+  @IsArray()
+  headerVariables?: string[];
+
+  // Valor del {{1}} de cada boton de enlace con URL dinamica.
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ButtonVariableDto)
+  buttonVariables?: ButtonVariableDto[];
 }

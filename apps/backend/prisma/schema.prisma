@@ -469,6 +469,30 @@ model MessageTemplate {
   name           String
   language       String   @default("es")
   category       String // MARKETING | UTILITY | AUTHENTICATION
+
+  // ── Componentes de la plantilla ────────────────────────────────────────────
+  // Meta arma la plantilla con hasta 4 componentes: HEADER, BODY, FOOTER y
+  // BUTTONS. Solo BODY es obligatorio; el resto se guarda aca para poder
+  // reconstruir el envio y mostrar la vista previa sin volver a preguntarle a Meta.
+
+  // TEXT | IMAGE — null es una plantilla sin encabezado.
+  headerFormat    String?
+  // Solo para headerFormat TEXT. Admite una unica variable y tiene que ser {{1}}.
+  headerText      String?
+  // Solo para headerFormat IMAGE: ruta relativa de nuestra copia, el mismo formato
+  // que Message.mediaUrl. Se guarda para la vista previa y para poder re-subir la
+  // imagen a Meta cuando el media id vence.
+  headerMediaPath String?
+  headerMediaMime String?
+  // Cache de media ids de Meta por linea: { "<phoneNumberId>": { id, uploadedAt } }.
+  // El id que devuelve /media vive ~30 dias y es por numero, no por WABA, asi que
+  // no alcanza con guardar uno solo. Sin este cache, cada envio resubiria la imagen.
+  headerMediaIds  Json?
+  footerText      String?
+  // [{ type: QUICK_REPLY|URL|PHONE_NUMBER, text, url?, urlExample?, phoneNumber? }]
+  // El orden importa: es el index que Meta usa para los parametros de boton al enviar.
+  buttons         Json?
+
   bodyText       String
   variableCount  Int      @default(0)
   status         String   @default("PENDING") // PENDING | APPROVED | REJECTED

@@ -6,6 +6,7 @@ import { ChannelAccessService } from '../common/services/channel-access.service'
 import { EventBusService } from '../events/event-bus.service';
 import { MediaService } from '../media/media.service';
 import { TemplatesService } from '../templates/templates.service';
+import { buildSendComponents, TemplateButton } from '../templates/template-components';
 import { WhatsAppAccountsService } from './accounts.service';
 import { SendMessageDto } from './dto/send-message.dto';
 import { SendMediaDto } from './dto/send-media.dto';
@@ -255,7 +256,10 @@ export class WhatsAppService {
 
     const now = new Date();
     const variables = dto.variables ?? [];
-    const renderedBody = this.renderTemplateBody(template.bodyText, variables);
+    // Lo que se guarda en la bandeja es lo que el cliente ve: encabezado de texto,
+    // cuerpo y pie. Si solo se guardara el cuerpo, el agente abriria la conversacion
+    // y leeria algo distinto de lo que se mando.
+    const renderedBody = this.renderTemplateText(template, variables, dto.headerVariables ?? []);
 
     if (!conversation) {
       conversation = await this.prisma.conversation.create({
@@ -276,6 +280,28 @@ export class WhatsAppService {
       });
     }
 
+    // La imagen del encabezado se manda por media id, no por URL: el id es por linea
+    // y se cachea, asi que un segundo envio por la misma linea no vuelve a subirla.
+    const headerMediaId =
+      template.headerFormat === 'IMAGE'
+        ? await this.resolveHeaderMediaId(template, account)
+        : undefined;
+
+    const components = buildSendComponents(
+      {
+        headerFormat: template.headerFormat,
+        headerText: template.headerText,
+        bodyText: template.bodyText,
+        buttons: template.buttons as unknown as TemplateButton[] | null,
+      },
+      {
+        body: variables,
+        header: dto.headerVariables ?? [],
+        buttons: dto.buttonVariables ?? [],
+      },
+      headerMediaId,
+    );
+
     const payload = {
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
@@ -284,9 +310,7 @@ export class WhatsAppService {
       template: {
         name: template.name,
         language: { code: template.language },
-        ...(variables.length > 0 && {
-          components: [{ type: 'body', parameters: variables.map((v) => ({ type: 'text', text: v })) }],
-        }),
+        ...(components.length > 0 && { components }),
       },
     };
 
@@ -324,6 +348,14 @@ export class WhatsAppService {
           body: renderedBody,
           status: externalId ? 'SENT' : 'FAILED',
           externalId,
+          // Se apunta a la copia local de la imagen del encabezado (la misma que la
+          // vista previa), para que la burbuja del inbox muestre lo que se envio.
+          ...(template.headerFormat === 'IMAGE' &&
+            template.headerMediaPath && {
+              mediaUrl: template.headerMediaPath,
+              mediaType: 'image',
+              mediaMimeType: template.headerMediaMime ?? 'image/jpeg',
+            }),
         },
       }),
       this.prisma.conversation.update({
@@ -383,11 +415,62 @@ export class WhatsAppService {
     });
   }
 
+  /**
+   * Media id de la imagen del encabezado para la linea que envia, subiendola si hace falta.
+   *
+   * Meta pide un media id (o una URL publica) al enviar, y ese id es por numero y vence
+   * a los ~30 dias — por eso se cachea por linea en vez de guardar uno solo. Sin imagen
+   * no se puede enviar: una plantilla con encabezado IMAGE mandada sin el parametro
+   * devuelve 132000 ("number of parameters does not match"), que no dice que falto.
+   */
+  private async resolveHeaderMediaId(
+    template: { id: string; name: string; headerMediaPath: string | null; headerMediaMime: string | null; headerMediaIds: any },
+    account: { phoneNumberId: string; accessToken: string },
+  ): Promise<string> {
+    const cached = this.templatesService.getCachedHeaderMediaId(template, account.phoneNumberId);
+    if (cached) return cached;
+
+    const file = await this.templatesService.readHeaderMediaFile(template);
+    if (!file) {
+      this.logger.error(
+        `[Envio bloqueado] La plantilla "${template.name}" (${template.id}) tiene encabezado de imagen ` +
+          `pero falta el archivo ${template.headerMediaPath ?? '(sin ruta)'}`,
+      );
+      throw new BadRequestException(
+        `No se encontró la imagen del encabezado de la plantilla "${template.name}". ` +
+          'Volvé a crearla con la imagen para poder enviarla.',
+      );
+    }
+
+    const mediaId = await this.uploadMediaToMeta(account.phoneNumberId, account.accessToken, file);
+    await this.templatesService.cacheHeaderMediaId(template.id, account.phoneNumberId, mediaId);
+    return mediaId;
+  }
+
   private renderTemplateBody(bodyText: string, variables: string[]): string {
     return bodyText.replace(/\{\{(\d+)\}\}/g, (_, idx) => variables[Number(idx) - 1] ?? `{{${idx}}}`);
   }
 
-  private async uploadMediaToMeta(phoneNumberId: string, accessToken: string, file: Express.Multer.File): Promise<string> {
+  /** Encabezado de texto + cuerpo + pie, ya con las variables reemplazadas. */
+  private renderTemplateText(
+    template: { headerFormat: string | null; headerText: string | null; bodyText: string; footerText: string | null },
+    variables: string[],
+    headerVariables: string[],
+  ): string {
+    const parts: string[] = [];
+    if (template.headerFormat === 'TEXT' && template.headerText) {
+      parts.push(this.renderTemplateBody(template.headerText, headerVariables));
+    }
+    parts.push(this.renderTemplateBody(template.bodyText, variables));
+    if (template.footerText) parts.push(template.footerText);
+    return parts.join('\n\n');
+  }
+
+  private async uploadMediaToMeta(
+    phoneNumberId: string,
+    accessToken: string,
+    file: { buffer: Buffer; originalname: string; mimetype: string },
+  ): Promise<string> {
     const form = new FormData();
     form.append('messaging_product', 'whatsapp');
     form.append('file', file.buffer, { filename: file.originalname, contentType: file.mimetype });
