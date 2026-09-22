@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { MenuNodesService, MenuNodeDto, MenuNodeUpdateDto, ReparentDto } from './menu-nodes.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -12,8 +12,8 @@ export class MenuNodesController {
   constructor(private service: MenuNodesService) {}
 
   @Get()
-  getTree(@CurrentUser() user: any) {
-    return this.service.getTree(user.tenantId);
+  getTree(@CurrentUser() user: any, @Query('botId') botId: string) {
+    return this.service.getTree(user.tenantId, botId);
   }
 
   @Post()

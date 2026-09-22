@@ -18,7 +18,7 @@ const navItems = [
   { href: '/settings/whatsapp',      icon: Settings,     label: 'WhatsApp',      roles: ['ADMIN', 'SUPERVISOR'] },
   { href: '/settings/templates',     icon: FileText,     label: 'Plantillas',    roles: ['ADMIN', 'SUPERVISOR'] },
   { href: '/campaigns',              icon: Megaphone,    label: 'Campañas',      roles: ['ADMIN', 'SUPERVISOR'] },
-  { href: '/settings/bot',           icon: Bot,          label: 'Menú de WhatsApp', roles: ['ADMIN', 'SUPERVISOR'] },
+  { href: '/settings/bot',           icon: Bot,          label: 'Bots de WhatsApp', roles: ['ADMIN', 'SUPERVISOR'] },
   { href: '/settings/system',        icon: ShieldCheck,  label: 'Sistema',       superAdminOnly: true },
   { href: '/settings/tenants',       icon: Building2,    label: 'Empresas',      superAdminOnly: true },
 ];

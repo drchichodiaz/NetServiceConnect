@@ -113,6 +113,10 @@ export interface WhatsAppAccount {
   statusCheckedAt?: string | null;
   signupStatus: 'PENDING' | 'CONNECTED' | 'FAILED' | 'DISCONNECTED';
   isActive: boolean;
+  /** Bot que atiende la linea. null = el bot predeterminado del tenant. */
+  botId?: string | null;
+  /** false = sin bot: las conversaciones entran directo a los agentes. */
+  botEnabled?: boolean;
   webhookVerifyToken: string;
   createdAt: string;
   updatedAt: string;

@@ -112,7 +112,7 @@ export const whatsappApi = {
   // Importa el resto de los números del WABA ya conectado (evita repetir el signup por sucursal)
   syncAccounts: (): Promise<{ ok: boolean; imported: number; failedWabas: string[] }> =>
     api.post('/whatsapp/accounts/sync').then((r) => r.data),
-  updateAccount: (id: string, data: { label?: string; sortOrder?: number }) =>
+  updateAccount: (id: string, data: { label?: string; sortOrder?: number; botId?: string | null; botEnabled?: boolean }) =>
     api.patch(`/whatsapp/accounts/${id}`, data).then((r) => r.data),
   // Registra en la Cloud API una linea ya dada de alta (PIN de 6 digitos de 2FA)
   registerAccount: (id: string, pin: string) =>
@@ -174,22 +174,38 @@ export const settingsApi = {
     api.patch('/settings', data).then((r) => r.data),
 };
 
-// ─── Bot config (menú de WhatsApp) ─────────────────────────────────────────────
+// ─── Bots (un tenant puede tener varios, cada línea elige el suyo) ─────────────
 
-export const botConfigApi = {
-  get: () => api.get('/bot-config').then((r) => r.data),
-  update: (data: { aiKnowledgeBase?: string; startInAiChat?: boolean }) =>
-    api.patch('/bot-config', data).then((r) => r.data),
-};
+export interface BotSummary {
+  id: string;
+  name: string;
+  aiKnowledgeBase: string | null;
+  startInAiChat: boolean;
+  isDefault: boolean;
+  nodeCount: number;
+  /** Líneas que atiende hoy, ya resuelto el "usa el predeterminado". */
+  lines: { id: string; label: string | null; phoneNumber: string | null }[];
+}
 
-export const botStatsApi = {
-  get: (period: 'today' | 'week' | 'month' = 'week') =>
-    api.get('/bot-config/stats', { params: { period } }).then((r) => r.data),
+export const botsApi = {
+  list: (): Promise<BotSummary[]> => api.get('/bots').then((r) => r.data),
+  create: (name: string) => api.post('/bots', { name }).then((r) => r.data),
+  update: (id: string, data: { name?: string; aiKnowledgeBase?: string; startInAiChat?: boolean }) =>
+    api.patch(`/bots/${id}`, data).then((r) => r.data),
+  // Copia el bot con todo su árbol de menú; la copia no queda asignada a ninguna línea
+  duplicate: (id: string, name?: string) => api.post(`/bots/${id}/duplicate`, { name }).then((r) => r.data),
+  setDefault: (id: string): Promise<BotSummary[]> => api.post(`/bots/${id}/default`).then((r) => r.data),
+  remove: (id: string): Promise<BotSummary[]> => api.delete(`/bots/${id}`).then((r) => r.data),
+  // Sin botId: las métricas de todos los bots juntos
+  stats: (period: 'today' | 'week' | 'month' = 'week', botId?: string) =>
+    api.get('/bots/stats', { params: { period, ...(botId && { botId }) } }).then((r) => r.data),
 };
 
 // ─── Menu nodes (árbol configurable del menú de WhatsApp) ──────────────────────
 
 export interface MenuNodeInput {
+  /** Obligatorio para una opción de la raíz; con parentId se hereda del padre. */
+  botId?: string;
   parentId?: string | null;
   type?: 'MENU' | 'TEXT' | 'ORDER_LOOKUP' | 'AGENT' | 'AI_CHAT';
   title: string;
@@ -221,7 +237,7 @@ export interface LookupTestResult {
 }
 
 export const menuNodesApi = {
-  getTree: () => api.get('/menu-nodes').then((r) => r.data),
+  getTree: (botId: string) => api.get('/menu-nodes', { params: { botId } }).then((r) => r.data),
   create: (data: MenuNodeInput) => api.post('/menu-nodes', data).then((r) => r.data),
   update: (id: string, data: Partial<MenuNodeInput>) => api.patch(`/menu-nodes/${id}`, data).then((r) => r.data),
   move: (id: string, data: { parentId: string | null; orderedSiblingIds: string[] }) =>

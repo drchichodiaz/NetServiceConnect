@@ -9,7 +9,7 @@ import {
   TrendingUp, TrendingDown, ChevronDown, RefreshCw,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/auth.store';
-import { statsApi, botStatsApi } from '@/lib/api';
+import { statsApi, botsApi, BotSummary } from '@/lib/api';
 import clsx from 'clsx';
 
 type Period = 'today' | 'week' | 'month';
@@ -117,6 +117,10 @@ export default function DashboardPage() {
   const [periodOpen, setPeriodOpen] = useState(false);
   const [stats,      setStats]      = useState<any>(null);
   const [botStats,   setBotStats]   = useState<any>(null);
+  const [bots,       setBots]       = useState<BotSummary[]>([]);
+  // '' = todos los bots juntos
+  const [botFilter,  setBotFilter]  = useState('');
+  const [botLoading, setBotLoading] = useState(false);
   const [loading,    setLoading]    = useState(true);
 
   const firstName = user?.name?.split(' ')[0] ?? 'Admin';
@@ -124,14 +128,28 @@ export default function DashboardPage() {
   const fetchStats = useCallback(async (p: Period) => {
     setLoading(true);
     try {
-      const [data, botData] = await Promise.all([statsApi.get(p), botStatsApi.get(p)]);
+      const data = await statsApi.get(p);
       setStats(data);
-      setBotStats(botData);
     } catch {
       // silencioso — mantiene datos anteriores
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  // Las del bot van aparte: cambiar de bot no tiene por que recargar todo el dashboard.
+  useEffect(() => {
+    let cancelled = false;
+    setBotLoading(true);
+    botsApi.stats(period, botFilter || undefined)
+      .then((data) => { if (!cancelled) setBotStats(data); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setBotLoading(false); });
+    return () => { cancelled = true; };
+  }, [period, botFilter]);
+
+  useEffect(() => {
+    botsApi.list().then(setBots).catch(() => setBots([]));
   }, []);
 
   useEffect(() => { fetchStats(period); }, [period, fetchStats]);
@@ -246,18 +264,31 @@ export default function DashboardPage() {
 
         {/* ── Bot de WhatsApp ──────────────────────────────────────────────── */}
         <div className="card p-5 animate-fade-in" style={{ animationDelay: '80ms' }}>
-          <div className="flex items-center gap-2 mb-4">
+          <div className="flex items-center gap-2 mb-4 flex-wrap">
             <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: '#E8FBF0' }}>
               <Bot className="w-3.5 h-3.5" style={{ color: '#128C7E' }} />
             </div>
-            <div>
-              <h2 className="font-semibold text-ink text-sm">Bot de WhatsApp</h2>
-              <p className="text-xs text-ink-muted">{periodLabel} · configurable en Settings → Menú de WhatsApp</p>
+            <div className="flex-1 min-w-0">
+              <h2 className="font-semibold text-ink text-sm">{bots.length > 1 ? 'Bots de WhatsApp' : 'Bot de WhatsApp'}</h2>
+              <p className="text-xs text-ink-muted">{periodLabel} · configurable en Settings → Bots de WhatsApp</p>
             </div>
+            {/* Con un solo bot no hay nada que elegir — misma regla que el desglose por línea. */}
+            {bots.length > 1 && (
+              <select
+                value={botFilter}
+                onChange={(e) => setBotFilter(e.target.value)}
+                className="input text-xs py-1.5 w-auto"
+              >
+                <option value="">Todos los bots</option>
+                {bots.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            )}
           </div>
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            {loading ? (
+            {loading || botLoading ? (
               [1, 2, 3, 4].map((i) => <div key={i} className="h-14 rounded-lg bg-surface-muted animate-pulse" />)
             ) : (
               <>

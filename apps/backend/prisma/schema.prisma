@@ -40,6 +40,7 @@ model Tenant {
   botConfig        TenantBotConfig?
   branches         TenantBranch[]
   menuNodes        TenantMenuNode[]
+  bots             Bot[]
 }
 
 // ─── User ─────────────────────────────────────────────────────────────────────
@@ -145,6 +146,13 @@ model ChannelAccount {
   // pintar la lista sin pegarle a Meta 15 veces; statusCheckedAt dice que tan viejo es.
   platformStatus     String?
   statusCheckedAt    DateTime?
+  // Que bot atiende las conversaciones nuevas de esta linea. botId null = el bot por
+  // defecto del tenant (asi una linea recien conectada ya tiene bot sin configurar
+  // nada); botEnabled false = sin bot, la conversacion entra directo a los agentes.
+  // Son dos campos y no un solo botId porque "usar el predeterminado" y "ninguno"
+  // son cosas distintas y las dos necesitan poder expresarse.
+  botId              String?
+  botEnabled         Boolean              @default(true)
   webhookVerifyToken String               @default(cuid())
   isActive           Boolean              @default(true)
   signupStatus       EmbeddedSignupStatus @default(PENDING)
@@ -153,6 +161,7 @@ model ChannelAccount {
   updatedAt          DateTime             @updatedAt
 
   tenant        Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  bot           Bot?                 @relation(fields: [botId], references: [id], onDelete: SetNull)
   conversations Conversation[]
   campaigns     Campaign[]
   userAccess    UserChannelAccount[]
@@ -207,26 +216,26 @@ enum EmbeddedSignupStatus {
 // ─── Contact ──────────────────────────────────────────────────────────────────
 
 model Contact {
-  id        String   @id @default(cuid())
-  tenantId  String
+  id             String    @id @default(cuid())
+  tenantId       String
   // Dejo de ser la identidad del contacto y paso a ser un dato mas de la ficha: quien
   // es en cada canal vive en ContactIdentity. Nullable porque un contacto que llego
   // por Instagram o Messenger no tiene telefono y nunca lo vamos a conocer.
-  phone     String?
-  name      String?
-  email     String?
-  company   String?
-  avatarUrl String?
-  metadata  Json?
+  phone          String?
+  name           String?
+  email          String?
+  company        String?
+  avatarUrl      String?
+  metadata       Json?
   // Cuando la persona pidio no recibir mas envios masivos. Se guarda la fecha y no un
   // booleano para poder decir desde cuando y por que canal llego la baja.
   // Una baja NO impide responderle si escribe: corta los envios proactivos, nada mas.
   optedOutAt     DateTime?
   optedOutReason String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  tenant        Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   conversations Conversation[]
   identities    ContactIdentity[]
   campaignItems CampaignRecipient[]
@@ -283,6 +292,10 @@ model Conversation {
   // Contexto liviano del bot que necesita sobrevivir entre turnos (ej: coincidencias
   // pendientes de una busqueda de sucursal). No confundir con AuditLog, que es historico.
   botContext       Json?
+  // Bot con el que arranco la conversacion. Se fija al crearla y no cambia si despues
+  // le asignan otro bot a la linea: la conversacion en curso termina con el arbol en
+  // el que estaba navegando. Tambien es lo que separa las metricas por bot.
+  botId            String?
   closedReason     String?
   lastMessageAt    DateTime?
   lastMessageText  String?
@@ -302,6 +315,7 @@ model Conversation {
   tenant         Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   contact        Contact           @relation(fields: [contactId], references: [id])
   channelAccount ChannelAccount?   @relation(fields: [channelAccountId], references: [id], onDelete: SetNull)
+  bot            Bot?              @relation(fields: [botId], references: [id], onDelete: SetNull)
   assignedUser   User?             @relation("AssignedAgent", fields: [assignedUserId], references: [id])
   messages       Message[]
   notes          InternalNote[]
@@ -311,6 +325,7 @@ model Conversation {
   @@index([tenantId, status])
   @@index([tenantId, lastMessageAt])
   @@index([tenantId, channelAccountId])
+  @@index([botId])
 }
 
 enum ConversationStatus {
@@ -468,16 +483,16 @@ model QuickReply {
 // ─── Message Template (plantillas de WhatsApp, aprobadas por Meta) ────────────
 
 model MessageTemplate {
-  id             String   @id @default(cuid())
-  tenantId       String
+  id       String  @id @default(cuid())
+  tenantId String
   // WABA donde vive la plantilla. Meta las guarda por WABA, no por numero: una
   // plantilla creada en un WABA no existe para un numero de otro, y enviarla da
   // el error 132001 ("template name does not exist in the translation"). Un tenant
   // con lineas en varios WABA necesita la misma plantilla en cada uno.
-  wabaId         String?
-  name           String
-  language       String   @default("es")
-  category       String // MARKETING | UTILITY | AUTHENTICATION
+  wabaId   String?
+  name     String
+  language String  @default("es")
+  category String // MARKETING | UTILITY | AUTHENTICATION
 
   // ── Componentes de la plantilla ────────────────────────────────────────────
   // Meta arma la plantilla con hasta 4 componentes: HEADER, BODY, FOOTER y
@@ -519,7 +534,41 @@ model MessageTemplate {
   @@index([tenantId])
 }
 
+// ─── Bot ──────────────────────────────────────────────────────────────────────
+// Un tenant puede tener varios bots (ej: uno de ventas y otro de soporte) y cada
+// linea de WhatsApp elige cual la atiende (ChannelAccount.botId). Un bot es su arbol
+// de menu + la info de negocio que usa el modo IA + como arranca. La clave de OpenAI
+// sigue siendo del tenant (Tenant.openaiApiKey), no se repite por bot.
+//
+// isDefault: el que atiende las lineas sin bot elegido. Hay uno por tenant; lo
+// garantiza BotsService (se crea solo si falta), no un indice.
+
+model Bot {
+  id              String   @id @default(cuid())
+  tenantId        String
+  name            String
+  // Info de negocio (horarios, servicios, politicas, FAQs) que alimenta el prompt
+  // de los nodos AI_CHAT de este bot.
+  aiKnowledgeBase String?
+  // Si es true, una conversacion nueva arranca directo en modo IA en vez de
+  // mostrar el arbol de menu. El menu sigue siendo alcanzable si el cliente
+  // escribe "menu"/"volver" en medio del chat.
+  startInAiChat   Boolean  @default(false)
+  isDefault       Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  menuNodes       TenantMenuNode[]
+  channelAccounts ChannelAccount[]
+  conversations   Conversation[]
+
+  @@index([tenantId])
+}
+
 // ─── Tenant Bot Config (Fase D: textos del menu de WhatsApp por empresa) ──────
+// Sin uso desde que existe Bot: sus datos se copiaron al bot por defecto de cada
+// tenant en la migracion 20260923000000_bots. Queda como red de rollback.
 
 model TenantBotConfig {
   id              String   @id @default(cuid())
@@ -568,6 +617,7 @@ model TenantBranch {
 model TenantMenuNode {
   id         String       @id @default(cuid())
   tenantId   String
+  botId      String
   parentId   String?
   type       MenuNodeType @default(TEXT)
   title      String
@@ -581,10 +631,12 @@ model TenantMenuNode {
   updatedAt  DateTime     @updatedAt
 
   tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  bot      Bot              @relation(fields: [botId], references: [id], onDelete: Cascade)
   parent   TenantMenuNode?  @relation("MenuNodeChildren", fields: [parentId], references: [id], onDelete: Cascade)
   children TenantMenuNode[] @relation("MenuNodeChildren")
 
   @@index([tenantId, parentId])
+  @@index([botId, parentId])
 }
 
 enum MenuNodeType {
@@ -640,19 +692,19 @@ model AuditLog {
 // ─── Campañas (envío masivo de plantillas) ────────────────────────────────────
 
 enum CampaignStatus {
-  DRAFT     // cargada y revisada, todavia no se mando nada
-  RUNNING   // el worker esta procesando destinatarios
-  PAUSED    // frenada a mano, o por el limite diario de Meta
-  DONE      // no quedan pendientes
+  DRAFT // cargada y revisada, todavia no se mando nada
+  RUNNING // el worker esta procesando destinatarios
+  PAUSED // frenada a mano, o por el limite diario de Meta
+  DONE // no quedan pendientes
   CANCELLED // cancelada; los pendientes no se mandan nunca
 }
 
 enum CampaignRecipientStatus {
-  PENDING  // todavia no se intento
-  SENDING  // un worker la tomo (evita que dos procesos manden lo mismo)
-  SENT     // Meta la acepto
-  FAILED   // Meta la rechazo despues de los reintentos
-  SKIPPED  // no se mando a proposito (dado de baja, sin WhatsApp, repetido)
+  PENDING // todavia no se intento
+  SENDING // un worker la tomo (evita que dos procesos manden lo mismo)
+  SENT // Meta la acepto
+  FAILED // Meta la rechazo despues de los reintentos
+  SKIPPED // no se mando a proposito (dado de baja, sin WhatsApp, repetido)
 }
 
 /// Un envio de una plantilla a muchos contactos. El progreso vive en CampaignRecipient,

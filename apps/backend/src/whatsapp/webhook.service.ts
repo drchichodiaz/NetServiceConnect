@@ -5,6 +5,8 @@ import { ContactIdentityService, displayId } from '../contacts/contact-identity.
 import { EventBusService } from '../events/event-bus.service';
 import { MediaService } from '../media/media.service';
 import { BotService } from '../bot/bot.service';
+import { BotsService } from '../bots/bots.service';
+import { AssignmentService } from './assignment.service';
 
 /**
  * Palabras con las que alguien pide dejar de recibir envios masivos.
@@ -29,6 +31,8 @@ export class WebhookService {
     private eventBus: EventBusService,
     private mediaService: MediaService,
     private botService: BotService,
+    private bots: BotsService,
+    private assignmentService: AssignmentService,
     config: ConfigService,
   ) {
     this.apiVersion = config.get('META_API_VERSION') || 'v19.0';
@@ -152,17 +156,22 @@ export class WebhookService {
     const isNewConversation = !conversation;
 
     if (!conversation) {
-      // Fase D: las conversaciones nuevas arrancan en modo BOT (menú interactivo) y
-      // sin asignar — la asignación por carga se dispara recién cuando el bot deriva
-      // a un humano (opción "Contactar a un agente" o fallback de "Consultar orden").
+      // Cada linea elige su bot. Con bot, la conversacion arranca en modo BOT y sin
+      // asignar — la asignacion por carga se dispara recien cuando el bot deriva a un
+      // humano. Sin bot, entra directo a los agentes y se reparte en el momento, con la
+      // misma regla de permisos por linea que usa el bot al derivar.
+      const bot = await this.bots.resolveForAccount(tenantId, accountId);
+      const assignedUserId = bot ? null : await this.assignmentService.findLeastBusyAgent(tenantId, accountId);
+
       conversation = await this.prisma.conversation.create({
         data: {
           tenantId,
           contactId: contact.id,
           channelAccountId: accountId,
           status: 'OPEN',
-          mode: 'BOT',
-          botState: 'MENU',
+          ...(bot
+            ? { mode: 'BOT', botState: 'MENU', botId: bot.id }
+            : { mode: 'AGENT', assignedUserId, ...(assignedUserId && { assignedAt: now }) }),
           lastMessageAt: now,
           lastMessageText: body,
           lastInboundAt: now,
@@ -173,9 +182,15 @@ export class WebhookService {
       await this.prisma.auditLog.create({
         data: { tenantId, conversationId: conversation.id, action: 'conversation.created' },
       });
-      await this.prisma.auditLog.create({
-        data: { tenantId, conversationId: conversation.id, action: 'bot.started' },
-      });
+      if (bot) {
+        await this.prisma.auditLog.create({
+          data: { tenantId, conversationId: conversation.id, action: 'bot.started' },
+        });
+      } else if (assignedUserId) {
+        await this.prisma.auditLog.create({
+          data: { tenantId, conversationId: conversation.id, action: 'conversation.auto_assigned', metadata: { assignedUserId } },
+        });
+      }
     } else {
       await this.prisma.conversation.update({
         where: { id: conversation.id },
@@ -239,9 +254,9 @@ export class WebhookService {
     // Fase D: el bot responde recién después de que el mensaje del cliente ya quedó
     // guardado y visible en el historial (así el humano que eventualmente tome la
     // conversación ve todo el intercambio, incluido lo que pasó con el bot).
-    if (isNewConversation) {
+    if (isNewConversation && conversation.mode === 'BOT') {
       await this.botService.sendMenu(tenantId, conversation.id, phone);
-    } else if (conversation.mode === 'BOT') {
+    } else if (!isNewConversation && conversation.mode === 'BOT') {
       await this.botService.handleBotReply(tenantId, conversation.id, conversation.botState, phone, msg);
     }
   }

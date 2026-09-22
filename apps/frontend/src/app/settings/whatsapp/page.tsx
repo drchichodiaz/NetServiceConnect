@@ -1,11 +1,12 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
-import { whatsappApi } from '@/lib/api';
+import Link from 'next/link';
+import { whatsappApi, botsApi, BotSummary } from '@/lib/api';
 import { WhatsAppAccount, accountLabel } from '@/types';
 import EmbeddedSignup from '@/components/whatsapp/EmbeddedSignup';
 import {
   CheckCircle, Copy, Eye, EyeOff, Wifi, WifiOff, Plus, Star,
-  KeyRound, Loader2, AlertCircle, Zap, Pencil, RefreshCw, Phone, X, Check,
+  KeyRound, Loader2, AlertCircle, Zap, Pencil, RefreshCw, Phone, X, Check, Bot,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
@@ -18,10 +19,17 @@ export default function WhatsAppSettingsPage() {
   const [tab,         setTab]         = useState<ConnectTab>('embedded');
   const [showConnect, setShowConnect] = useState(false);
   const [isSyncing,   setIsSyncing]   = useState(false);
+  const [bots,        setBots]        = useState<BotSummary[]>([]);
 
   const load = useCallback(async () => {
     try {
-      setAccounts(await whatsappApi.listAccounts());
+      const [list, botList] = await Promise.all([
+        whatsappApi.listAccounts(),
+        // Si falla, las lineas se muestran igual, solo sin el selector de bot.
+        botsApi.list().catch(() => [] as BotSummary[]),
+      ]);
+      setAccounts(list);
+      setBots(botList);
     } catch {
       setAccounts([]);
     } finally {
@@ -116,7 +124,7 @@ export default function WhatsAppSettingsPage() {
           </div>
 
           {accounts.map((account) => (
-            <AccountCard key={account.id} account={account} onChanged={setAccounts} />
+            <AccountCard key={account.id} account={account} bots={bots} onChanged={setAccounts} />
           ))}
         </div>
       )}
@@ -170,8 +178,8 @@ export default function WhatsAppSettingsPage() {
 // ─── Tarjeta de una línea ─────────────────────────────────────────────────────
 
 function AccountCard({
-  account, onChanged,
-}: { account: WhatsAppAccount; onChanged: (accounts: WhatsAppAccount[]) => void }) {
+  account, bots, onChanged,
+}: { account: WhatsAppAccount; bots: BotSummary[]; onChanged: (accounts: WhatsAppAccount[]) => void }) {
   const [editing,    setEditing]    = useState(false);
   const [draft,      setDraft]      = useState(account.label ?? '');
   const [saving,     setSaving]     = useState(false);
@@ -330,6 +338,8 @@ function AccountCard({
             {account.displayName && <span className="text-ink-subtle">· {account.displayName}</span>}
           </p>
 
+          {bots.length > 0 && <BotSelector account={account} bots={bots} onChanged={onChanged} />}
+
           <div className="flex items-center gap-3 mt-2">
             <button
               onClick={() => setExpanded(!expanded)}
@@ -421,6 +431,67 @@ function AccountCard({
           <AccountRow label="Webhook Verify Token" value={account.webhookVerifyToken} mono secret />
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Qué bot atiende la línea ─────────────────────────────────────────────────
+// Tres casos que el backend guarda en dos campos: sin botId = el predeterminado (y
+// sigue al predeterminado si se cambia), un botId = ese bot, botEnabled false = sin bot.
+
+const NO_BOT = '__none__';
+const DEFAULT_BOT = '';
+
+function BotSelector({
+  account, bots, onChanged,
+}: { account: WhatsAppAccount; bots: BotSummary[]; onChanged: (accounts: WhatsAppAccount[]) => void }) {
+  const [saving, setSaving] = useState(false);
+  const defaultBot = bots.find((b) => b.isDefault);
+  const value = account.botEnabled === false
+    ? NO_BOT
+    : account.botId && bots.some((b) => b.id === account.botId) ? account.botId : DEFAULT_BOT;
+
+  async function change(next: string) {
+    setSaving(true);
+    try {
+      await whatsappApi.updateAccount(
+        account.id,
+        next === NO_BOT ? { botEnabled: false } : { botEnabled: true, botId: next || null },
+      );
+      onChanged(await whatsappApi.listAccounts());
+      toast.success(next === NO_BOT ? 'La línea atiende sin bot' : 'Bot de la línea actualizado');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'No se pudo cambiar el bot');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-2 space-y-1">
+      <div className="flex items-center gap-2">
+        <Bot className="w-3.5 h-3.5 text-ink-subtle shrink-0" />
+        <label className="text-xs text-ink-muted shrink-0">Atiende</label>
+        <select
+          value={value}
+          disabled={saving}
+          onChange={(e) => change(e.target.value)}
+          className="input text-xs py-1 w-auto max-w-[260px]"
+        >
+          <option value={DEFAULT_BOT}>Bot predeterminado{defaultBot ? ` (${defaultBot.name})` : ''}</option>
+          {bots.filter((b) => !b.isDefault).map((b) => (
+            <option key={b.id} value={b.id}>{b.name}</option>
+          ))}
+          <option value={NO_BOT}>Sin bot — directo a los agentes</option>
+        </select>
+        {saving && <Loader2 className="w-3.5 h-3.5 animate-spin text-ink-subtle" />}
+      </div>
+      <p className="text-[11px] text-ink-subtle pl-5">
+        {value === NO_BOT
+          ? 'Las conversaciones nuevas entran directo a la bandeja y se reparten entre los agentes que ven esta línea.'
+          : 'Vale para las conversaciones nuevas; las que están en curso terminan con el bot con el que empezaron.'}{' '}
+        <Link href="/settings/bot" className="underline hover:text-ink">Ver y editar los bots</Link>
+      </p>
     </div>
   );
 }

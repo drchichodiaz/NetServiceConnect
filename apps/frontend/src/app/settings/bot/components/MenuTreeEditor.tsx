@@ -27,7 +27,7 @@ const DEFAULT_TITLE: Record<MenuNodeType, string> = {
   AI_CHAT: 'Pregúntame lo que quieras',
 };
 
-export default function MenuTreeEditor() {
+export default function MenuTreeEditor({ botId, onCountChange }: { botId: string; onCountChange?: (count: number) => void }) {
   const [nodes, setNodes] = useState<MenuNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -40,13 +40,21 @@ export default function MenuTreeEditor() {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
   useEffect(() => {
+    setSelectedId(null);
+    setCollapsed(new Set());
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [botId]);
+
+  useEffect(() => {
+    if (!loading) onCountChange?.(nodes.length);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes.length, loading]);
 
   async function load() {
     setLoading(true);
     try {
-      const tree = await menuNodesApi.getTree();
+      const tree = await menuNodesApi.getTree(botId);
       setNodes(tree);
     } catch {
       toast.error('Error al cargar el menú del bot');
@@ -129,7 +137,7 @@ export default function MenuTreeEditor() {
 
   async function handleCreate(parentId: string | null, type: MenuNodeType) {
     try {
-      const created = await menuNodesApi.create({ parentId, type, title: DEFAULT_TITLE[type] });
+      const created = await menuNodesApi.create({ botId, parentId, type, title: DEFAULT_TITLE[type] });
       setNodes((prev) => [...prev, created]);
       if (parentId) {
         setCollapsed((prev) => {
@@ -162,7 +170,7 @@ export default function MenuTreeEditor() {
   async function handleDelete(id: string) {
     try {
       await menuNodesApi.remove(id);
-      const tree = await menuNodesApi.getTree();
+      const tree = await menuNodesApi.getTree(botId);
       setNodes(tree);
       if (selectedId === id) setSelectedId(null);
       toast.success('Opción eliminada');

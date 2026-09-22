@@ -47,6 +47,8 @@ export class WhatsAppAccountsService {
     statusCheckedAt: true,
     signupStatus: true,
     isActive: true,
+    botId: true,
+    botEnabled: true,
     webhookVerifyToken: true,
     createdAt: true,
     updatedAt: true,
@@ -177,14 +179,28 @@ export class WhatsAppAccountsService {
     };
   }
 
-  /** Renombrar la linea (el label que ve el agente en el inbox) y reordenarla. */
-  async update(tenantId: string, id: string, data: { label?: string | null; sortOrder?: number }) {
+  /**
+   * Renombrar la linea (el label que ve el agente en el inbox), reordenarla y elegir
+   * que bot la atiende. El cambio de bot vale para las conversaciones nuevas: las que
+   * estan en curso terminan con el bot con el que arrancaron (Conversation.botId).
+   */
+  async update(
+    tenantId: string,
+    id: string,
+    data: { label?: string | null; sortOrder?: number; botId?: string | null; botEnabled?: boolean },
+  ) {
     await this.findOneOrThrow(tenantId, id);
+    if (data.botId) {
+      const bot = await this.prisma.bot.findFirst({ where: { id: data.botId, tenantId }, select: { id: true } });
+      if (!bot) throw new NotFoundException('Bot no encontrado');
+    }
     await this.prisma.channelAccount.update({
       where: { id },
       data: {
         ...(data.label !== undefined && { label: data.label?.trim() || null }),
         ...(data.sortOrder !== undefined && { sortOrder: data.sortOrder }),
+        ...(data.botId !== undefined && { botId: data.botId || null }),
+        ...(data.botEnabled !== undefined && { botEnabled: data.botEnabled }),
       },
     });
     return this.prisma.channelAccount.findUnique({

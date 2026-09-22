@@ -1,11 +1,15 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { LookupService, LookupConfig } from '../common/lookup.service';
+import { BotsService } from '../bots/bots.service';
 
 const NODE_TYPES = ['MENU', 'TEXT', 'ORDER_LOOKUP', 'AGENT', 'AI_CHAT'] as const;
 type NodeType = (typeof NODE_TYPES)[number];
 
 export interface MenuNodeDto {
+  // Bot al que pertenece. Obligatorio si no hay parentId (una opción de la raíz);
+  // con parentId se hereda del padre.
+  botId?: string;
   parentId?: string | null;
   type?: NodeType;
   title: string;
@@ -34,6 +38,7 @@ export class MenuNodesService {
   constructor(
     private prisma: PrismaService,
     private lookup: LookupService,
+    private bots: BotsService,
   ) {}
 
   /**
@@ -60,9 +65,11 @@ export class MenuNodesService {
     };
   }
 
-  getTree(tenantId: string) {
+  async getTree(tenantId: string, botId: string) {
+    if (!botId) throw new BadRequestException('Falta indicar el bot');
+    await this.bots.findOneOrThrow(tenantId, botId);
     return this.prisma.tenantMenuNode.findMany({
-      where: { tenantId },
+      where: { tenantId, botId },
       orderBy: [{ parentId: 'asc' }, { sortOrder: 'asc' }],
     });
   }
@@ -73,13 +80,20 @@ export class MenuNodesService {
     if (!NODE_TYPES.includes(type)) throw new BadRequestException('Tipo de opción inválido');
 
     const parentId = dto.parentId ?? null;
-    await this.assertParentIsMenu(tenantId, parentId);
+    const parent = await this.assertParentIsMenu(tenantId, parentId);
+    const botId = parent?.botId ?? dto.botId;
+    if (!botId) throw new BadRequestException('Falta indicar el bot');
+    if (parent && dto.botId && dto.botId !== parent.botId) {
+      throw new BadRequestException('La opción padre es de otro bot');
+    }
+    await this.bots.findOneOrThrow(tenantId, botId);
 
-    const siblingCount = await this.prisma.tenantMenuNode.count({ where: { tenantId, parentId } });
+    const siblingCount = await this.prisma.tenantMenuNode.count({ where: { tenantId, botId, parentId } });
 
     return this.prisma.tenantMenuNode.create({
       data: {
         tenantId,
+        botId,
         parentId,
         type,
         title: dto.title.trim(),
@@ -128,11 +142,15 @@ export class MenuNodesService {
       throw new BadRequestException('orderedSiblingIds debe incluir el propio nodo');
     }
 
-    await this.assertParentIsMenu(tenantId, dto.parentId);
+    // Mover entre bots no existe: el arbol de un bot solo se reordena adentro de ese bot.
+    const parent = await this.assertParentIsMenu(tenantId, dto.parentId);
+    if (parent && parent.botId !== node.botId) {
+      throw new BadRequestException('No se puede mover una opción a otro bot');
+    }
     if (dto.parentId) await this.assertNoCycle(tenantId, id, dto.parentId);
 
     const siblings = await this.prisma.tenantMenuNode.findMany({
-      where: { tenantId, id: { in: dto.orderedSiblingIds } },
+      where: { tenantId, botId: node.botId, id: { in: dto.orderedSiblingIds } },
       select: { id: true },
     });
     if (siblings.length !== dto.orderedSiblingIds.length) {
@@ -146,14 +164,15 @@ export class MenuNodesService {
       ),
     ]);
 
-    return this.getTree(tenantId);
+    return this.getTree(tenantId, node.botId);
   }
 
   private async assertParentIsMenu(tenantId: string, parentId: string | null) {
-    if (!parentId) return;
+    if (!parentId) return null;
     const parent = await this.prisma.tenantMenuNode.findFirst({ where: { id: parentId, tenantId } });
     if (!parent) throw new NotFoundException('Nodo padre no encontrado');
     if (parent.type !== 'MENU') throw new BadRequestException('Solo una opción de tipo Submenú puede tener opciones adentro');
+    return parent;
   }
 
   private async assertNoCycle(tenantId: string, nodeId: string, newParentId: string) {

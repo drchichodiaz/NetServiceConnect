@@ -7,6 +7,7 @@ import { AssignmentService } from '../whatsapp/assignment.service';
 import { WhatsAppAccountsService, WhatsAppAccountCreds } from '../whatsapp/accounts.service';
 import { OpenAiClientService } from '../common/openai-client.service';
 import { LookupService, LookupConfig } from '../common/lookup.service';
+import { BotsService } from '../bots/bots.service';
 
 type MenuNodeType = 'MENU' | 'TEXT' | 'ORDER_LOOKUP' | 'AGENT' | 'AI_CHAT';
 
@@ -73,15 +74,16 @@ export class BotService {
     private accounts: WhatsAppAccountsService,
     private openaiClient: OpenAiClientService,
     private lookup: LookupService,
+    private bots: BotsService,
     config: ConfigService,
   ) {
     this.apiVersion = config.get('META_API_VERSION') || 'v19.0';
   }
 
-  /** Arranca una conversación nueva — en el árbol de menú, o directo en modo IA si el tenant lo configuró así. */
+  /** Arranca una conversación nueva — en el árbol de menú, o directo en modo IA si su bot está configurado así. */
   async sendMenu(tenantId: string, conversationId: string, phone: string) {
-    const config = await this.prisma.tenantBotConfig.findUnique({ where: { tenantId } });
-    if (config?.startInAiChat) {
+    const bot = await this.getBot(tenantId, conversationId);
+    if (bot.startInAiChat) {
       return this.startAiChat(tenantId, conversationId, phone, null);
     }
     return this.enterNode(tenantId, conversationId, phone, null);
@@ -141,8 +143,9 @@ export class BotService {
       }
     }
 
+    const botId = await this.getBotId(tenantId, conversationId);
     const children = await this.prisma.tenantMenuNode.findMany({
-      where: { tenantId, parentId: nodeId, active: true },
+      where: { tenantId, botId, parentId: nodeId, active: true },
       orderBy: [{ sortOrder: 'asc' }],
     });
 
@@ -210,8 +213,10 @@ export class BotService {
       return this.enterNode(tenantId, conversationId, phone, current?.parentId ?? null, account);
     }
 
+    // El botId importa en la raíz: parentId null lo comparten las opciones de todos los bots.
+    const botId = await this.getBotId(tenantId, conversationId);
     const child = optionId
-      ? await this.prisma.tenantMenuNode.findFirst({ where: { id: optionId, tenantId, parentId: nodeId, active: true } })
+      ? await this.prisma.tenantMenuNode.findFirst({ where: { id: optionId, tenantId, botId, parentId: nodeId, active: true } })
       : null;
 
     if (!child) {
@@ -252,8 +257,8 @@ export class BotService {
   // ─── Modo IA: chat libre con OpenAI, usando la info del negocio del tenant ─
 
   /**
-   * `node` es null cuando el tenant configuró "arrancar directo en modo IA"
-   * (TenantBotConfig.startInAiChat) — en ese caso no hay un nodo del árbol de
+   * `node` es null cuando el bot está configurado para "arrancar directo en modo IA"
+   * (Bot.startInAiChat) — en ese caso no hay un nodo del árbol de
    * menú detrás, así que se usa el texto de bienvenida por defecto y el nivel
    * al que vuelve un "menú"/"volver" es la raíz del árbol (nodeId: null).
    */
@@ -269,8 +274,8 @@ export class BotService {
       return this.handoffToHuman(tenantId, conversationId, 'whatsapp_account_unavailable');
     }
 
-    const config = await this.prisma.tenantBotConfig.findUnique({ where: { tenantId } });
-    const knowledgeBase = config?.aiKnowledgeBase?.trim();
+    const bot = await this.getBot(tenantId, conversationId);
+    const knowledgeBase = bot.aiKnowledgeBase?.trim();
     const resolved = knowledgeBase ? await this.openaiClient.getClient(tenantId) : null;
 
     // Sin info del negocio o sin clave de OpenAI resoluble, no tiene sentido entrar
@@ -324,8 +329,8 @@ export class BotService {
 
     // Se busca fresco en cada turno (no se cachea en botContext) para que un admin
     // corrigiendo la info del negocio a mitad de conversación tenga efecto inmediato.
-    const config = await this.prisma.tenantBotConfig.findUnique({ where: { tenantId } });
-    const knowledgeBase = config?.aiKnowledgeBase?.trim();
+    const bot = await this.getBot(tenantId, conversationId);
+    const knowledgeBase = bot.aiKnowledgeBase?.trim();
     const resolved = knowledgeBase ? await this.openaiClient.getClient(tenantId) : null;
 
     if (!knowledgeBase || !resolved) {
@@ -425,8 +430,9 @@ ${knowledgeBase}
     // tildes: un cliente escribiendo el nombre de su propia opción sin acentos
     // (muy común en WhatsApp) no debe fallar el match por eso.
     const normalizedQuery = this.normalizeText(query);
+    const botId = await this.getBotId(tenantId, conversationId);
     const children = await this.prisma.tenantMenuNode.findMany({
-      where: { tenantId, parentId: nodeId, active: true },
+      where: { tenantId, botId, parentId: nodeId, active: true },
       orderBy: [{ sortOrder: 'asc' }],
     });
     const matches = children
@@ -759,6 +765,24 @@ ${knowledgeBase}
       where: { id: conversationId },
       data: { botContext: { ...current, ...patch } },
     });
+  }
+
+  /**
+   * Bot de la conversación. Se fija al crearla (webhook); si quedó en null — porque
+   * borraron el bot a mitad de camino (FK SET NULL) — se sigue con el predeterminado
+   * y se deja anotado, para que el resto de la conversación no cambie de bot otra vez.
+   */
+  private async getBot(tenantId: string, conversationId: string) {
+    const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId }, select: { bot: true } });
+    if (conv?.bot) return conv.bot;
+    const fallback = await this.bots.getDefault(tenantId);
+    await this.prisma.conversation.update({ where: { id: conversationId }, data: { botId: fallback.id } });
+    return fallback;
+  }
+
+  private async getBotId(tenantId: string, conversationId: string): Promise<string> {
+    const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId }, select: { botId: true } });
+    return conv?.botId ?? (await this.getBot(tenantId, conversationId)).id;
   }
 
   private async resolveNode(tenantId: string, nodeId: string): Promise<MenuNode | null> {

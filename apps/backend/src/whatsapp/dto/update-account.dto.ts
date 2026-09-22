@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsInt, MaxLength } from 'class-validator';
+import { IsOptional, IsString, IsInt, IsBoolean, MaxLength } from 'class-validator';
 
 export class UpdateAccountDto {
   /** Nombre operativo de la linea, ej: "Sucursal Palermo". Vacio = volver a mostrar el numero. */
@@ -10,4 +10,14 @@ export class UpdateAccountDto {
   @IsOptional()
   @IsInt()
   sortOrder?: number;
+
+  /** Bot que atiende la linea. null = el bot por defecto del tenant. */
+  @IsOptional()
+  @IsString()
+  botId?: string | null;
+
+  /** false = la linea no tiene bot: las conversaciones entran directo a los agentes. */
+  @IsOptional()
+  @IsBoolean()
+  botEnabled?: boolean;
 }
