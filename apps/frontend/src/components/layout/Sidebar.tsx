@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { MessageSquare, Users, Settings, LogOut, LayoutDashboard, Zap, Sparkles, BookUser, ShieldCheck, Building2, FileText, Bot, UserCircle, Megaphone, LifeBuoy } from 'lucide-react';
+import { MessageSquare, Users, Settings, LogOut, LayoutDashboard, Zap, Sparkles, BookUser, ShieldCheck, Building2, FileText, Bot, UserCircle, Megaphone, LifeBuoy, Handshake } from 'lucide-react';
 import { useState } from 'react';
 import { useAuthStore } from '@/store/auth.store';
 import SupportModal from '@/components/support/SupportModal';
@@ -23,6 +23,7 @@ const navItems = [
   { href: '/settings/bot',           icon: Bot,          label: 'Bots de WhatsApp', roles: ['ADMIN', 'SUPERVISOR'] },
   { href: '/settings/system',        icon: ShieldCheck,  label: 'Sistema',       superAdminOnly: true },
   { href: '/settings/tenants',       icon: Building2,    label: 'Empresas',      superAdminOnly: true },
+  { href: '/settings/partners',      icon: Handshake,    label: 'Partners',      superAdminOnly: true },
 ];
 
 export default function Sidebar({ user }: Props) {

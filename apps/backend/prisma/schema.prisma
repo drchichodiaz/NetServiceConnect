@@ -23,6 +23,18 @@ model Tenant {
   isActive     Boolean  @default(true)
   openaiApiKey String?
   openaiModel  String?
+  // Quien vendio esta cuenta. Null = venta directa, que es como estan todas las que ya
+  // existian. Se puede corregir despues: el primer tiempo la atribucion se carga a mano
+  // mirando papeles, y equivocarse una vez no puede ser irreversible.
+  partnerId    String?
+  // Cuando se cerro la venta. Puede no coincidir con createdAt: el partner vende y
+  // avisa, y el alta la hacemos nosotros despues.
+  soldAt       DateTime?
+  // Lo acordado para ESTA venta en particular, cuando difiere del trato general del
+  // partner (que vive en Partner.agreement). Texto libre a proposito: el sistema no
+  // calcula comisiones — no hay precios modelados — y un campo numerico daria a
+  // entender que si.
+  partnerNote  String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -43,6 +55,44 @@ model Tenant {
   bots             Bot[]
   contactTags      ContactTag[]
   supportRequests  SupportRequest[]
+  partner          Partner?          @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+
+  @@index([partnerId])
+}
+
+// ─── Partner ──────────────────────────────────────────────────────────────────
+
+/// Quien vende el sistema y nos trae clientes.
+///
+/// NO es un Tenant ni un User: es gente de la operacion comercial de quien opera este
+/// servidor, no de ninguna empresa cliente. Por eso no tiene tenantId y solo lo ve el
+/// super admin, igual que SystemConfig.
+///
+/// Tampoco entra al sistema: hoy no tiene acceso ni pantalla propia. Se modela aparte
+/// de User justamente para que el dia que se le quiera dar acceso alcance con
+/// asociarle un usuario, sin rehacer la atribucion que ya este cargada.
+model Partner {
+  id       String  @id @default(cuid())
+  name     String
+  email    String?
+  phone    String?
+  /// Cedula o RUC. En Panama es lo que hace falta para poder pagarle.
+  taxId    String?
+  /// El trato general: "20% los primeros 12 meses". Texto libre y no un porcentaje
+  /// numerico porque el sistema no liquida nada — no hay precios modelados — y un
+  /// numero prometeria un calculo que no existe.
+  agreement String?
+  notes     String?
+  /// Un partner que dejo de vender se desactiva, no se borra: sus ventas siguen siendo
+  /// suyas y el historico tiene que poder explicarse.
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Las empresas que trajo. Si se borra el partner quedan sin partner (SetNull), no
+  /// se borran con el.
+  tenants Tenant[]
 }
 
 // ─── User ─────────────────────────────────────────────────────────────────────

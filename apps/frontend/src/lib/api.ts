@@ -338,16 +338,61 @@ export const systemConfigApi = {
 
 // ─── Tenants (alta de empresas — solo operador de la plataforma) ──────────────
 
+export interface Partner {
+  id: string;
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  taxId?: string | null;
+  agreement?: string | null;
+  notes?: string | null;
+  isActive: boolean;
+  createdAt: string;
+  /** Empresas vendidas: el total y cuántas siguen activas. */
+  tenantCount?: number;
+  activeTenantCount?: number;
+}
+
 export const tenantsApi = {
   list: () => api.get('/tenants').then((r) => r.data),
+  get: (id: string) => api.get(`/tenants/${id}`).then((r) => r.data),
   create: (data: {
     name: string;
     slug: string;
     plan?: string;
+    partnerId?: string;
+    soldAt?: string;
+    partnerNote?: string;
     adminName: string;
     adminEmail: string;
     adminPassword: string;
   }) => api.post('/tenants', data).then((r) => r.data),
+  update: (
+    id: string,
+    data: {
+      name?: string;
+      slug?: string;
+      plan?: string;
+      isActive?: boolean;
+      /** Cadena vacía = venta directa (le saca el partner). */
+      partnerId?: string;
+      soldAt?: string;
+      partnerNote?: string;
+    },
+  ) => api.patch(`/tenants/${id}`, data).then((r) => r.data),
+};
+
+// ─── Partners (quién vendió cada cuenta — solo operador de la plataforma) ──────
+
+export const partnersApi = {
+  list: (): Promise<Partner[]> => api.get('/partners').then((r) => r.data),
+  get: (id: string): Promise<Partner & { tenants: any[] }> =>
+    api.get(`/partners/${id}`).then((r) => r.data),
+  create: (data: Partial<Partner> & { name: string }): Promise<Partner> =>
+    api.post('/partners', data).then((r) => r.data),
+  update: (id: string, data: Partial<Partner>): Promise<Partner> =>
+    api.patch(`/partners/${id}`, data).then((r) => r.data),
+  remove: (id: string) => api.delete(`/partners/${id}`).then((r) => r.data),
 };
 
 // ─── Message Templates ─────────────────────────────────────────────────────────

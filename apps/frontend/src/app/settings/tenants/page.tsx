@@ -1,7 +1,8 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { tenantsApi } from '@/lib/api';
-import { Building2, Plus, Loader2, X, Copy, Check, RefreshCw } from 'lucide-react';
+import { tenantsApi, partnersApi, type Partner } from '@/lib/api';
+import ModalPortal from '@/components/ui/ModalPortal';
+import { Building2, Plus, Loader2, X, Copy, Check, RefreshCw, Pencil, Handshake } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { validarPassword, PASSWORD_MIN_LENGTH } from '@/lib/password';
 
@@ -12,6 +13,10 @@ interface TenantRow {
   plan: string;
   isActive: boolean;
   createdAt: string;
+  partnerId?: string | null;
+  soldAt?: string | null;
+  partnerNote?: string | null;
+  partner?: { id: string; name: string; isActive: boolean } | null;
   _count: { users: number; conversations: number };
 }
 
@@ -83,7 +88,13 @@ export default function TenantsPage() {
 
   const [form, setForm] = useState({
     name: '', slug: '', adminName: '', adminEmail: '', adminPassword: generatePassword(),
+    partnerId: '', partnerNote: '',
   });
+
+  // Quién vendió cada cuenta. Solo se ofrecen los que siguen vendiendo: una venta nueva
+  // atribuida a un partner dado de baja es un error de carga, y el backend la rechaza.
+  const [partners, setPartners] = useState<Partner[]>([]);
+  const [editing, setEditing] = useState<TenantRow | null>(null);
 
   function load() {
     setIsLoading(true);
@@ -91,6 +102,10 @@ export default function TenantsPage() {
   }
 
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    partnersApi.list().then(setPartners).catch(() => setPartners([]));
+  }, []);
 
   function handleNameChange(name: string) {
     setForm((f) => ({ ...f, name, slug: slugTouched ? f.slug : slugify(name) }));
@@ -126,7 +141,10 @@ export default function TenantsPage() {
     try {
       setResult({ tenant: created.tenant, admin: created.admin, password: form.adminPassword });
       setTenants((prev) => [created.tenant, ...prev]);
-      setForm({ name: '', slug: '', adminName: '', adminEmail: '', adminPassword: generatePassword() });
+      setForm({
+        name: '', slug: '', adminName: '', adminEmail: '', adminPassword: generatePassword(),
+        partnerId: '', partnerNote: '',
+      });
       setSlugTouched(false);
       setShowForm(false);
     } catch {
@@ -192,6 +210,32 @@ export default function TenantsPage() {
               className="input font-mono text-sm"
             />
 
+            {/* Quién vendió. El flujo real: el partner cierra la venta, nos avisa, y el
+                alta la hacemos nosotros anotando quién la trajo. */}
+            {partners.length > 0 && (
+              <>
+                <p className="text-xs font-semibold text-ink-muted uppercase tracking-wider pt-2">Venta</p>
+                <select
+                  value={form.partnerId}
+                  onChange={(e) => setForm((f) => ({ ...f, partnerId: e.target.value }))}
+                  className="input w-full"
+                >
+                  <option value="">Venta directa (sin partner)</option>
+                  {partners.filter((p) => p.isActive).map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+                {form.partnerId && (
+                  <input
+                    placeholder="Acuerdo de esta venta, si difiere del general (opcional)"
+                    value={form.partnerNote}
+                    onChange={(e) => setForm((f) => ({ ...f, partnerNote: e.target.value }))}
+                    className="input w-full"
+                  />
+                )}
+              </>
+            )}
+
             <p className="text-xs font-semibold text-ink-muted uppercase tracking-wider pt-2">Administrador inicial</p>
             <input
               required placeholder="Nombre completo" value={form.adminName}
@@ -246,16 +290,165 @@ export default function TenantsPage() {
                     {!t.isActive && <span className="text-[10px] text-red-400 font-medium">Inactiva</span>}
                   </div>
                   <p className="text-xs text-ink-subtle truncate font-mono">{t.slug}</p>
+                  {t.partner && (
+                    <p className="text-[11px] text-ink-muted truncate flex items-center gap-1 mt-0.5">
+                      <Handshake className="w-2.5 h-2.5 shrink-0" />
+                      {t.partner.name}
+                    </p>
+                  )}
                 </div>
                 <div className="text-right shrink-0">
                   <p className="text-xs text-ink-muted">{t._count.users} usuarios</p>
                   <p className="text-[11px] text-ink-subtle">{t._count.conversations} conversaciones</p>
                 </div>
+                <button
+                  onClick={() => setEditing(t)}
+                  className="w-7 h-7 rounded-lg flex items-center justify-center text-ink-subtle hover:text-ink hover:bg-black/5 shrink-0"
+                  title="Editar empresa"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
               </div>
             ))}
           </div>
         )}
       </div>
+
+      {editing && (
+        <EditTenantModal
+          tenant={editing}
+          partners={partners}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); load(); }}
+        />
+      )}
     </div>
+  );
+}
+
+// ─── Edición de una empresa ───────────────────────────────────────────────────
+
+/**
+ * Hasta ahora una empresa creada no se podía tocar desde el panel: el endpoint existía
+ * pero nadie lo llamaba, y `isActive` no se podía cambiar ni por API. Eso dejaba borrar
+ * como única salida para un cliente que deja de pagar — y borrar se lleva puestas sus
+ * conversaciones, contactos, plantillas y campañas, para siempre.
+ */
+function EditTenantModal({
+  tenant,
+  partners,
+  onClose,
+  onSaved,
+}: {
+  tenant: TenantRow;
+  partners: Partner[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState(tenant.name);
+  const [plan, setPlan] = useState(tenant.plan ?? '');
+  const [isActive, setIsActive] = useState(tenant.isActive);
+  const [partnerId, setPartnerId] = useState(tenant.partnerId ?? '');
+  const [partnerNote, setPartnerNote] = useState(tenant.partnerNote ?? '');
+  const [saving, setSaving] = useState(false);
+
+  // Al corregir una atribución vieja puede hacer falta un partner que ya no vende, así
+  // que acá sí se listan los inactivos — a diferencia del alta, donde no se ofrecen.
+  const options = partners.filter((p) => p.isActive || p.id === tenant.partnerId);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await tenantsApi.update(tenant.id, { name, plan, isActive, partnerId, partnerNote });
+      toast.success('Empresa actualizada');
+      onSaved();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'No se pudo guardar');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <ModalPortal>
+      <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 sm:p-6">
+        <form onSubmit={handleSubmit} className="card w-full max-w-md p-6 my-4">
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <h2 className="text-base font-bold text-ink" style={{ letterSpacing: '-0.02em' }}>Editar empresa</h2>
+              <p className="text-xs text-ink-subtle font-mono">{tenant.slug}</p>
+            </div>
+            <button type="button" onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center text-ink-subtle hover:bg-black/5">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <label className="text-[11px] text-ink-subtle block mb-1">Nombre</label>
+              <input required value={name} onChange={(e) => setName(e.target.value)} className="input w-full" />
+            </div>
+
+            <div>
+              <label className="text-[11px] text-ink-subtle block mb-1">Plan</label>
+              <input value={plan} onChange={(e) => setPlan(e.target.value)} placeholder="starter" className="input w-full" />
+            </div>
+
+            <div>
+              <label className="text-[11px] text-ink-subtle block mb-1">Vendida por</label>
+              <select value={partnerId} onChange={(e) => setPartnerId(e.target.value)} className="input w-full">
+                <option value="">Venta directa (sin partner)</option>
+                {options.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}{p.isActive ? '' : ' (ya no vende)'}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {partnerId && (
+              <div>
+                <label className="text-[11px] text-ink-subtle block mb-1">Acuerdo de esta venta</label>
+                <input
+                  value={partnerNote}
+                  onChange={(e) => setPartnerNote(e.target.value)}
+                  placeholder="Solo si difiere del acuerdo general del partner"
+                  className="input w-full"
+                />
+              </div>
+            )}
+
+            {/* El interruptor de corte. Es la alternativa a borrar, que es irreversible. */}
+            <label
+              className="flex items-start gap-2 cursor-pointer rounded-lg p-3"
+              style={{ background: isActive ? 'var(--surface-muted)' : '#FEF2F2' }}
+            >
+              <input
+                type="checkbox"
+                checked={!isActive}
+                onChange={(e) => setIsActive(!e.target.checked)}
+                className="w-3.5 h-3.5 mt-0.5 accent-red-500"
+              />
+              <span className="text-xs text-ink">
+                Desactivar esta empresa
+                <span className="block text-[11px] text-ink-subtle">
+                  Nadie de la empresa va a poder entrar, con un aviso al intentarlo. No se borra nada:
+                  conversaciones, contactos y plantillas quedan intactos y vuelven al reactivarla.
+                </span>
+              </span>
+            </label>
+          </div>
+
+          <div className="flex gap-2 mt-5">
+            <button type="button" onClick={onClose} className="btn-secondary flex-1">Cancelar</button>
+            <button type="submit" disabled={saving || !name.trim()} className="btn-primary flex-1">
+              {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              Guardar
+            </button>
+          </div>
+        </form>
+      </div>
+    </ModalPortal>
   );
 }

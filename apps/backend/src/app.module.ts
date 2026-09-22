@@ -7,6 +7,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { EventsModule } from './events/events.module';
 import { AuthModule } from './auth/auth.module';
 import { TenantsModule } from './tenants/tenants.module';
+import { PartnersModule } from './partners/partners.module';
 import { UsersModule } from './users/users.module';
 import { WhatsAppModule } from './whatsapp/whatsapp.module';
 import { ContactsModule } from './contacts/contacts.module';
@@ -40,6 +41,7 @@ import { RequestLogInterceptor } from './common/request-log.interceptor';
     EventsModule,
     AuthModule,
     TenantsModule,
+    PartnersModule,
     UsersModule,
     WhatsAppModule,
     ContactsModule,
