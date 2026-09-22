@@ -3,7 +3,13 @@ import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { PrismaService } from '../prisma/prisma.service';
 
-/** Resuelve el cliente de OpenAI de un tenant (clave propia, o la de .env como fallback). */
+/**
+ * Resuelve el cliente de OpenAI de un tenant (clave propia, o la de .env como fallback).
+ *
+ * Vive dentro de este modulo y NO se exporta: el unico que lo puede usar es el gateway,
+ * que mide lo que se consume. Si esto volviera a estar disponible para cualquier modulo,
+ * la primera funcionalidad nueva con IA gastaria sin dejar rastro.
+ */
 @Injectable()
 export class OpenAiClientService {
   private readonly fallbackApiKey: string;

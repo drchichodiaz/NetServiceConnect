@@ -10,6 +10,6 @@ export class AiController {
 
   @Post('suggest')
   suggest(@CurrentUser() user: any, @Param('conversationId') conversationId: string) {
-    return this.service.suggestReply(user.tenantId, conversationId);
+    return this.service.suggestReply(user.tenantId, conversationId, user.id);
   }
 }

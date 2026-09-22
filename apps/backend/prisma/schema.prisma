@@ -55,6 +55,7 @@ model Tenant {
   bots             Bot[]
   contactTags      ContactTag[]
   supportRequests  SupportRequest[]
+  aiUsages         AiUsage[]
   partner          Partner?          @relation(fields: [partnerId], references: [id], onDelete: SetNull)
 
   @@index([partnerId])
@@ -120,6 +121,7 @@ model User {
   internalNotes InternalNote[]
   auditLogs     AuditLog[]
   supportRequests SupportRequest[]
+  aiUsages        AiUsage[]
 
   // Unico en todo el sistema, no por empresa: con el email repetido entre empresas el
   // login no puede saber a cual entrar (se quedaba con el primero que encontraba) y
@@ -375,6 +377,7 @@ model Conversation {
   notes          InternalNote[]
   tags           ConversationTag[]
   auditLogs      AuditLog[]
+  aiUsages       AiUsage[]
 
   @@index([tenantId, status])
   @@index([tenantId, lastMessageAt])
@@ -769,6 +772,16 @@ model SystemConfig {
   // A donde llegan los reportes del boton de soporte. Es por entorno y no por empresa
   // a proposito: quien atiende el reporte es quien opera ESTE servidor, no el tenant.
   supportEmail     String?
+  // ─── Creditos de IA ───
+  // Parametros comerciales del motor de creditos. Viven en la base y no en el codigo
+  // porque son precio, no logica: se ajustan sin redeploy y quedan igual en los dos
+  // entornos. Un crédito vale aiCreditUsdValue dolares de venta; el markup es lo que
+  // se le aplica al costo real del proveedor antes de convertirlo a creditos.
+  aiMarkupFactor    Decimal @default(2)     @db.Decimal(6, 3)
+  aiCreditUsdValue  Decimal @default(0.001) @db.Decimal(12, 6)
+  // Piso por operacion: sin esto, las llamadas mas baratas redondean a cero creditos
+  // y se regalan.
+  aiMinCreditsPerOp Int     @default(1)
 }
 
 // ─── Soporte ──────────────────────────────────────────────────────────────────
@@ -925,4 +938,92 @@ model CampaignRecipient {
   @@unique([campaignId, contactId])
   /// El worker busca por aca: pendientes de una campaña, en orden de carga.
   @@index([campaignId, status])
+}
+
+// ─── Consumo de IA ────────────────────────────────────────────────────────────
+
+/// Precio de un modelo de IA, en USD por millon de tokens.
+///
+/// La tabla es INMUTABLE a proposito: cambiar un precio es insertar una fila nueva con
+/// otra fecha de vigencia, nunca editar la anterior. Es lo unico que permite responder
+/// en marzo por que se cobro lo que se cobro en enero — cada uso guarda con que fila se
+/// calculo, asi que el numero viejo se puede reproducir aunque el precio haya cambiado
+/// tres veces desde entonces.
+model AiPrice {
+  id       String @id @default(cuid())
+  provider String @default("openai")
+  model    String
+
+  inputPerMTok       Decimal @db.Decimal(12, 6)
+  /// Los tokens de entrada que el proveedor sirve desde su cache salen mas baratos.
+  /// Cuando un modelo no tiene descuento, se carga el mismo precio que la entrada normal.
+  cachedInputPerMTok Decimal @db.Decimal(12, 6)
+  outputPerMTok      Decimal @db.Decimal(12, 6)
+
+  /// Desde cuando rige. Para cada uso se toma la fila vigente mas reciente a esa fecha.
+  effectiveFrom DateTime @default(now())
+  /// De donde salio el precio (lista publica, acuerdo, etc). Texto libre.
+  source        String?
+  createdAt     DateTime @default(now())
+
+  usages AiUsage[]
+
+  @@unique([provider, model, effectiveFrom])
+  @@index([provider, model, effectiveFrom])
+}
+
+/// Una llamada a un proveedor de IA: que gasto y cuanto vale comercialmente.
+///
+/// Se escribe SIEMPRE, incluida la llamada que fallo (con error y los tokens en cero):
+/// la tasa de error del proveedor es justamente lo que explica los "el bot no responde"
+/// que hoy no dejan rastro.
+///
+/// Los tokens son la fuente de verdad, no el costo: costMicros es un derivado del
+/// precio vigente y se puede recalcular entero si un precio estaba mal cargado.
+model AiUsage {
+  id       String @id @default(cuid())
+  tenantId String
+
+  /// Para que se uso: "bot_ai_chat" (el bot respondiendole a un cliente final) o
+  /// "agent_suggestion" (sugerencia de respuesta para un agente humano).
+  feature  String
+  provider String @default("openai")
+  model    String
+
+  inputTokens       Int @default(0)
+  cachedInputTokens Int @default(0)
+  outputTokens      Int @default(0)
+
+  /// Costo del proveedor en millonesimas de dolar (1.000.000 = US$1). Entero para que
+  /// sumar un mes no arrastre error de coma flotante.
+  costMicros   Int      @default(0)
+  priceId      String?
+  markupFactor Decimal  @db.Decimal(6, 3)
+
+  /// Lo que corresponde cobrar por esta operacion. En la fase de medicion se calcula
+  /// pero no se descuenta de ningun saldo: billed queda en false y el numero sirve
+  /// para ver cuanto se facturaria si el cobro estuviera activo.
+  credits Int     @default(0)
+  billed  Boolean @default(false)
+
+  /// Idempotencia: un reintento con el mismo requestId no puede registrarse dos veces.
+  requestId         String  @unique
+  /// El id que devuelve el proveedor, para poder conciliar contra su factura.
+  providerRequestId String?
+
+  conversationId String?
+  userId         String?
+  /// Que contesto el proveedor cuando fallo. Null = la llamada salio bien.
+  error          String?
+
+  createdAt DateTime @default(now())
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  price        AiPrice?      @relation(fields: [priceId], references: [id])
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  user         User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, feature, createdAt])
+  @@index([createdAt])
 }

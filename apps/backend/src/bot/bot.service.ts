@@ -5,7 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EventBusService } from '../events/event-bus.service';
 import { AssignmentService } from '../whatsapp/assignment.service';
 import { WhatsAppAccountsService, WhatsAppAccountCreds } from '../whatsapp/accounts.service';
-import { OpenAiClientService } from '../common/openai-client.service';
+import { AiGatewayService } from '../ai-usage/ai-gateway.service';
 import { LookupService, LookupConfig } from '../common/lookup.service';
 import { BotsService } from '../bots/bots.service';
 
@@ -72,7 +72,7 @@ export class BotService {
     private eventBus: EventBusService,
     private assignmentService: AssignmentService,
     private accounts: WhatsAppAccountsService,
-    private openaiClient: OpenAiClientService,
+    private ai: AiGatewayService,
     private lookup: LookupService,
     private bots: BotsService,
     config: ConfigService,
@@ -276,12 +276,12 @@ export class BotService {
 
     const bot = await this.getBot(tenantId, conversationId);
     const knowledgeBase = bot.aiKnowledgeBase?.trim();
-    const resolved = await this.openaiClient.getClient(tenantId);
+    const hasKey = await this.ai.isConfigured(tenantId);
 
     // Sin info del negocio o sin clave de OpenAI resoluble, no tiene sentido entrar
     // al modo — el bot "conversaría" sin nada que decir. Se deriva directo.
-    if (!knowledgeBase || !resolved) {
-      return this.handoffAiNotConfigured(tenantId, conversationId, phone, acc, bot.name, !knowledgeBase, !resolved);
+    if (!knowledgeBase || !hasKey) {
+      return this.handoffAiNotConfigured(tenantId, conversationId, phone, acc, bot.name, !knowledgeBase, !hasKey);
     }
 
     const contactName = await this.getContactName(conversationId);
@@ -331,10 +331,10 @@ export class BotService {
     // corrigiendo la info del negocio a mitad de conversación tenga efecto inmediato.
     const bot = await this.getBot(tenantId, conversationId);
     const knowledgeBase = bot.aiKnowledgeBase?.trim();
-    const resolved = await this.openaiClient.getClient(tenantId);
+    const hasKey = await this.ai.isConfigured(tenantId);
 
-    if (!knowledgeBase || !resolved) {
-      return this.handoffAiNotConfigured(tenantId, conversationId, phone, account, bot.name, !knowledgeBase, !resolved);
+    if (!knowledgeBase || !hasKey) {
+      return this.handoffAiNotConfigured(tenantId, conversationId, phone, account, bot.name, !knowledgeBase, !hasKey);
     }
 
     // Acotado por aiSince: no queremos que el historial incluya resúmenes de listas
@@ -354,18 +354,17 @@ export class BotService {
 
     const contactName = await this.getContactName(conversationId);
 
-    let reply: string | undefined;
-    try {
-      const completion = await resolved.client.chat.completions.create({
-        model: resolved.model,
-        messages: [{ role: 'system', content: this.buildAiSystemPrompt(knowledgeBase, contactName) }, ...chatMessages],
-        max_tokens: 500,
-        temperature: 0.6,
-      });
-      reply = completion.choices[0]?.message?.content?.trim();
-    } catch (err) {
-      this.logger.error('OpenAI error en modo IA del bot', (err as any)?.response?.data || (err as any)?.message);
-    }
+    // El gateway resuelve la clave, llama y deja registrado el consumo. Un fallo del
+    // proveedor ya quedo logueado y medido ahi adentro; acá solo importa que no hay
+    // respuesta para el cliente.
+    const result = await this.ai.chat(tenantId, {
+      feature: 'bot_ai_chat',
+      messages: [{ role: 'system', content: this.buildAiSystemPrompt(knowledgeBase, contactName) }, ...chatMessages],
+      maxTokens: 500,
+      temperature: 0.6,
+      conversationId,
+    });
+    const reply = result.ok ? result.text : undefined;
 
     if (!reply) {
       await this.sendText(tenantId, conversationId, phone, account, 'Perdón, tuve un problema para responderte. Ya te paso con un agente.');

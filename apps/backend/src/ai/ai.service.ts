@@ -1,28 +1,15 @@
-import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { OpenAiClientService } from '../common/openai-client.service';
-import OpenAI from 'openai';
+import { AiGatewayService } from '../ai-usage/ai-gateway.service';
 
 @Injectable()
 export class AiService {
-  private readonly logger = new Logger(AiService.name);
-
   constructor(
     private prisma: PrismaService,
-    private openaiClient: OpenAiClientService,
+    private ai: AiGatewayService,
   ) {}
 
-  private async getOpenAI(tenantId: string): Promise<{ client: OpenAI; model: string }> {
-    const resolved = await this.openaiClient.getClient(tenantId);
-    if (!resolved) {
-      throw new BadRequestException(
-        'No hay una clave de OpenAI configurada. Agrégala en Configuración → IA.',
-      );
-    }
-    return resolved;
-  }
-
-  async suggestReply(tenantId: string, conversationId: string) {
+  async suggestReply(tenantId: string, conversationId: string, userId?: string) {
     const conv = await this.prisma.conversation.findFirst({
       where: { id: conversationId, tenantId },
       include: { contact: { select: { name: true, phone: true } } },
@@ -51,24 +38,29 @@ Read the conversation below and write a concise, helpful, and friendly reply to 
 Reply in the same language the customer is using.
 Keep the response under 200 words. Do not add any explanation, just the reply text.`;
 
-    try {
-      const { client, model } = await this.getOpenAI(tenantId);
+    // Pasa por el gateway y no por OpenAI directo: asi el consumo del agente queda
+    // medido igual que el del bot. Los mensajes de error son los mismos de antes.
+    const result = await this.ai.chat(tenantId, {
+      feature: 'agent_suggestion',
+      messages: [{ role: 'system', content: systemPrompt }, ...history],
+      maxTokens: 300,
+      temperature: 0.7,
+      conversationId,
+      userId,
+    });
 
-      const completion = await client.chat.completions.create({
-        model,
-        messages: [{ role: 'system', content: systemPrompt }, ...history],
-        max_tokens: 300,
-        temperature: 0.7,
-      });
-
-      const suggestion = completion.choices[0]?.message?.content?.trim();
-      if (!suggestion) throw new BadRequestException('AI returned empty response');
-
-      return { suggestion };
-    } catch (err) {
-      if (err instanceof BadRequestException) throw err;
-      this.logger.error('OpenAI error', err);
+    if (!result.ok) {
+      if (result.reason === 'NOT_CONFIGURED') {
+        throw new BadRequestException(
+          'No hay una clave de OpenAI configurada. Agrégala en Configuración → IA.',
+        );
+      }
+      if (result.reason === 'EMPTY_RESPONSE') {
+        throw new BadRequestException('AI returned empty response');
+      }
       throw new BadRequestException('Error al generar sugerencia con IA. Verifica tu clave de API.');
     }
+
+    return { suggestion: result.text };
   }
 }

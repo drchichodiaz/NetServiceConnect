@@ -16,6 +16,7 @@ import { ConversationsModule } from './conversations/conversations.module';
 import { MessagesModule } from './messages/messages.module';
 import { NotesModule } from './notes/notes.module';
 import { AiModule } from './ai/ai.module';
+import { AiUsageModule } from './ai-usage/ai-usage.module';
 import { AuditModule } from './audit/audit.module';
 import { StatsModule } from './stats/stats.module';
 import { QuickRepliesModule } from './quick-replies/quick-replies.module';
@@ -50,6 +51,7 @@ import { RequestLogInterceptor } from './common/request-log.interceptor';
     MessagesModule,
     NotesModule,
     AiModule,
+    AiUsageModule,
     AuditModule,
     StatsModule,
     QuickRepliesModule,
