@@ -36,6 +36,7 @@ model Tenant {
   internalNotes    InternalNote[]
   quickReplies     QuickReply[]
   messageTemplates MessageTemplate[]
+  campaigns        Campaign[]
   botConfig        TenantBotConfig?
   branches         TenantBranch[]
   menuNodes        TenantMenuNode[]
@@ -59,6 +60,7 @@ model User {
 
   tenant        Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   assignedConvs Conversation[]       @relation("AssignedAgent")
+  campaigns     Campaign[]
   channelAccess UserChannelAccount[]
   resetTokens   PasswordResetToken[]
   messages      Message[]
@@ -152,6 +154,7 @@ model ChannelAccount {
 
   tenant        Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   conversations Conversation[]
+  campaigns     Campaign[]
   userAccess    UserChannelAccount[]
 
   // Los dos unique conviven porque en Postgres los NULL no colisionan entre si: una
@@ -215,12 +218,18 @@ model Contact {
   company   String?
   avatarUrl String?
   metadata  Json?
+  // Cuando la persona pidio no recibir mas envios masivos. Se guarda la fecha y no un
+  // booleano para poder decir desde cuando y por que canal llego la baja.
+  // Una baja NO impide responderle si escribe: corta los envios proactivos, nada mas.
+  optedOutAt     DateTime?
+  optedOutReason String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant        Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant        Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   conversations Conversation[]
   identities    ContactIdentity[]
+  campaignItems CampaignRecipient[]
 
   // Se queda tal cual aunque phone sea nullable: en Postgres varios NULL no colisionan,
   // asi que esto sigue impidiendo dos contactos de WhatsApp con el mismo numero y no
@@ -501,7 +510,8 @@ model MessageTemplate {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  campaigns Campaign[]
 
   // El nombre solo es unico dentro de su WABA — el mismo nombre puede (y suele
   // necesitar) existir en cada WABA del tenant.
@@ -625,4 +635,99 @@ model AuditLog {
 
   @@index([tenantId, createdAt])
   @@index([conversationId])
+}
+
+// ─── Campañas (envío masivo de plantillas) ────────────────────────────────────
+
+enum CampaignStatus {
+  DRAFT     // cargada y revisada, todavia no se mando nada
+  RUNNING   // el worker esta procesando destinatarios
+  PAUSED    // frenada a mano, o por el limite diario de Meta
+  DONE      // no quedan pendientes
+  CANCELLED // cancelada; los pendientes no se mandan nunca
+}
+
+enum CampaignRecipientStatus {
+  PENDING  // todavia no se intento
+  SENDING  // un worker la tomo (evita que dos procesos manden lo mismo)
+  SENT     // Meta la acepto
+  FAILED   // Meta la rechazo despues de los reintentos
+  SKIPPED  // no se mando a proposito (dado de baja, sin WhatsApp, repetido)
+}
+
+/// Un envio de una plantilla a muchos contactos. El progreso vive en CampaignRecipient,
+/// no aca: estos contadores son un resumen para la pantalla, no la fuente de verdad.
+model Campaign {
+  id       String         @id @default(cuid())
+  tenantId String
+  name     String
+  status   CampaignStatus @default(DRAFT)
+
+  // Que se manda y por donde. La linea importa doble: el cliente recibe desde ese
+  // numero, y la plantilla tiene que existir en el WABA de esa linea.
+  templateId       String
+  channelAccountId String
+
+  createdById String
+
+  // Destinatarios por minuto. Se guarda por campaña para poder ir mas despacio en un
+  // numero nuevo, que arranca con un limite diario bajo de Meta.
+  ratePerMinute Int @default(20)
+
+  // Resumen para la pantalla; se recalcula desde CampaignRecipient.
+  totalCount   Int @default(0)
+  sentCount    Int @default(0)
+  failedCount  Int @default(0)
+  skippedCount Int @default(0)
+
+  // Por que se freno sola (limite diario de Meta, token vencido…), para poder decirlo.
+  pausedReason String?
+
+  createdAt  DateTime  @default(now())
+  startedAt  DateTime?
+  finishedAt DateTime?
+
+  tenant         Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  template       MessageTemplate     @relation(fields: [templateId], references: [id])
+  channelAccount ChannelAccount      @relation(fields: [channelAccountId], references: [id])
+  createdBy      User                @relation(fields: [createdById], references: [id])
+  recipients     CampaignRecipient[]
+
+  @@index([tenantId, status])
+}
+
+/// Un destinatario de una campaña. Es la unidad de trabajo y la fuente de verdad del
+/// progreso: si el proceso se reinicia a mitad de una campaña, al volver sigue por los
+/// que quedaron PENDING y nadie recibe dos veces.
+model CampaignRecipient {
+  id         String                  @id @default(cuid())
+  campaignId String
+  tenantId   String
+  contactId  String
+  status     CampaignRecipientStatus @default(PENDING)
+
+  /// Los valores de las {{n}} de ESTE destinatario: { body: [...], header: [...], buttons: [...] }.
+  /// Salen de las columnas extra del Excel, asi que cambian fila por fila.
+  variables Json?
+
+  /// Se resuelve al armar la campaña y se congela: si el contacto cambia de numero
+  /// despues, la campaña sigue apuntando a quien se reviso y aprobo.
+  recipientPhone String
+
+  messageId      String?
+  conversationId String?
+  error          String?
+  attempts       Int       @default(0)
+  sentAt         DateTime?
+  /// Cuando un worker tomo esta fila. Sirve para destrabar las que quedaron en SENDING
+  /// porque el proceso se cayo justo despues de tomarlas.
+  claimedAt      DateTime?
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contact  Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  /// Lo que hace la campaña idempotente: el mismo contacto no puede entrar dos veces.
+  @@unique([campaignId, contactId])
+  /// El worker busca por aca: pendientes de una campaña, en orden de carga.
+  @@index([campaignId, status])
 }

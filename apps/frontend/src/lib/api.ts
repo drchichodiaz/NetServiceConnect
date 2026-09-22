@@ -405,3 +405,108 @@ export const quickRepliesApi = {
     api.patch(`/quick-replies/${id}`, data).then((r) => r.data),
   remove: (id: string) => api.delete(`/quick-replies/${id}`).then((r) => r.data),
 };
+
+// ─── Campañas (envío masivo de plantillas) ────────────────────────────────────
+
+export type CampaignStatus = 'DRAFT' | 'RUNNING' | 'PAUSED' | 'DONE' | 'CANCELLED';
+
+export interface VariableMapping {
+  target: 'header' | 'body' | 'button';
+  index: number;
+  /** Encabezado de la columna del archivo, o `__name__` para el nombre del contacto. */
+  column?: string;
+  /** Alternativa: el mismo valor para todos. */
+  fixedValue?: string;
+}
+
+export interface CampaignPreview {
+  totalRows: number;
+  ready: number;
+  invalid: number;
+  duplicated: number;
+  optedOut: number;
+  extraColumns: string[];
+  needs: { header: number; body: number; buttons: { index: number; text: string }[] };
+  errors: { row: number; reason: string }[];
+  truncatedErrors: boolean;
+  sample: { phone: string; name?: string; values: Record<string, string> }[];
+}
+
+export interface Campaign {
+  id: string;
+  name: string;
+  status: CampaignStatus;
+  ratePerMinute: number;
+  totalCount: number;
+  sentCount: number;
+  failedCount: number;
+  skippedCount: number;
+  pausedReason?: string | null;
+  createdAt: string;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  template?: { name: string; language: string };
+  channelAccount?: { label?: string | null; phoneNumber?: string | null };
+  createdBy?: { name?: string | null };
+  counts?: Record<string, number>;
+}
+
+export const campaignsApi = {
+  list: (): Promise<Campaign[]> => api.get('/campaigns').then((r) => r.data),
+  get: (id: string): Promise<Campaign> => api.get(`/campaigns/${id}`).then((r) => r.data),
+  failures: (id: string): Promise<{ recipientPhone: string; status: string; error?: string }[]> =>
+    api.get(`/campaigns/${id}/failures`).then((r) => r.data),
+
+  // Cuenta que pasaria sin crear nada. El archivo se manda dos veces (acá y al crear)
+  // a proposito: el navegador ya lo tiene en memoria, y guardarlo en el server entre
+  // los dos pasos obligaria a limpiar archivos que nadie llego a confirmar.
+  preview: (templateId: string, file: File): Promise<CampaignPreview> => {
+    const form = new FormData();
+    form.append('file', file);
+    return api
+      .post(`/campaigns/preview?templateId=${encodeURIComponent(templateId)}`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      .then((r) => r.data);
+  },
+
+  // Cuenta lo mismo pero sobre los contactos que ya estan en el sistema, sin archivo.
+  previewContacts: (data: {
+    templateId: string;
+    contactIds?: string[];
+    contactSearch?: string;
+  }): Promise<CampaignPreview> => api.post('/campaigns/preview-contacts', data).then((r) => r.data),
+
+  create: (data: {
+    name: string;
+    templateId: string;
+    channelAccountId: string;
+    ratePerMinute?: number;
+    mapping: VariableMapping[];
+    /** 'FILE' (default) toma `file`; 'CONTACTS' toma contactIds o contactSearch. */
+    source?: 'FILE' | 'CONTACTS';
+    file?: File;
+    contactIds?: string[];
+    contactSearch?: string;
+  }): Promise<Campaign & { invalidRows: number }> => {
+    const form = new FormData();
+    // Va como multipart en los dos casos: con contactos simplemente no hay archivo,
+    // y asi el alta es un solo endpoint en vez de dos casi iguales.
+    if (data.file) form.append('file', data.file);
+    if (data.source) form.append('source', data.source);
+    if (data.contactIds?.length) form.append('contactIds', JSON.stringify(data.contactIds));
+    if (data.contactSearch) form.append('contactSearch', data.contactSearch);
+    form.append('name', data.name);
+    form.append('templateId', data.templateId);
+    form.append('channelAccountId', data.channelAccountId);
+    if (data.ratePerMinute) form.append('ratePerMinute', String(data.ratePerMinute));
+    form.append('mapping', JSON.stringify(data.mapping));
+    return api
+      .post('/campaigns', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+      .then((r) => r.data);
+  },
+
+  start:  (id: string) => api.post(`/campaigns/${id}/start`).then((r) => r.data),
+  pause:  (id: string) => api.post(`/campaigns/${id}/pause`).then((r) => r.data),
+  cancel: (id: string) => api.post(`/campaigns/${id}/cancel`).then((r) => r.data),
+};

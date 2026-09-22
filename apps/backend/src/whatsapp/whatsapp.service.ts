@@ -248,6 +248,53 @@ export class WhatsAppService {
       throw new BadRequestException('Ese contacto no tiene un número de WhatsApp');
     }
 
+    return this.sendTemplateToContact({
+      tenantId,
+      account,
+      template,
+      contact,
+      recipient,
+      variables: {
+        body: dto.variables ?? [],
+        header: dto.headerVariables ?? [],
+        buttons: dto.buttonVariables ?? [],
+      },
+      senderId,
+      // De a uno, quien inicia la conversacion queda a cargo de ella. Una campaña
+      // pasa `assignTo: null` justamente para no asignarle miles de hilos a nadie.
+      assignTo: senderId,
+    });
+  }
+
+  /**
+   * Manda una plantilla a un contacto y deja el hilo en la bandeja.
+   *
+   * Es el unico lugar donde se arma y se manda un mensaje de plantilla. Lo usan el
+   * envio de a uno (startConversation) y el envio masivo (CampaignRunner), que se
+   * diferencian solo en si el hilo queda asignado a alguien. Tener dos copias de esto
+   * fue el riesgo obvio en cuanto aparecieron las campañas: los componentes, el cache
+   * del media id del encabezado y el texto que se guarda en la bandeja tienen que ser
+   * identicos en los dos caminos.
+   *
+   * Asume que la linea, la plantilla y el destinatario ya estan resueltos y validados.
+   */
+  async sendTemplateToContact(params: {
+    tenantId: string;
+    account: { id: string; phoneNumberId: string; accessToken: string; wabaId: string | null };
+    template: any;
+    contact: { id: string; name: string | null; phone: string | null };
+    recipient: string;
+    variables: { body?: string[]; header?: string[]; buttons?: { index: number; value: string }[] };
+    /** Autor del mensaje. Null en una campaña: no lo escribio una persona. */
+    senderId: string | null;
+    /** A quien queda asignado el hilo nuevo. Null lo deja sin asignar. */
+    assignTo: string | null;
+  }) {
+    const { tenantId, account, template, contact, recipient, senderId, assignTo } = params;
+    const bodyVariables = params.variables.body ?? [];
+    const headerVariables = params.variables.header ?? [];
+    const buttonVariables = params.variables.buttons ?? [];
+
     // Misma regla que el webhook: la identidad de un hilo es (contacto, línea).
     let conversation = await this.prisma.conversation.findFirst({
       where: { tenantId, contactId: contact.id, channelAccountId: account.id, status: { not: 'CLOSED' } },
@@ -255,11 +302,10 @@ export class WhatsAppService {
     });
 
     const now = new Date();
-    const variables = dto.variables ?? [];
     // Lo que se guarda en la bandeja es lo que el cliente ve: encabezado de texto,
     // cuerpo y pie. Si solo se guardara el cuerpo, el agente abriria la conversacion
     // y leeria algo distinto de lo que se mando.
-    const renderedBody = this.renderTemplateText(template, variables, dto.headerVariables ?? []);
+    const renderedBody = this.renderTemplateText(template, bodyVariables, headerVariables);
 
     if (!conversation) {
       conversation = await this.prisma.conversation.create({
@@ -268,7 +314,9 @@ export class WhatsAppService {
           contactId: contact.id,
           channelAccountId: account.id,
           status: 'OPEN',
-          assignedUserId: senderId,
+          // Null en una campaña: el hilo aparece sin dueño y alguien lo toma cuando
+          // la persona responde. Asignarlos al que lanzo la campaña le dejaria miles.
+          assignedUserId: assignTo,
           lastMessageAt: now,
           lastMessageText: renderedBody,
           unreadCount: 0,
@@ -276,7 +324,7 @@ export class WhatsAppService {
       });
 
       await this.prisma.auditLog.create({
-        data: { tenantId, userId: senderId, conversationId: conversation.id, action: 'conversation.started' },
+        data: { tenantId, userId: senderId ?? undefined, conversationId: conversation.id, action: 'conversation.started' },
       });
     }
 
@@ -295,9 +343,9 @@ export class WhatsAppService {
         buttons: template.buttons as unknown as TemplateButton[] | null,
       },
       {
-        body: variables,
-        header: dto.headerVariables ?? [],
-        buttons: dto.buttonVariables ?? [],
+        body: bodyVariables,
+        header: headerVariables,
+        buttons: buttonVariables,
       },
       headerMediaId,
     );

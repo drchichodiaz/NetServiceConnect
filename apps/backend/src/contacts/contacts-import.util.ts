@@ -9,6 +9,12 @@ export interface ParsedContactRow {
   phone: string;
   email?: string;
   company?: string;
+  /**
+   * Las columnas que NO son name/phone/email/company, con su encabezado original
+   * como clave. El import de contactos las ignora; las campañas las usan como los
+   * valores de las variables de la plantilla, que cambian fila por fila.
+   */
+  extra: Record<string, string>;
 }
 
 export interface ParseRowError {
@@ -21,7 +27,9 @@ export interface ParseResult {
   errors: ParseRowError[];
 }
 
-const HEADER_ALIASES: Record<string, keyof Omit<ParsedContactRow, 'row'>> = {
+type KnownField = 'name' | 'phone' | 'email' | 'company';
+
+const HEADER_ALIASES: Record<string, KnownField> = {
   nombre: 'name',
   name: 'name',
   telefono: 'phone',
@@ -59,7 +67,15 @@ function cellToString(value: ExcelJS.CellValue): string {
   return String(value).trim();
 }
 
-/** Parsea un .xlsx o .csv subido y devuelve las filas ya mapeadas a name/phone/email/company. */
+/**
+ * Parsea un .xlsx o .csv subido y devuelve las filas ya mapeadas a name/phone/email/company,
+ * mas las columnas que no reconocimos en `extra`.
+ *
+ * Lo usan dos cosas con intenciones opuestas: el import de contactos (donde un telefono
+ * que ya existe es un error a saltear) y las campañas (donde un contacto que ya existe es
+ * el caso normal). Por eso esta funcion solo parsea y valida forma — que hacer con cada
+ * fila lo decide quien llama.
+ */
 export async function parseWorkbookRows(buffer: Buffer, filename: string): Promise<ParseResult> {
   const workbook = new ExcelJS.Workbook();
   const isCsv = filename.toLowerCase().endsWith('.csv');
@@ -77,10 +93,16 @@ export async function parseWorkbookRows(buffer: Buffer, filename: string): Promi
   }
 
   const headerRow = worksheet.getRow(1);
-  const columnMap = new Map<number, keyof Omit<ParsedContactRow, 'row'>>();
+  const columnMap = new Map<number, KnownField>();
+  // Las columnas que no reconocemos no se descartan: se guardan con su encabezado tal
+  // como vino, para que una campaña pueda mapearlas a las variables de la plantilla.
+  const extraColumns = new Map<number, string>();
   headerRow.eachCell({ includeEmpty: false }, (cell, colNumber) => {
-    const key = HEADER_ALIASES[normalizeHeader(cellToString(cell.value))];
+    const raw = cellToString(cell.value).trim();
+    if (!raw) return;
+    const key = HEADER_ALIASES[normalizeHeader(raw)];
     if (key) columnMap.set(colNumber, key);
+    else extraColumns.set(colNumber, raw);
   });
 
   if (!Array.from(columnMap.values()).includes('phone')) {
@@ -93,13 +115,21 @@ export async function parseWorkbookRows(buffer: Buffer, filename: string): Promi
   worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
     if (rowNumber === 1) return; // headers
 
-    const values: Partial<Record<keyof Omit<ParsedContactRow, 'row'>, string>> = {};
+    const values: Partial<Record<KnownField, string>> = {};
     columnMap.forEach((key, colNumber) => {
       const v = cellToString(row.getCell(colNumber).value);
       if (v) values[key] = v;
     });
 
-    if (!values.name && !values.phone && !values.email && !values.company) return; // fila vacía
+    const extra: Record<string, string> = {};
+    extraColumns.forEach((header, colNumber) => {
+      const v = cellToString(row.getCell(colNumber).value);
+      if (v) extra[header] = v;
+    });
+
+    // Una fila con solo columnas extra y sin telefono no sirve para nada: se ignora
+    // igual que una vacia, en vez de reportarla como error por cada fila de relleno.
+    if (!values.name && !values.phone && !values.email && !values.company) return;
 
     if (!values.phone) {
       errors.push({ row: rowNumber, reason: 'Falta el teléfono' });
@@ -117,7 +147,7 @@ export async function parseWorkbookRows(buffer: Buffer, filename: string): Promi
       return;
     }
 
-    rows.push({ row: rowNumber, name: values.name, phone, email: values.email, company: values.company });
+    rows.push({ row: rowNumber, name: values.name, phone, email: values.email, company: values.company, extra });
   });
 
   return { rows, errors };

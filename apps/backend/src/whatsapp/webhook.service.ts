@@ -6,6 +6,18 @@ import { EventBusService } from '../events/event-bus.service';
 import { MediaService } from '../media/media.service';
 import { BotService } from '../bot/bot.service';
 
+/**
+ * Palabras con las que alguien pide dejar de recibir envios masivos.
+ *
+ * Se exige que el mensaje sea corto (mismo criterio que usa el bot para "agente" y
+ * "menu"): asi "baja" como respuesta cuenta, pero "me dieron de baja en el seguro" no.
+ * Frente a la duda conviene equivocarse dando de baja de mas: una baja no impide
+ * responderle a la persona, solo corta los envios proactivos, y un envio no deseado
+ * con datos de salud de por medio es un problema bastante mayor (Ley 81).
+ */
+const OPT_OUT_RE = /\b(baja|stop|cancelar|desuscribir|desuscribirme|unsubscribe|remover)\b/i;
+const OPT_OUT_MAX_WORDS = 4;
+
 @Injectable()
 export class WebhookService {
   private readonly logger = new Logger(WebhookService.name);
@@ -220,6 +232,10 @@ export class WebhookService {
       },
     });
 
+    // La baja se procesa antes que el bot: si la persona pide dejar de recibir envios,
+    // eso vale aunque despues el bot le conteste otra cosa.
+    await this.applyOptOutIfRequested(tenantId, contact.id, body, type);
+
     // Fase D: el bot responde recién después de que el mensaje del cliente ya quedó
     // guardado y visible en el historial (así el humano que eventualmente tome la
     // conversación ve todo el intercambio, incluido lo que pasó con el bot).
@@ -227,6 +243,24 @@ export class WebhookService {
       await this.botService.sendMenu(tenantId, conversation.id, phone);
     } else if (conversation.mode === 'BOT') {
       await this.botService.handleBotReply(tenantId, conversation.id, conversation.botState, phone, msg);
+    }
+  }
+
+  /**
+   * Marca el contacto como dado de baja si el mensaje lo pide. Es idempotente: si ya
+   * estaba dado de baja no se toca la fecha original, que es la que interesa.
+   */
+  private async applyOptOutIfRequested(tenantId: string, contactId: string, body: string, type: string) {
+    if (type !== 'TEXT' || !body) return;
+    const words = body.trim().split(/\s+/);
+    if (words.length > OPT_OUT_MAX_WORDS || !OPT_OUT_RE.test(body)) return;
+
+    const { count } = await this.prisma.contact.updateMany({
+      where: { id: contactId, tenantId, optedOutAt: null },
+      data: { optedOutAt: new Date(), optedOutReason: body.slice(0, 200) },
+    });
+    if (count > 0) {
+      this.logger.log(`[baja] contacto ${contactId} pidio no recibir mas envios: "${body.slice(0, 60)}"`);
     }
   }
 

@@ -19,6 +19,7 @@ import { QuickRepliesModule } from './quick-replies/quick-replies.module';
 import { SettingsModule } from './settings/settings.module';
 import { SystemConfigModule } from './system-config/system-config.module';
 import { TemplatesModule } from './templates/templates.module';
+import { CampaignsModule } from './campaigns/campaigns.module';
 import { BotConfigModule } from './bot-config/bot-config.module';
 import { MenuNodesModule } from './menu-nodes/menu-nodes.module';
 import { ChannelAccessModule } from './common/services/channel-access.module';
@@ -47,6 +48,7 @@ import { MailModule } from './mail/mail.module';
     SettingsModule,
     SystemConfigModule,
     TemplatesModule,
+    CampaignsModule,
     BotConfigModule,
     MenuNodesModule,
   ],
