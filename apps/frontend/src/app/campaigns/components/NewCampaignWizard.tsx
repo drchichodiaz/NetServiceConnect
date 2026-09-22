@@ -6,6 +6,7 @@ import { Upload, Loader2, AlertTriangle, CheckCircle2, FileSpreadsheet, X, Searc
 import toast from 'react-hot-toast';
 import { TemplatePreview } from '@/app/settings/templates/components/TemplatePreview';
 import TagPicker, { useContactTags } from '@/components/contacts/TagPicker';
+import ModalPortal from '@/components/ui/ModalPortal';
 
 /**
  * Campos del propio contacto, usables como valor de una variable sin que esten en
@@ -221,280 +222,286 @@ export function NewCampaignWizard({ onClose, onCreated }: Props) {
     !!template && !!preview && preview.ready > 0 && hasRecipients && !!name.trim() && missingSlots.length === 0 && !isPreviewing;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-6">
-      <div className="card w-full max-w-3xl p-6 my-4">
-        <div className="flex items-start justify-between mb-5">
-          <div>
-            <h2 className="text-lg font-bold text-ink" style={{ letterSpacing: '-0.02em' }}>Nueva campaña</h2>
-            <p className="text-sm text-ink-muted">Enviar una plantilla aprobada a muchos contactos</p>
+    // Va por portal: esta pantalla envuelve su contenido en `animate-fade-in`, cuyo
+    // transform convertia a esa columna en el bloque contenedor del overlay — el modal
+    // quedaba encerrado en ella, chico y con scroll de mas. Ver ModalPortal.
+    <ModalPortal>
+      <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 sm:p-6">
+        {/* El formulario es largo: el que scrollea es el overlay, no la pagina de atras. */}
+        <div className="card w-full max-w-3xl p-6 my-4">
+          <div className="flex items-start justify-between mb-5">
+            <div>
+              <h2 className="text-lg font-bold text-ink" style={{ letterSpacing: '-0.02em' }}>Nueva campaña</h2>
+              <p className="text-sm text-ink-muted">Enviar una plantilla aprobada a muchos contactos</p>
+            </div>
+            <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center text-ink-subtle hover:bg-black/5">
+              <X className="w-4 h-4" />
+            </button>
           </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center text-ink-subtle hover:bg-black/5">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
 
-        <div className="space-y-5">
-          {/* ── 1. Qué se manda ─────────────────────────────────────────── */}
-          <section>
-            <p className="text-xs font-semibold text-ink mb-2">1 · Qué se manda</p>
-            <div className="space-y-3">
-              <input
-                placeholder="Nombre de la campaña (solo lo ves vos)"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="input w-full"
-              />
-              <div className="grid sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[11px] text-ink-subtle block mb-1">Línea que envía</label>
-                  <select value={accountId} onChange={(e) => setAccountId(e.target.value)} className="input w-full">
-                    {accounts.map((a) => (
-                      <option key={a.id} value={a.id}>{a.label?.trim() || a.phoneNumber}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-[11px] text-ink-subtle block mb-1">Plantilla aprobada</label>
-                  <select value={templateId} onChange={(e) => setTemplateId(e.target.value)} className="input w-full" disabled={loading}>
-                    <option value="">{loading ? 'Cargando…' : 'Elegí una plantilla…'}</option>
-                    {templates.map((t) => (
-                      <option key={t.id} value={t.id}>{t.name}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {!loading && templates.length === 0 && (
-                <p className="text-xs text-ink-muted">
-                  Esta línea no tiene plantillas aprobadas. Creá una en Configuración → Plantillas y esperá que Meta la apruebe.
-                </p>
-              )}
-
-              {template && (
-                <TemplatePreview
-                  headerFormat={template.headerFormat}
-                  headerText={template.headerText}
-                  bodyText={template.bodyText}
-                  footerText={template.footerText}
-                  buttons={template.buttons}
-                />
-              )}
-            </div>
-          </section>
-
-          {/* ── 2. A quién ──────────────────────────────────────────────── */}
-          <section className="pt-4" style={{ borderTop: '1px solid var(--border)' }}>
-            <p className="text-xs font-semibold text-ink mb-2">2 · A quién</p>
-
-            <div className="flex gap-1.5 mb-3">
-              <button
-                type="button"
-                onClick={() => setSource('CONTACTS')}
-                className={source === 'CONTACTS' ? 'btn-primary text-xs py-1.5 px-3' : 'btn-secondary text-xs py-1.5 px-3'}
-              >
-                <BookUser className="w-3.5 h-3.5" />
-                Contactos del sistema
-              </button>
-              <button
-                type="button"
-                onClick={() => setSource('FILE')}
-                className={source === 'FILE' ? 'btn-primary text-xs py-1.5 px-3' : 'btn-secondary text-xs py-1.5 px-3'}
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5" />
-                Subir un Excel
-              </button>
-            </div>
-
-            {source === 'CONTACTS' ? (
-              <div>
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-ink-subtle" />
-                    <input
-                      placeholder="Filtrar por nombre, teléfono, email o empresa (vacío = todos)"
-                      value={contactSearch}
-                      onChange={(e) => setContactSearch(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleContactsPreview()}
-                      className="input w-full pl-9"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleContactsPreview}
-                    disabled={!templateId || isPreviewing}
-                    className="btn-secondary shrink-0"
-                  >
-                    {isPreviewing ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                    Ver a cuántos
-                  </button>
-                </div>
-                {/* Segmentacion por etiquetas. Si el tenant todavia no cargo ninguna,
-                    no se muestra nada: seria una fila muerta. */}
-                {allTags.length > 0 && (
-                  <div className="mt-2.5 space-y-2 rounded-lg p-2.5" style={{ background: 'var(--surface-muted)' }}>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[11px] text-ink-muted w-16 shrink-0">Que tengan</span>
-                      <TagPicker
-                        value={tagIds}
-                        onChange={setTagIds}
-                        allowCreate={false}
-                        emptyLabel="cualquier etiqueta"
-                        placeholder="Buscar etiqueta…"
-                      />
-                      {tagIds.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => setTagMatch((m) => (m === 'ANY' ? 'ALL' : 'ANY'))}
-                          className="text-[10px] text-ink-muted hover:text-ink underline decoration-dotted"
-                        >
-                          {tagMatch === 'ANY' ? 'alguna de estas' : 'todas estas'}
-                        </button>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[11px] text-ink-muted w-16 shrink-0">Menos</span>
-                      <TagPicker
-                        value={excludeTagIds}
-                        onChange={setExcludeTagIds}
-                        allowCreate={false}
-                        emptyLabel="nadie"
-                        placeholder="Buscar etiqueta…"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                <p className="text-[11px] text-ink-subtle mt-1">
-                  Solo entran los contactos que tienen WhatsApp. Las variables de la plantilla se llenan
-                  con los datos de su ficha (nombre, empresa…) o con un texto igual para todos.
-                </p>
-              </div>
-            ) : (
-              <div>
+          <div className="space-y-5">
+            {/* ── 1. Qué se manda ─────────────────────────────────────────── */}
+            <section>
+              <p className="text-xs font-semibold text-ink mb-2">1 · Qué se manda</p>
+              <div className="space-y-3">
                 <input
-                  ref={fileRef}
-                  type="file"
-                  accept=".xlsx,.csv"
-                  onChange={(e) => handleFile(e.target.files?.[0])}
-                  className="hidden"
+                  placeholder="Nombre de la campaña (solo lo ves vos)"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="input w-full"
                 />
-                <button
-                  type="button"
-                  onClick={() => fileRef.current?.click()}
-                  disabled={!templateId || isPreviewing}
-                  className="btn-secondary w-full justify-center"
-                >
-                  {isPreviewing ? <Loader2 className="w-4 h-4 animate-spin" /> : file ? <FileSpreadsheet className="w-4 h-4" /> : <Upload className="w-4 h-4" />}
-                  {isPreviewing ? 'Leyendo…' : file ? file.name : 'Subir Excel o CSV'}
-                </button>
-                <p className="text-[11px] text-ink-subtle mt-1">
-                  Necesita una columna <strong>Teléfono</strong>. Las demás columnas quedan disponibles para
-                  las variables de la plantilla — que es lo que el Excel permite y los contactos del sistema no:
-                  un dato distinto para cada persona. Mismo formato que importar contactos.
-                </p>
-              </div>
-            )}
-
-            {preview && (
-              <div className="rounded-lg p-3 mt-2.5 text-xs" style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)' }}>
-                <div className="flex flex-wrap gap-x-4 gap-y-1">
-                  <span className="flex items-center gap-1.5 text-ink">
-                    <CheckCircle2 className="w-3.5 h-3.5" style={{ color: '#128C7E' }} />
-                    <strong>{preview.ready}</strong> van a recibir el mensaje
-                  </span>
-                  {preview.optedOut > 0 && (
-                    <span className="text-ink-muted">{preview.optedOut} dados de baja (se saltean)</span>
-                  )}
-                  {preview.duplicated > 0 && <span className="text-ink-muted">{preview.duplicated} repetidos</span>}
-                  {preview.invalid > 0 && <span className="text-ink-muted">{preview.invalid} sin teléfono válido</span>}
-                </div>
-
-                {preview.errors.length > 0 && (
-                  <details className="mt-2">
-                    <summary className="cursor-pointer text-ink-subtle">Ver las filas con problemas</summary>
-                    <ul className="mt-1.5 space-y-0.5 max-h-32 overflow-y-auto">
-                      {preview.errors.map((e, i) => (
-                        <li key={i} className="text-ink-subtle">Fila {e.row}: {e.reason}</li>
-                      ))}
-                    </ul>
-                  </details>
-                )}
-
-                {preview.ready === 0 && (
-                  <p className="flex items-center gap-1.5 mt-2 text-red-600">
-                    <AlertTriangle className="w-3.5 h-3.5" />
-                    No hay nadie a quien enviarle con esta selección.
-                  </p>
-                )}
-              </div>
-            )}
-          </section>
-
-          {/* ── 3. Con qué datos ────────────────────────────────────────── */}
-          {preview && slots.length > 0 && (
-            <section className="pt-4" style={{ borderTop: '1px solid var(--border)' }}>
-              <p className="text-xs font-semibold text-ink mb-2">3 · Con qué datos se llenan las variables</p>
-              <div className="space-y-2">
-                {slots.map((slot) => (
-                  <div key={slot.key} className="flex items-center gap-2">
-                    <span className="text-xs text-ink-muted w-36 shrink-0">{slot.label}</span>
-                    <select
-                      value={mapping[slot.key] ?? ''}
-                      onChange={(e) => setMapping((m) => ({ ...m, [slot.key]: e.target.value }))}
-                      className="input flex-1 text-sm"
-                    >
-                      <option value="">Elegí de dónde sale…</option>
-                      {columns.map((c) => (
-                        <option key={c.key} value={c.key}>{c.label}</option>
+                <div className="grid sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] text-ink-subtle block mb-1">Línea que envía</label>
+                    <select value={accountId} onChange={(e) => setAccountId(e.target.value)} className="input w-full">
+                      {accounts.map((a) => (
+                        <option key={a.id} value={a.id}>{a.label?.trim() || a.phoneNumber}</option>
                       ))}
                     </select>
-                    {preview.sample[0] && mapping[slot.key] && (
-                      <span className="text-[11px] text-ink-subtle w-28 truncate" title="Ejemplo del primero de la lista">
-                        ej: {mapping[slot.key] === '__name__'
-                          ? preview.sample[0].name
-                          : mapping[slot.key] === '__phone__'
-                            ? preview.sample[0].phone
-                            : preview.sample[0].values[mapping[slot.key]] || '—'}
-                      </span>
-                    )}
                   </div>
-                ))}
+                  <div>
+                    <label className="text-[11px] text-ink-subtle block mb-1">Plantilla aprobada</label>
+                    <select value={templateId} onChange={(e) => setTemplateId(e.target.value)} className="input w-full" disabled={loading}>
+                      <option value="">{loading ? 'Cargando…' : 'Elegí una plantilla…'}</option>
+                      {templates.map((t) => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {!loading && templates.length === 0 && (
+                  <p className="text-xs text-ink-muted">
+                    Esta línea no tiene plantillas aprobadas. Creá una en Configuración → Plantillas y esperá que Meta la apruebe.
+                  </p>
+                )}
+
+                {template && (
+                  <TemplatePreview
+                    headerFormat={template.headerFormat}
+                    headerText={template.headerText}
+                    bodyText={template.bodyText}
+                    footerText={template.footerText}
+                    buttons={template.buttons}
+                  />
+                )}
               </div>
             </section>
-          )}
 
-          {/* ── Ritmo ───────────────────────────────────────────────────── */}
-          {preview && (
+            {/* ── 2. A quién ──────────────────────────────────────────────── */}
             <section className="pt-4" style={{ borderTop: '1px solid var(--border)' }}>
-              <label className="text-xs font-semibold text-ink block mb-1.5">Ritmo de envío</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number" min={1} max={600} value={ratePerMinute}
-                  onChange={(e) => setRatePerMinute(Number(e.target.value) || 1)}
-                  className="input w-24 text-sm"
-                />
-                <span className="text-xs text-ink-muted">mensajes por minuto</span>
-              </div>
-              <p className="text-[11px] text-ink-subtle mt-1">
-                Meta limita a cuántas personas distintas se les puede escribir por día, y un número nuevo
-                arranca con un límite bajo. Ir despacio también cuida la calificación de calidad de la línea.
-                A {ratePerMinute}/min, {preview.ready} mensajes tardan {Math.ceil(preview.ready / ratePerMinute)} min.
-              </p>
-            </section>
-          )}
-        </div>
+              <p className="text-xs font-semibold text-ink mb-2">2 · A quién</p>
 
-        <div className="flex gap-2 mt-6">
-          <button onClick={onClose} className="btn-secondary flex-1">Cancelar</button>
-          <button onClick={handleCreate} disabled={!canCreate || isSaving} className="btn-primary flex-1">
-            {isSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-            Crear campaña
-          </button>
+              <div className="flex gap-1.5 mb-3">
+                <button
+                  type="button"
+                  onClick={() => setSource('CONTACTS')}
+                  className={source === 'CONTACTS' ? 'btn-primary text-xs py-1.5 px-3' : 'btn-secondary text-xs py-1.5 px-3'}
+                >
+                  <BookUser className="w-3.5 h-3.5" />
+                  Contactos del sistema
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSource('FILE')}
+                  className={source === 'FILE' ? 'btn-primary text-xs py-1.5 px-3' : 'btn-secondary text-xs py-1.5 px-3'}
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                  Subir un Excel
+                </button>
+              </div>
+
+              {source === 'CONTACTS' ? (
+                <div>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-ink-subtle" />
+                      <input
+                        placeholder="Filtrar por nombre, teléfono, email o empresa (vacío = todos)"
+                        value={contactSearch}
+                        onChange={(e) => setContactSearch(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleContactsPreview()}
+                        className="input w-full pl-9"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleContactsPreview}
+                      disabled={!templateId || isPreviewing}
+                      className="btn-secondary shrink-0"
+                    >
+                      {isPreviewing ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                      Ver a cuántos
+                    </button>
+                  </div>
+                  {/* Segmentacion por etiquetas. Si el tenant todavia no cargo ninguna,
+                      no se muestra nada: seria una fila muerta. */}
+                  {allTags.length > 0 && (
+                    <div className="mt-2.5 space-y-2 rounded-lg p-2.5" style={{ background: 'var(--surface-muted)' }}>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[11px] text-ink-muted w-16 shrink-0">Que tengan</span>
+                        <TagPicker
+                          value={tagIds}
+                          onChange={setTagIds}
+                          allowCreate={false}
+                          emptyLabel="cualquier etiqueta"
+                          placeholder="Buscar etiqueta…"
+                        />
+                        {tagIds.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setTagMatch((m) => (m === 'ANY' ? 'ALL' : 'ANY'))}
+                            className="text-[10px] text-ink-muted hover:text-ink underline decoration-dotted"
+                          >
+                            {tagMatch === 'ANY' ? 'alguna de estas' : 'todas estas'}
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[11px] text-ink-muted w-16 shrink-0">Menos</span>
+                        <TagPicker
+                          value={excludeTagIds}
+                          onChange={setExcludeTagIds}
+                          allowCreate={false}
+                          emptyLabel="nadie"
+                          placeholder="Buscar etiqueta…"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <p className="text-[11px] text-ink-subtle mt-1">
+                    Solo entran los contactos que tienen WhatsApp. Las variables de la plantilla se llenan
+                    con los datos de su ficha (nombre, empresa…) o con un texto igual para todos.
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept=".xlsx,.csv"
+                    onChange={(e) => handleFile(e.target.files?.[0])}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileRef.current?.click()}
+                    disabled={!templateId || isPreviewing}
+                    className="btn-secondary w-full justify-center"
+                  >
+                    {isPreviewing ? <Loader2 className="w-4 h-4 animate-spin" /> : file ? <FileSpreadsheet className="w-4 h-4" /> : <Upload className="w-4 h-4" />}
+                    {isPreviewing ? 'Leyendo…' : file ? file.name : 'Subir Excel o CSV'}
+                  </button>
+                  <p className="text-[11px] text-ink-subtle mt-1">
+                    Necesita una columna <strong>Teléfono</strong>. Las demás columnas quedan disponibles para
+                    las variables de la plantilla — que es lo que el Excel permite y los contactos del sistema no:
+                    un dato distinto para cada persona. Mismo formato que importar contactos.
+                  </p>
+                </div>
+              )}
+
+              {preview && (
+                <div className="rounded-lg p-3 mt-2.5 text-xs" style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)' }}>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1">
+                    <span className="flex items-center gap-1.5 text-ink">
+                      <CheckCircle2 className="w-3.5 h-3.5" style={{ color: '#128C7E' }} />
+                      <strong>{preview.ready}</strong> van a recibir el mensaje
+                    </span>
+                    {preview.optedOut > 0 && (
+                      <span className="text-ink-muted">{preview.optedOut} dados de baja (se saltean)</span>
+                    )}
+                    {preview.duplicated > 0 && <span className="text-ink-muted">{preview.duplicated} repetidos</span>}
+                    {preview.invalid > 0 && <span className="text-ink-muted">{preview.invalid} sin teléfono válido</span>}
+                  </div>
+
+                  {preview.errors.length > 0 && (
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-ink-subtle">Ver las filas con problemas</summary>
+                      <ul className="mt-1.5 space-y-0.5 max-h-32 overflow-y-auto">
+                        {preview.errors.map((e, i) => (
+                          <li key={i} className="text-ink-subtle">Fila {e.row}: {e.reason}</li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+
+                  {preview.ready === 0 && (
+                    <p className="flex items-center gap-1.5 mt-2 text-red-600">
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      No hay nadie a quien enviarle con esta selección.
+                    </p>
+                  )}
+                </div>
+              )}
+            </section>
+
+            {/* ── 3. Con qué datos ────────────────────────────────────────── */}
+            {preview && slots.length > 0 && (
+              <section className="pt-4" style={{ borderTop: '1px solid var(--border)' }}>
+                <p className="text-xs font-semibold text-ink mb-2">3 · Con qué datos se llenan las variables</p>
+                <div className="space-y-2">
+                  {slots.map((slot) => (
+                    <div key={slot.key} className="flex items-center gap-2">
+                      <span className="text-xs text-ink-muted w-36 shrink-0">{slot.label}</span>
+                      <select
+                        value={mapping[slot.key] ?? ''}
+                        onChange={(e) => setMapping((m) => ({ ...m, [slot.key]: e.target.value }))}
+                        className="input flex-1 text-sm"
+                      >
+                        <option value="">Elegí de dónde sale…</option>
+                        {columns.map((c) => (
+                          <option key={c.key} value={c.key}>{c.label}</option>
+                        ))}
+                      </select>
+                      {preview.sample[0] && mapping[slot.key] && (
+                        <span className="text-[11px] text-ink-subtle w-28 truncate" title="Ejemplo del primero de la lista">
+                          ej: {mapping[slot.key] === '__name__'
+                            ? preview.sample[0].name
+                            : mapping[slot.key] === '__phone__'
+                              ? preview.sample[0].phone
+                              : preview.sample[0].values[mapping[slot.key]] || '—'}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* ── Ritmo ───────────────────────────────────────────────────── */}
+            {preview && (
+              <section className="pt-4" style={{ borderTop: '1px solid var(--border)' }}>
+                <label className="text-xs font-semibold text-ink block mb-1.5">Ritmo de envío</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number" min={1} max={600} value={ratePerMinute}
+                    onChange={(e) => setRatePerMinute(Number(e.target.value) || 1)}
+                    className="input w-24 text-sm"
+                  />
+                  <span className="text-xs text-ink-muted">mensajes por minuto</span>
+                </div>
+                <p className="text-[11px] text-ink-subtle mt-1">
+                  Meta limita a cuántas personas distintas se les puede escribir por día, y un número nuevo
+                  arranca con un límite bajo. Ir despacio también cuida la calificación de calidad de la línea.
+                  A {ratePerMinute}/min, {preview.ready} mensajes tardan {Math.ceil(preview.ready / ratePerMinute)} min.
+                </p>
+              </section>
+            )}
+          </div>
+
+          <div className="flex gap-2 mt-6">
+            <button onClick={onClose} className="btn-secondary flex-1">Cancelar</button>
+            <button onClick={handleCreate} disabled={!canCreate || isSaving} className="btn-primary flex-1">
+              {isSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              Crear campaña
+            </button>
+          </div>
+          <p className="text-[11px] text-ink-subtle text-center mt-2">
+            Crear la campaña no manda nada todavía. Después la revisás y la arrancás vos.
+          </p>
         </div>
-        <p className="text-[11px] text-ink-subtle text-center mt-2">
-          Crear la campaña no manda nada todavía. Después la revisás y la arrancás vos.
-        </p>
       </div>
-    </div>
+    </ModalPortal>
   );
 }
