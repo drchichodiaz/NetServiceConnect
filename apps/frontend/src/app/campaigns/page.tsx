@@ -12,8 +12,7 @@ export default function CampaignsPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showWizard, setShowWizard] = useState(false);
-  // Arranca abierto mientras no haya ninguna campaña: la primera vez, la pantalla
-  // vacia no explica nada por si sola y esto es lo unico que hay para leer.
+  // Arranca siempre plegada: abierta ocupaba la pantalla entera al entrar.
   const [showHelp, setShowHelp] = useState(false);
 
   function load() {
@@ -21,9 +20,6 @@ export default function CampaignsPage() {
       .list()
       .then((list) => {
         setCampaigns(list);
-        // La primera vez la pantalla vacia no explica nada por si sola, asi que la
-        // ayuda arranca abierta. Con campañas ya hechas, queda plegada.
-        if (list.length === 0) setShowHelp(true);
       })
       .catch(() => toast.error('Error al cargar las campañas'))
       .finally(() => setIsLoading(false));

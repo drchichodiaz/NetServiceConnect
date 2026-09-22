@@ -20,6 +20,7 @@ export default function BotSettingsPage() {
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
   const [busy, setBusy] = useState(false);
+  // Arranca siempre plegada: abierta ocupaba la pantalla entera al entrar.
   const [showHelp, setShowHelp] = useState(false);
 
   useEffect(() => {
@@ -28,9 +29,6 @@ export default function BotSettingsPage() {
         const [list, settings] = await Promise.all([botsApi.list(), settingsApi.get()]);
         setBots(list);
         setSelectedId(list.find((b) => b.isDefault)?.id ?? list[0]?.id ?? null);
-        // Con un solo bot todavia no se uso lo de varios bots: la ayuda arranca abierta
-        // para que se entienda que existe. Con varios, ya se sabe y queda plegada.
-        if (list.length <= 1) setShowHelp(true);
         setHasOpenaiKey(!!settings.hasOpenaiKey);
       } catch {
         toast.error('Error al cargar los bots');
