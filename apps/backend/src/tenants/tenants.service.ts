@@ -1,15 +1,19 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { PartnersService } from '../partners/partners.service';
+import { AiWalletService } from '../ai-usage/ai-wallet.service';
 import * as bcrypt from 'bcryptjs';
 
 @Injectable()
 export class TenantsService {
+  private readonly logger = new Logger(TenantsService.name);
+
   constructor(
     private prisma: PrismaService,
     private partners: PartnersService,
+    private aiWallet: AiWalletService,
   ) {}
 
   // Crea la empresa junto con su primer usuario (ADMIN) en una sola transaccion —
@@ -25,7 +29,7 @@ export class TenantsService {
 
     const passwordHash = await bcrypt.hash(dto.adminPassword, 10);
 
-    return this.prisma.$transaction(async (tx) => {
+    const created = await this.prisma.$transaction(async (tx) => {
       const tenant = await tx.tenant.create({
         data: {
           name: dto.name,
@@ -52,6 +56,33 @@ export class TenantsService {
 
       return { tenant, admin };
     });
+
+    await this.grantTrialCredits(created.tenant.id, created.tenant.name);
+    return created;
+  }
+
+  /**
+   * Acredita los creditos de prueba de una empresa recien creada.
+   *
+   * Va por fuera de la transaccion del alta a proposito: si esto falla, la empresa
+   * igual queda creada y usable, y los creditos se cargan a mano desde el panel. Al
+   * reves seria peor — perder el alta entera por no haber podido regalar saldo.
+   */
+  private async grantTrialCredits(tenantId: string, tenantName: string) {
+    const config = await this.prisma.systemConfig.findUnique({ where: { id: '1' } });
+    const credits = config?.aiTrialCredits ?? 0;
+    if (credits <= 0) return;
+
+    try {
+      await this.aiWallet.grant(tenantId, {
+        kind: 'BONUS',
+        credits,
+        note: 'Créditos de prueba del alta',
+      });
+      this.logger.log(`${tenantName} nace con ${credits} creditos de IA de prueba.`);
+    } catch (err) {
+      this.logger.error(`No se pudieron acreditar los creditos de prueba de ${tenantName}`, err as any);
+    }
   }
 
   findAll() {

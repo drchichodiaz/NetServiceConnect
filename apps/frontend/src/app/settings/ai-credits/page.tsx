@@ -268,6 +268,7 @@ function PlatformCard({ settings, onSaved }: { settings: AiPlatformSettings | nu
   const [markup, setMarkup] = useState(String(settings?.markupFactor ?? 2));
   const [creditValue, setCreditValue] = useState(String(settings?.creditUsdValue ?? 0.001));
   const [minCredits, setMinCredits] = useState(String(settings?.minCreditsPerOp ?? 1));
+  const [trial, setTrial] = useState(String(settings?.trialCredits ?? 0));
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -276,6 +277,7 @@ function PlatformCard({ settings, onSaved }: { settings: AiPlatformSettings | nu
     setMarkup(String(settings.markupFactor));
     setCreditValue(String(settings.creditUsdValue));
     setMinCredits(String(settings.minCreditsPerOp));
+    setTrial(String(settings.trialCredits));
   }, [settings]);
 
   async function save() {
@@ -287,6 +289,7 @@ function PlatformCard({ settings, onSaved }: { settings: AiPlatformSettings | nu
         markupFactor: Number(markup),
         creditUsdValue: Number(creditValue),
         minCreditsPerOp: Number(minCredits),
+        trialCredits: Number(trial),
       });
       setKey('');
       onSaved(saved);
@@ -359,6 +362,17 @@ function PlatformCard({ settings, onSaved }: { settings: AiPlatformSettings | nu
           <input value={minCredits} onChange={(e) => setMinCredits(e.target.value)} className="input w-full" inputMode="numeric" />
           <p className="text-[10px] text-ink-subtle mt-1">Nunca cobra cero</p>
         </div>
+      </div>
+
+      <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
+        <label className="block text-xs font-medium text-ink-muted mb-1.5">
+          Créditos de prueba para empresas nuevas
+        </label>
+        <input value={trial} onChange={(e) => setTrial(e.target.value)} className="input w-full" inputMode="numeric" />
+        <p className="text-[11px] text-ink-subtle mt-1">
+          Con cuántos créditos nace una empresa al darla de alta. En 0 no recibe ninguno y su
+          asistente queda apagado hasta que le acredites el primer paquete.
+        </p>
       </div>
 
       <div className="flex justify-end mt-4">

@@ -393,6 +393,8 @@ export interface AiPlatformSettings {
   markupFactor: number;
   creditUsdValue: number;
   minCreditsPerOp: number;
+  /** Con cuántos créditos nace una empresa nueva. 0 = ninguno. */
+  trialCredits: number;
 }
 
 export interface AiCreditTenantRow {
@@ -450,7 +452,7 @@ export const aiCreditsApi = {
   getSettings: (): Promise<AiPlatformSettings> => api.get('/ai-credits/settings').then((r) => r.data),
   updateSettings: (data: {
     platformApiKey?: string; platformModel?: string;
-    markupFactor?: number; creditUsdValue?: number; minCreditsPerOp?: number;
+    markupFactor?: number; creditUsdValue?: number; minCreditsPerOp?: number; trialCredits?: number;
   }): Promise<AiPlatformSettings> => api.patch('/ai-credits/settings', data).then((r) => r.data),
 
   overview: (period = 'month'): Promise<{

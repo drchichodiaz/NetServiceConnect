@@ -23,11 +23,15 @@ model Tenant {
   isActive      Boolean       @default(true)
   openaiApiKey  String?
   openaiModel   String?
-  /// Quien paga la IA de esta empresa. BYOK = trae su propia clave y le factura el
-  /// proveedor directamente, que es como estaban todas antes de esto; PLATFORM = usa
-  /// nuestra clave y consume creditos. Arranca en BYOK para que el despliegue no le
-  /// cambie nada a nadie: se pasa cliente por cliente, cuando se decide.
-  aiBillingMode AiBillingMode @default(BYOK)
+  /// Quien paga la IA de esta empresa. PLATFORM = usa nuestra clave y consume
+  /// creditos, que es como se venden todas; BYOK = trae su propia clave y le factura el
+  /// proveedor directamente.
+  ///
+  /// El default arranco en BYOK para que el despliegue del motor no le cambiara nada a
+  /// nadie, y paso a PLATFORM cuando se decidio que todas las empresas se manejan por
+  /// creditos. Las que ya existian siguen en BYOK hasta que se las pase a mano: cambiar
+  /// un default no toca las filas que ya estan.
+  aiBillingMode AiBillingMode @default(PLATFORM)
   // Quien vendio esta cuenta. Null = venta directa, que es como estan todas las que ya
   // existian. Se puede corregir despues: el primer tiempo la atribucion se carga a mano
   // mirando papeles, y equivocarse una vez no puede ser irreversible.
@@ -800,6 +804,11 @@ model SystemConfig {
   /// con nuestra clave, esa eleccion regula nuestro costo. Medido contra un bot real,
   /// el modelo economico acerto 22 de 24 contra 23 del caro, costando 17 veces menos.
   aiPlatformModel   String   @default("gpt-4o-mini")
+  /// Creditos de regalo con los que nace una empresa nueva. 0 = ninguno, y entonces su
+  /// IA queda apagada hasta que alguien le acredite el primer paquete. Existe para que
+  /// una cuenta nueva pueda probar el asistente el mismo dia del alta, sin que nadie
+  /// tenga que acordarse de cargarle saldo.
+  aiTrialCredits    Int      @default(0)
 }
 
 // ─── Soporte ──────────────────────────────────────────────────────────────────

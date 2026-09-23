@@ -42,6 +42,7 @@ export class AiCreditsService {
       markupFactor: Number(config?.aiMarkupFactor ?? 2),
       creditUsdValue: Number(config?.aiCreditUsdValue ?? 0.001),
       minCreditsPerOp: config?.aiMinCreditsPerOp ?? 1,
+      trialCredits: config?.aiTrialCredits ?? 0,
     };
   }
 
@@ -51,6 +52,7 @@ export class AiCreditsService {
     markupFactor?: number;
     creditUsdValue?: number;
     minCreditsPerOp?: number;
+    trialCredits?: number;
   }) {
     const payload: any = {};
 
@@ -73,6 +75,10 @@ export class AiCreditsService {
     if (data.minCreditsPerOp !== undefined) {
       if (data.minCreditsPerOp < 0) throw new BadRequestException('El mínimo por operación no puede ser negativo');
       payload.aiMinCreditsPerOp = Math.floor(data.minCreditsPerOp);
+    }
+    if (data.trialCredits !== undefined) {
+      if (data.trialCredits < 0) throw new BadRequestException('Los créditos de prueba no pueden ser negativos');
+      payload.aiTrialCredits = Math.floor(data.trialCredits);
     }
 
     await this.prisma.systemConfig.upsert({

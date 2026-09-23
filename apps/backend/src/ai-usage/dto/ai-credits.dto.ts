@@ -20,6 +20,10 @@ export class UpdatePlatformSettingsDto {
 
   @IsOptional() @IsInt() @Min(0)
   minCreditsPerOp?: number;
+
+  /** Con cuantos creditos nace una empresa nueva. 0 = ninguno. */
+  @IsOptional() @IsInt() @Min(0)
+  trialCredits?: number;
 }
 
 export class GrantCreditsDto {
