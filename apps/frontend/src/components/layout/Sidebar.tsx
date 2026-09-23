@@ -70,7 +70,11 @@ export default function Sidebar({ user }: Props) {
       {/* Nav */}
       <nav className="flex-1 flex flex-col gap-1 w-full px-2">
         {visibleItems.map(({ href, icon: Icon, label }) => {
-          const active = pathname.startsWith(href);
+          // Coincidencia por tramo completo, no por prefijo de texto: con startsWith,
+          // "/settings/ai-credits" tambien marcaba activo a "/settings/ai" y se
+          // encendian los dos. El "/" del final es lo que deja funcionar las subpaginas
+          // (/inbox/123 marca /inbox) sin que un nombre mas largo pise a otro.
+          const active = pathname === href || pathname.startsWith(href + '/');
           return (
             <div key={href} className="relative group">
               <Link
