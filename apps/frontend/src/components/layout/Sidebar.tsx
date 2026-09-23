@@ -16,7 +16,9 @@ const navItems = [
   { href: '/contacts',           icon: BookUser,        label: 'Contactos' },
   { href: '/settings/team',      icon: Users,           label: 'Equipo' },
   { href: '/settings/quick-replies', icon: Zap,       label: 'Respuestas rápidas' },
-  { href: '/settings/ai',            icon: Sparkles,  label: 'Configuración IA', roles: ['ADMIN', 'SUPERVISOR'] },
+  // El saldo de IA de la propia empresa. El super admin no lo ve: para eso tiene el
+  // panel de la plataforma, y dos entradas que dicen "IA" en el mismo menu confunden.
+  { href: '/settings/ai',            icon: Sparkles,  label: 'Créditos de IA', roles: ['ADMIN', 'SUPERVISOR'], hideForSuperAdmin: true },
   { href: '/settings/whatsapp',      icon: Settings,     label: 'WhatsApp',      roles: ['ADMIN', 'SUPERVISOR'] },
   { href: '/settings/templates',     icon: FileText,     label: 'Plantillas',    roles: ['ADMIN', 'SUPERVISOR'] },
   { href: '/campaigns',              icon: Megaphone,    label: 'Campañas',      roles: ['ADMIN', 'SUPERVISOR'] },
@@ -36,6 +38,7 @@ export default function Sidebar({ user }: Props) {
   const [showSupport, setShowSupport] = useState(false);
   const visibleItems = navItems.filter((item) => {
     if (item.superAdminOnly) return !!user?.isSuperAdmin;
+    if ((item as { hideForSuperAdmin?: boolean }).hideForSuperAdmin && user?.isSuperAdmin) return false;
     if (item.roles) return !!user?.role && (item.roles as string[]).includes(user.role);
     return true;
   });

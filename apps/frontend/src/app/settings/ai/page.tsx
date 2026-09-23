@@ -10,6 +10,17 @@ import { es } from 'date-fns/locale';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
 
+/**
+ * Cargar una clave propia de OpenAI: APAGADO.
+ *
+ * Todas las empresas pasan a manejarse por creditos, asi que la clave la pone la
+ * plataforma y el modelo lo decide la plataforma. El formulario queda en el codigo —no
+ * se borro— para el caso de un cliente que insista en pagarle directo al proveedor con
+ * su propia cuenta: se prende esto, se pasa esa empresa a "clave propia" desde el panel
+ * de creditos, y vuelve a funcionar como antes.
+ */
+const SHOW_TENANT_API_KEY_FORM = false;
+
 const MODELS = [
   { id: 'gpt-4o-mini', label: 'GPT-4o Mini', desc: 'Rápido y económico — recomendado' },
   { id: 'gpt-4o',      label: 'GPT-4o',      desc: 'Más inteligente, mayor costo' },
@@ -120,17 +131,19 @@ export default function AiSettingsPage() {
             <Sparkles className="w-4 h-4" style={{ color: '#9333EA' }} />
           </div>
           <h1 className="text-xl font-bold text-ink" style={{ letterSpacing: '-0.02em' }}>
-            Configuración de IA
+            {SHOW_TENANT_API_KEY_FORM ? 'Configuración de IA' : 'Créditos de IA'}
           </h1>
         </div>
         <p className="text-sm text-ink-muted mt-1">
-          Conecta tu cuenta de OpenAI para usar sugerencias de respuesta con IA en el inbox.
+          {SHOW_TENANT_API_KEY_FORM
+            ? 'Conecta tu cuenta de OpenAI para usar sugerencias de respuesta con IA en el inbox.'
+            : 'Cuánto saldo de IA te queda y en qué se fue.'}
         </p>
       </div>
 
       {credits && <CreditsCard credits={credits} />}
 
-      {!credits && (
+      {SHOW_TENANT_API_KEY_FORM && !credits && (
       <>
       {/* Status card */}
       <div
@@ -272,6 +285,17 @@ export default function AiSettingsPage() {
         </p>
       </div>
       </>
+      )}
+
+      {!SHOW_TENANT_API_KEY_FORM && !credits && (
+        <div className="card p-5 text-sm text-ink-muted">
+          <p className="text-ink font-medium mb-1.5">Todavía no hay créditos de IA en esta cuenta</p>
+          <p>
+            El asistente con IA se activa con un plan de créditos. Mientras tanto, las consultas que
+            llegan por WhatsApp las atiende tu equipo como siempre.
+          </p>
+          <p className="mt-2">Escribinos para activarlo y vas a ver acá tu saldo y tu consumo.</p>
+        </div>
       )}
     </div>
   );
