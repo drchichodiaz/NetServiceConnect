@@ -5,6 +5,7 @@ import { ContactTag } from '@/types';
 import { Tag as TagIcon, X, Plus, Check, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
+import { onSessionReset } from '@/lib/session-state';
 
 /**
  * Elegir etiquetas escribiendo. Si lo que se escribió no existe, la primera opción de
@@ -15,8 +16,21 @@ import clsx from 'clsx';
  * y para filtrar una lista; lo único que cambia es `allowCreate`.
  */
 
-/** Caché a nivel de módulo: el picker aparece en tres pantallas y la lista es la misma. */
+/**
+ * Caché a nivel de módulo: el picker aparece en tres pantallas y la lista es la misma.
+ *
+ * `null` significa "todavía no se pidió" y es lo único que dispara una carga; una lista
+ * vacía es una respuesta válida y no se vuelve a pedir. Por eso un error **no** puede
+ * dejar `[]` acá: un 401 de paso apagaría las etiquetas hasta la próxima recarga, y
+ * como las pantallas se esconden cuando la lista está vacía, parecería que la función
+ * no existe. Por el mismo motivo se vacía al entrar y al salir de una sesión: la caché
+ * vive en el módulo y un login no recarga la página.
+ */
 let cachedTags: ContactTag[] | null = null;
+/** La carga en curso, para que tres pickers montándose juntos pidan la lista una vez. */
+let enVuelo: Promise<ContactTag[]> | null = null;
+/** Sube en cada cambio de sesión: una respuesta que quedó viajando no pisa la nueva. */
+let sesion = 0;
 const subscribers = new Set<(tags: ContactTag[]) => void>();
 
 function publish(tags: ContactTag[]) {
@@ -26,17 +40,40 @@ function publish(tags: ContactTag[]) {
 
 /** Refresca la lista compartida. La llama quien crea, renombra o borra etiquetas. */
 export async function reloadContactTags() {
-  const tags = await contactTagsApi.list();
-  publish(tags);
-  return tags;
+  if (enVuelo) return enVuelo;
+  const deSesion = sesion;
+  const carga = contactTagsApi.list();
+  enVuelo = carga;
+  try {
+    const tags = await carga;
+    if (deSesion === sesion) publish(tags);
+    return tags;
+  } finally {
+    if (enVuelo === carga) enVuelo = null;
+  }
 }
+
+/**
+ * Olvida las etiquetas cargadas. Lo llama el cambio de sesión: las etiquetas son de
+ * una empresa, y quien entra después en esa pestaña no tiene por qué ver las de otra.
+ */
+function olvidarContactTags() {
+  sesion++;
+  cachedTags = null;
+  enVuelo = null;
+  subscribers.forEach((fn) => fn([]));
+}
+
+onSessionReset(olvidarContactTags);
 
 export function useContactTags() {
   const [tags, setTags] = useState<ContactTag[]>(cachedTags ?? []);
 
   useEffect(() => {
     subscribers.add(setTags);
-    if (cachedTags === null) reloadContactTags().catch(() => publish([]));
+    // Si falla se deja en `null` a proposito: asi el proximo montaje reintenta, en vez
+    // de que un error de red deje la pantalla sin etiquetas hasta el proximo F5.
+    if (cachedTags === null) reloadContactTags().catch(() => {});
     else setTags(cachedTags);
     return () => { subscribers.delete(setTags); };
   }, []);

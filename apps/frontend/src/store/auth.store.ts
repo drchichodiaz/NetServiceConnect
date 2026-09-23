@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { User } from '@/types';
 import { setAuth, clearAuth, getToken, getUser } from '@/lib/auth';
 import { authApi } from '@/lib/api';
+import { resetSessionState } from '@/lib/session-state';
 
 interface AuthStore {
   token: string | null;
@@ -28,6 +29,10 @@ export const useAuthStore = create<AuthStore>((set) => ({
     set({ isLoading: true });
     try {
       const data = await authApi.login(email, password);
+      // Entrar es `router.replace`, no una recarga: lo que dejo la sesion anterior en
+      // esta pestaña sigue en memoria. Se limpia antes de guardar el token nuevo para
+      // que ninguna pantalla llegue a mostrar datos de la empresa anterior.
+      resetSessionState();
       setAuth(data.access_token, data.user);
       set({ token: data.access_token, user: data.user });
     } finally {
@@ -43,6 +48,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
 
   logout: () => {
     clearAuth();
+    resetSessionState();
     set({ token: null, user: null });
   },
 }));

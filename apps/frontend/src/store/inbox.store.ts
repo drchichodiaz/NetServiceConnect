@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { Conversation, Message, InternalNote, WhatsAppAccount } from '@/types';
 import { conversationsApi, messagesApi, notesApi, whatsappApi } from '@/lib/api';
 import { useAuthStore } from './auth.store';
+import { onSessionReset } from '@/lib/session-state';
 
 /**
  * Espeja los filtros que aplica el backend en ConversationsService.findAll, para
@@ -53,15 +54,41 @@ interface InboxStore {
   }) => void;
 }
 
+/**
+ * Lo que hay antes de cargar nada. Esta aparte para poder volver a el: el store vive
+ * en el modulo y sobrevive a un logout, asi que sin esto el que entra despues en la
+ * misma pestaña ve las conversaciones del que estaba antes hasta que termine la
+ * primera carga — y pueden ser de otra empresa.
+ */
+type EstadoInicial = Pick<
+  InboxStore,
+  | 'conversations'
+  | 'selectedConversationId'
+  | 'messages'
+  | 'notes'
+  | 'isLoadingConversations'
+  | 'isLoadingMessages'
+  | 'accounts'
+  | 'filter'
+>;
+
+// Devuelve uno nuevo en cada llamada: si fuera un objeto compartido, las listas
+// vaciadas serian las mismas que despues se mutan.
+function estadoVacio(): EstadoInicial {
+  return {
+    conversations: [],
+    selectedConversationId: null,
+    messages: [],
+    notes: [],
+    isLoadingConversations: false,
+    isLoadingMessages: false,
+    accounts: [],
+    filter: { status: 'OPEN' },
+  };
+}
+
 export const useInboxStore = create<InboxStore>((set, get) => ({
-  conversations: [],
-  selectedConversationId: null,
-  messages: [],
-  notes: [],
-  isLoadingConversations: false,
-  isLoadingMessages: false,
-  accounts: [],
-  filter: { status: 'OPEN' },
+  ...estadoVacio(),
 
   // `silent` recarga sin prender el spinner: se usa para los refrescos que dispara
   // el servidor (SSE), que ahora llegan en cada cambio de estado de cualquier agente.
@@ -188,3 +215,5 @@ export const useInboxStore = create<InboxStore>((set, get) => ({
     });
   },
 }));
+
+onSessionReset(() => useInboxStore.setState(estadoVacio()));
