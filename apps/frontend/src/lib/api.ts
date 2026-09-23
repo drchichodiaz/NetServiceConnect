@@ -449,6 +449,10 @@ export const aiCreditsApi = {
   me: (period = 'month'): Promise<MyAiCredits> =>
     api.get('/ai-credits/me', { params: { period } }).then((r) => r.data),
 
+  /** El cliente pide que le recarguen. No cobra: deja el pedido y avisa por correo. */
+  requestTopUp: (data: { credits?: number; note?: string }): Promise<{ ticket: string; emailSent: boolean }> =>
+    api.post('/ai-credits/request-topup', data).then((r) => r.data),
+
   getSettings: (): Promise<AiPlatformSettings> => api.get('/ai-credits/settings').then((r) => r.data),
   updateSettings: (data: {
     platformApiKey?: string; platformModel?: string;

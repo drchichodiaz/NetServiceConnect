@@ -10,6 +10,7 @@ import { AiCreditsService } from './ai-credits.service';
 import { AiAlertsService } from './ai-alerts.service';
 import { OpenAiClientService } from './openai-client.service';
 import { CryptoService } from '../common/services/crypto.service';
+import { SystemConfigModule } from '../system-config/system-config.module';
 
 /**
  * El modulo por el que pasa todo el consumo de IA.
@@ -20,6 +21,9 @@ import { CryptoService } from '../common/services/crypto.service';
  * ningun otro modulo.
  */
 @Module({
+  // MailModule es @Global. SystemConfigModule trae la direccion de soporte, que es
+  // a donde llegan los pedidos de recarga y los avisos de saldo bajo.
+  imports: [SystemConfigModule],
   controllers: [AiUsageController, AiCreditsController],
   providers: [
     AiGatewayService,

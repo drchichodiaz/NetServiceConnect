@@ -49,3 +49,12 @@ export class UpdateAiTenantDto {
   @IsOptional() @IsBoolean()
   aiEnabled?: boolean;
 }
+
+export class RequestTopUpDto {
+  /** Cuantos creditos necesita. Opcional: puede pedir "una recarga" sin numero. */
+  @IsOptional() @IsInt() @Min(1)
+  credits?: number;
+
+  @IsOptional() @IsString() @MaxLength(500)
+  note?: string;
+}

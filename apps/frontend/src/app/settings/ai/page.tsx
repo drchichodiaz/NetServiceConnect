@@ -311,6 +311,30 @@ function CreditsCard({ credits }: { credits: MyAiCredits }) {
   const total = credits.balance + credits.creditsUsed;
   const low = credits.balance <= 0 || credits.usagePercent >= 90;
   const color = credits.balance <= 0 ? '#DC2626' : credits.usagePercent >= 90 ? '#D97706' : '#9333EA';
+  // El pedido de recarga. Sin esto, una empresa sin saldo ve el bot enmudecer y no
+  // tiene a donde ir: la pantalla le decia "escribinos" y ahi terminaba.
+  const [asking, setAsking] = useState(false);
+  const [amount, setAmount] = useState('5000');
+  const [note, setNote] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  async function requestTopUp() {
+    setSending(true);
+    try {
+      await aiCreditsApi.requestTopUp({
+        credits: Number(amount) > 0 ? Number(amount) : undefined,
+        note: note.trim() || undefined,
+      });
+      setSent(true);
+      setAsking(false);
+      toast.success('Pedido enviado. Te vamos a contactar para coordinar la recarga.');
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || 'No se pudo enviar el pedido');
+    } finally {
+      setSending(false);
+    }
+  }
 
   return (
     <div className="card p-5 mb-6">
@@ -367,6 +391,42 @@ function CreditsCard({ credits }: { credits: MyAiCredits }) {
         </div>
       )}
 
+      {!sent && !asking && (
+        <button onClick={() => setAsking(true)} className="btn-secondary w-full mb-3">
+          <Coins className="w-4 h-4" />
+          Pedir recarga
+        </button>
+      )}
+
+      {sent && (
+        <div className="p-2.5 rounded-lg mb-3" style={{ background: '#F0FDF4' }}>
+          <p className="text-[11px]" style={{ color: '#166534' }}>
+            Pedido enviado. Te contactamos para coordinar la recarga.
+          </p>
+        </div>
+      )}
+
+      {asking && (
+        <div className="p-3 rounded-lg mb-3" style={{ background: 'var(--surface-muted)' }}>
+          <label className="block text-[11px] font-medium text-ink-muted mb-1">Créditos que necesitás</label>
+          <input value={amount} onChange={(e) => setAmount(e.target.value)} className="input w-full mb-2" inputMode="numeric" />
+          <label className="block text-[11px] font-medium text-ink-muted mb-1">Algo que quieras aclarar (opcional)</label>
+          <input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Ej: facturar a nombre de..."
+            className="input w-full mb-2"
+          />
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setAsking(false)} className="btn-secondary !px-3 !py-1.5 text-xs">Cancelar</button>
+            <button onClick={requestTopUp} disabled={sending} className="btn-primary !px-3 !py-1.5 text-xs">
+              {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+              Enviar pedido
+            </button>
+          </div>
+        </div>
+      )}
+
       {credits.entries.length > 0 && (
         <details className="group">
           <summary className="text-xs text-ink-muted cursor-pointer list-none flex items-center gap-1.5">
@@ -390,8 +450,7 @@ function CreditsCard({ credits }: { credits: MyAiCredits }) {
       )}
 
       <p className="text-[11px] text-ink-subtle mt-3">
-        Cada respuesta de IA consume créditos según lo que necesite para responder. Para recargar,
-        escribinos.
+        Cada respuesta de IA consume créditos según lo que necesite para responder.
       </p>
     </div>
   );

@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { AiCreditsService } from './ai-credits.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -6,7 +7,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { SuperAdminGuard } from '../common/guards/super-admin.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { StatsPeriod } from '../common/period-range';
-import { GrantCreditsDto, UpdateAiTenantDto, UpdatePlatformSettingsDto } from './dto/ai-credits.dto';
+import { GrantCreditsDto, RequestTopUpDto, UpdateAiTenantDto, UpdatePlatformSettingsDto } from './dto/ai-credits.dto';
 
 const PERIODS: StatsPeriod[] = ['today', 'week', 'month'];
 const parsePeriod = (value?: string): StatsPeriod =>
@@ -30,6 +31,18 @@ export class AiCreditsController {
   @Get('me')
   me(@CurrentUser() user: any, @Query('period') period?: string) {
     return this.service.myCredits(user.tenantId, parsePeriod(period));
+  }
+
+  /**
+   * Pedir una recarga. Lleva limite propio porque dispara correos: 5 por hora alcanza
+   * para insistir un dia complicado y frena un bucle.
+   */
+  @UseGuards(JwtAuthGuard, RolesGuard, ThrottlerGuard)
+  @Roles('ADMIN' as any, 'SUPERVISOR' as any)
+  @Throttle({ default: { limit: 5, ttl: 3_600_000 } })
+  @Post('request-topup')
+  requestTopUp(@CurrentUser() user: any, @Body() dto: RequestTopUpDto) {
+    return this.service.requestTopUp(user.tenantId, user, dto);
   }
 
   // ─── Plataforma ─────────────────────────────────────────────────────────────

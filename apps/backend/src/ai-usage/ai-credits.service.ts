@@ -1,10 +1,13 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { AiLotKind } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from '../common/services/crypto.service';
+import { MailService } from '../mail/mail.service';
+import { SystemConfigService } from '../system-config/system-config.service';
 import { AiWalletService } from './ai-wallet.service';
 import { AiPricingService } from './ai-pricing.service';
 import { getPeriodStart, StatsPeriod } from '../common/period-range';
+import { formatCredits } from './format-credits';
 
 const round = (n: number, decimals = 6) => Math.round(n * 10 ** decimals) / 10 ** decimals;
 
@@ -20,9 +23,13 @@ export const ALERT_THRESHOLDS = [50, 75, 90, 100];
  */
 @Injectable()
 export class AiCreditsService {
+  private readonly logger = new Logger(AiCreditsService.name);
+
   constructor(
     private prisma: PrismaService,
     private crypto: CryptoService,
+    private mail: MailService,
+    private systemConfig: SystemConfigService,
     private wallet: AiWalletService,
     private pricing: AiPricingService,
   ) {}
@@ -289,5 +296,98 @@ export class AiCreditsService {
       lots: snap.lots,
       entries,
     };
+  }
+
+  /**
+   * El cliente pide que le recarguen creditos.
+   *
+   * No es una pasarela de pago: es el pedido. Sin esto, una empresa que se queda sin
+   * saldo ve su bot enmudecer y no tiene a donde ir — la pantalla le decia "escribinos"
+   * y ahi terminaba todo. El cobro y la acreditacion siguen siendo manuales, que es lo
+   * que exige la regla de no acreditar sin pago confirmado.
+   *
+   * Se guarda ANTES de mandar el correo y se guarda aunque el correo falle, igual que
+   * un reporte de soporte: si el SMTP esta caido, el pedido no se puede perder. Por eso
+   * tambien reusa SupportRequest en vez de una tabla propia — es el mismo flujo, y con
+   * una tabla nueva habria que rehacer el guardado, el envio y el limite de frecuencia.
+   */
+  async requestTopUp(
+    tenantId: string,
+    user: { id: string; name?: string | null; email: string },
+    dto: { credits?: number; note?: string },
+  ) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { name: true, aiBillingMode: true },
+    });
+    if (!tenant) throw new NotFoundException('Empresa no encontrada');
+    if (tenant.aiBillingMode !== 'PLATFORM') {
+      throw new BadRequestException('Esta empresa no usa créditos de IA.');
+    }
+
+    const snap = await this.usageSnapshot(tenantId);
+    const pedido = dto.credits && dto.credits > 0 ? Math.floor(dto.credits) : null;
+
+    const request = await this.prisma.supportRequest.create({
+      data: {
+        tenantId,
+        userId: user.id,
+        activity: 'Pedido de recarga de créditos de IA',
+        problem: dto.note?.trim() || (pedido ? `Pide ${pedido} créditos.` : 'Pide una recarga de créditos.'),
+        // Sin saldo el asistente no responde: eso frena el trabajo de verdad.
+        blocking: snap.balance <= 0,
+        context: {
+          kind: 'ai_topup',
+          creditsRequested: pedido,
+          balance: snap.balance,
+          creditsUsed: snap.creditsUsed,
+          usagePercent: snap.usagePercent,
+        } as any,
+      },
+    });
+
+    const ticket = request.id.slice(-8).toUpperCase();
+    const to = (await this.systemConfig.getSupportEmail())?.trim();
+
+    if (!to) {
+      this.logger.warn(`[recarga ${ticket}] ${tenant.name} pide creditos y NO hay direccion de soporte configurada.`);
+      await this.prisma.supportRequest.update({
+        where: { id: request.id },
+        data: { emailError: 'Sin dirección de soporte configurada' },
+      });
+      return { ticket, emailSent: false };
+    }
+
+    const detalle = [
+      `Empresa: ${tenant.name}`,
+      `Pide: ${pedido ? `${formatCredits(pedido)} créditos` : 'una recarga (sin cantidad indicada)'}`,
+      `Saldo actual: ${formatCredits(snap.balance)} créditos`,
+      `Consumo del período: ${formatCredits(snap.creditsUsed)} créditos (${snap.usagePercent} %)`,
+      `Lo pide: ${user.name || '(sin nombre)'} <${user.email}>`,
+      dto.note?.trim() ? `Nota: ${dto.note.trim()}` : '',
+    ].filter(Boolean);
+
+    const result = await this.mail.send({
+      to,
+      replyTo: user.email,
+      subject: `[Connect · ${tenant.name}] Pide recarga de créditos de IA${snap.balance <= 0 ? ' — SIN SALDO' : ''} (${ticket})`,
+      text: detalle.join('\n'),
+      html:
+        '<div style="font-family:sans-serif;font-size:14px;color:#101819;line-height:1.6">' +
+        detalle.map((l) => `<p style="margin:0 0 4px">${l}</p>`).join('') +
+        '<p style="margin:12px 0 0;color:#6B7280;font-size:12px">' +
+        'Acreditá los créditos desde Créditos de IA, con el pago confirmado.</p></div>',
+    });
+
+    await this.prisma.supportRequest.update({
+      where: { id: request.id },
+      data: { emailSent: result.sent, emailError: result.sent ? null : result.error ?? 'Error desconocido' },
+    });
+
+    if (!result.sent) {
+      this.logger.error(`[recarga ${ticket}] guardado pero fallo el envio a ${to}: ${result.error}`);
+    }
+
+    return { ticket, emailSent: result.sent };
   }
 }

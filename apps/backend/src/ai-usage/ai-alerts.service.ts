@@ -1,10 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
+import { SystemConfigService } from '../system-config/system-config.service';
 import { AiCreditsService } from './ai-credits.service';
+import { formatCredits } from './format-credits';
 
 /** Los umbrales de la especificacion. El 100 % no avisa "vas a quedarte": ya se quedo. */
 const THRESHOLDS = [50, 75, 90, 100];
+
+/** A partir de aca el aviso tambien nos llega a nosotros: es una señal de venta. */
+const NOTIFY_OPERATOR_FROM = 90;
 
 interface AlertCopy {
   subject: string;
@@ -31,6 +36,7 @@ export class AiAlertsService {
   constructor(
     private prisma: PrismaService,
     private mail: MailService,
+    private systemConfig: SystemConfigService,
     private credits: AiCreditsService,
   ) {}
 
@@ -112,10 +118,44 @@ export class AiAlertsService {
     }
 
     this.logger.log(`${tenantName} llego al ${threshold} % de sus creditos de IA. Avisados: ${admins.length}.`);
+
+    if (threshold >= NOTIFY_OPERATOR_FROM) await this.notifyOperator(tenantName, threshold, balance);
+  }
+
+  /**
+   * El mismo aviso, para nosotros.
+   *
+   * Hasta ahora el cliente se enteraba de que se estaba quedando sin creditos y nosotros
+   * no: justo la informacion que sirve para venderle la recarga antes de que su bot deje
+   * de responder. Va a la misma direccion que los reportes de soporte, que es de quien
+   * opera este servidor y no del cliente.
+   */
+  private async notifyOperator(tenantName: string, threshold: number, balance: number) {
+    const to = (await this.systemConfig.getSupportEmail())?.trim();
+    if (!to) return;
+
+    const agotado = threshold >= 100;
+    const detalle = agotado
+      ? `${tenantName} se quedo sin creditos de IA. Su asistente dejo de responder y las consultas pasan a sus agentes.`
+      : `${tenantName} uso el ${threshold} % de sus creditos de IA. Le quedan ${formatCredits(balance)}.`;
+
+    const result = await this.mail.send({
+      to,
+      subject: `[Connect · ${tenantName}] ${agotado ? 'Se quedó sin créditos de IA' : `Va por el ${threshold} % de sus créditos`}`,
+      text: `${detalle}
+
+Acreditá desde Créditos de IA, con el pago confirmado.`,
+      html:
+        '<div style="font-family:sans-serif;font-size:14px;color:#101819;line-height:1.6">' +
+        `<p style="margin:0 0 8px">${detalle}</p>` +
+        '<p style="margin:0;color:#6B7280;font-size:12px">Acreditá desde Créditos de IA, con el pago confirmado.</p></div>',
+    });
+
+    if (!result.sent) this.logger.warn(`No salio el aviso interno de ${tenantName} al ${threshold} %: ${result.error}`);
   }
 
   private copyFor(threshold: number, balance: number): AlertCopy {
-    const quedan = `Te quedan ${balance.toLocaleString('es')} créditos.`;
+    const quedan = `Te quedan ${formatCredits(balance)} créditos.`;
 
     if (threshold >= 100) {
       return {
