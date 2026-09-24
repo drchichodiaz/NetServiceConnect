@@ -73,7 +73,7 @@ export interface Conversation {
 }
 
 export type MessageDirection = 'INBOUND' | 'OUTBOUND';
-export type MessageType = 'TEXT' | 'IMAGE' | 'AUDIO' | 'DOCUMENT' | 'VIDEO' | 'STICKER';
+export type MessageType = 'TEXT' | 'IMAGE' | 'AUDIO' | 'DOCUMENT' | 'VIDEO' | 'STICKER' | 'TEMPLATE' | 'LOCATION';
 export type MessageStatus = 'PENDING' | 'SENT' | 'DELIVERED' | 'READ' | 'FAILED';
 
 export interface Message {
@@ -90,7 +90,18 @@ export interface Message {
   /** Motivo del fallo de entrega segun Meta, solo cuando status es FAILED. */
   failureReason?: string | null;
   externalId?: string;
+  /** Lo que mando Meta (entrantes) o lo que guardo el bot. En una ubicacion trae `location`. */
+  rawPayload?: { location?: MessageLocation } | null;
   createdAt: string;
+}
+
+export interface MessageLocation {
+  latitude?: number;
+  longitude?: number;
+  name?: string;
+  address?: string;
+  /** Link del lugar, si vino (Meta lo manda cuando se comparte un negocio). */
+  url?: string;
 }
 
 export interface InternalNote {

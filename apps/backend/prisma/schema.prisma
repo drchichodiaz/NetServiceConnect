@@ -473,6 +473,9 @@ enum MessageType {
   VIDEO
   STICKER
   TEMPLATE
+  // Una ubicacion: la que comparte un cliente o la que manda el bot desde un nodo
+  // LOCATION. Las coordenadas viajan en rawPayload.location.
+  LOCATION
 }
 
 enum MessageStatus {
@@ -758,6 +761,9 @@ enum MenuNodeType {
   ORDER_LOOKUP
   AGENT
   AI_CHAT
+  // Manda una tarjeta de ubicacion de WhatsApp. Coordenadas en config (ver
+  // common/maps-link.ts), sacadas del link de Google Maps que pega el admin.
+  LOCATION
 }
 
 // ─── System Config (global, singleton) ───────────────────────────────────────

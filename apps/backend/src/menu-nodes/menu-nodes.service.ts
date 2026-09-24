@@ -2,8 +2,9 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { LookupService, LookupConfig } from '../common/lookup.service';
 import { BotsService } from '../bots/bots.service';
+import { LocationConfig, resolveMapsLink } from '../common/maps-link';
 
-const NODE_TYPES = ['MENU', 'TEXT', 'ORDER_LOOKUP', 'AGENT', 'AI_CHAT'] as const;
+const NODE_TYPES = ['MENU', 'TEXT', 'ORDER_LOOKUP', 'AGENT', 'AI_CHAT', 'LOCATION'] as const;
 type NodeType = (typeof NODE_TYPES)[number];
 
 export interface MenuNodeDto {
@@ -65,6 +66,15 @@ export class MenuNodesService {
     };
   }
 
+  /**
+   * Coordenadas de un link de Google Maps, para que el panel las muestre antes de
+   * guardar. Un error aca es una respuesta normal (link sin coordenadas, link ajeno),
+   * no una excepcion: el panel lo muestra al lado del campo.
+   */
+  resolveLocation(url: string) {
+    return resolveMapsLink(url);
+  }
+
   async getTree(tenantId: string, botId: string) {
     if (!botId) throw new BadRequestException('Falta indicar el bot');
     await this.bots.findOneOrThrow(tenantId, botId);
@@ -100,7 +110,7 @@ export class MenuNodesService {
         subtitle: dto.subtitle?.trim() || null,
         bodyText: dto.bodyText?.trim() || null,
         promptText: dto.promptText?.trim() || null,
-        config: dto.config ?? undefined,
+        config: (type === 'LOCATION' && dto.config ? cleanLocationConfig(dto.config) : dto.config) ?? undefined,
         sortOrder: siblingCount,
       },
     });
@@ -117,7 +127,9 @@ export class MenuNodesService {
         ...(dto.subtitle !== undefined && { subtitle: dto.subtitle.trim() || null }),
         ...(dto.bodyText !== undefined && { bodyText: dto.bodyText.trim() || null }),
         ...(dto.promptText !== undefined && { promptText: dto.promptText.trim() || null }),
-        ...(dto.config !== undefined && { config: dto.config }),
+        ...(dto.config !== undefined && {
+          config: existing.type === 'LOCATION' && dto.config ? cleanLocationConfig(dto.config) : dto.config,
+        }),
         ...(dto.active !== undefined && { active: dto.active }),
       },
     });
@@ -189,4 +201,34 @@ export class MenuNodesService {
       current = parentNode?.parentId ?? null;
     }
   }
+}
+
+/**
+ * Deja la config de un nodo LOCATION con solo lo que usa el bot, y las coordenadas como
+ * numeros. Unas coordenadas fuera de rango se rechazan aca: si se guardaran, el error
+ * aparece recien cuando un cliente toca la opcion y Meta rechaza el mensaje.
+ */
+function cleanLocationConfig(raw: any): LocationConfig {
+  const text = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined);
+  const num = (v: unknown) => (v === null || v === undefined || v === '' ? undefined : Number(v));
+
+  const latitude = num(raw?.latitude);
+  const longitude = num(raw?.longitude);
+  if ((latitude === undefined) !== (longitude === undefined)) {
+    throw new BadRequestException('Faltan la latitud o la longitud');
+  }
+  if (latitude !== undefined && longitude !== undefined) {
+    if (!Number.isFinite(latitude) || Math.abs(latitude) > 90) throw new BadRequestException('La latitud tiene que estar entre -90 y 90');
+    if (!Number.isFinite(longitude) || Math.abs(longitude) > 180) throw new BadRequestException('La longitud tiene que estar entre -180 y 180');
+  }
+
+  return {
+    mapsUrl: text(raw?.mapsUrl, 1000),
+    latitude,
+    longitude,
+    // WhatsApp no documenta un tope, pero la tarjeta muestra una o dos lineas: mas
+    // largo que esto no se lee.
+    name: text(raw?.name, 100),
+    address: text(raw?.address, 200),
+  };
 }

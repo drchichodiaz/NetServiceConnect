@@ -1,7 +1,7 @@
 'use client';
 import { CSS } from '@dnd-kit/utilities';
 import { useSortable } from '@dnd-kit/sortable';
-import { GripVertical, ChevronRight, ChevronDown, FolderTree, MessageSquare, PackageSearch, Headphones, Sparkles } from 'lucide-react';
+import { GripVertical, ChevronRight, ChevronDown, FolderTree, MessageSquare, PackageSearch, Headphones, Sparkles, MapPin } from 'lucide-react';
 import clsx from 'clsx';
 import { FlattenedNode, INDENTATION_WIDTH, MenuNodeType } from '@/lib/sortable-tree';
 
@@ -11,6 +11,7 @@ export const TYPE_ICON: Record<MenuNodeType, typeof FolderTree> = {
   ORDER_LOOKUP: PackageSearch,
   AGENT: Headphones,
   AI_CHAT: Sparkles,
+  LOCATION: MapPin,
 };
 
 export const TYPE_LABEL: Record<MenuNodeType, string> = {
@@ -19,6 +20,7 @@ export const TYPE_LABEL: Record<MenuNodeType, string> = {
   ORDER_LOOKUP: 'Consulta a sistema externo',
   AGENT: 'Hablar con un agente',
   AI_CHAT: 'Modo IA',
+  LOCATION: 'Ubicación',
 };
 
 // El modo IA usa la paleta morada que ya identifica todo lo de IA en la app
@@ -29,10 +31,12 @@ const TYPE_COLOR: Record<MenuNodeType, { bg: string; fg: string }> = {
   ORDER_LOOKUP: { bg: 'var(--green-light)', fg: 'var(--green-dark)' },
   AGENT: { bg: 'var(--green-light)', fg: 'var(--green-dark)' },
   AI_CHAT: { bg: '#F3E8FF', fg: '#9333EA' },
+  LOCATION: { bg: 'var(--green-light)', fg: 'var(--green-dark)' },
 };
 
 export const ADDABLE_TYPES: { type: MenuNodeType; label: string }[] = [
   { type: 'TEXT', label: 'Texto' },
+  { type: 'LOCATION', label: 'Ubicación' },
   { type: 'MENU', label: 'Submenú' },
   { type: 'ORDER_LOOKUP', label: 'Consulta a sistema externo' },
   { type: 'AGENT', label: 'Hablar con un agente' },
@@ -105,7 +109,7 @@ export default function MenuNodeRow({ node, selected, collapsed, hasChildren, in
         <span
           className="text-[10px] font-semibold rounded-full px-2 py-0.5 shrink-0"
           style={{ background: '#FEF2F2', color: '#B91C1C' }}
-          title="Le falta configuración: si un cliente la elige, pasa directo a un agente"
+          title="Le falta configuración: tocala para ver qué falta"
         >
           Incompleta
         </span>

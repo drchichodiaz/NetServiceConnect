@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventBusService } from '../events/event-bus.service';
 import { AssignmentService } from '../whatsapp/assignment.service';
@@ -8,8 +9,9 @@ import { WhatsAppAccountsService, WhatsAppAccountCreds } from '../whatsapp/accou
 import { AiGatewayService } from '../ai-usage/ai-gateway.service';
 import { LookupService, LookupConfig } from '../common/lookup.service';
 import { BotsService } from '../bots/bots.service';
+import { LocationConfig, hasValidCoordinates, mapsLinkFor } from '../common/maps-link';
 
-type MenuNodeType = 'MENU' | 'TEXT' | 'ORDER_LOOKUP' | 'AGENT' | 'AI_CHAT';
+type MenuNodeType = 'MENU' | 'TEXT' | 'ORDER_LOOKUP' | 'AGENT' | 'AI_CHAT' | 'LOCATION';
 
 interface MenuNode {
   id: string;
@@ -251,6 +253,8 @@ export class BotService {
         return this.handoffToHuman(tenantId, conversationId, 'menu_selection');
       case 'AI_CHAT':
         return this.startAiChat(tenantId, conversationId, phone, node, account);
+      case 'LOCATION':
+        return this.sendLocation(tenantId, conversationId, phone, account, node);
     }
   }
 
@@ -533,6 +537,52 @@ ${knowledgeBase}
   }
 
   // ─── Prompt post-respuesta (generaliza confirmación de resolución + follow-up) ─
+
+  /**
+   * Manda la ubicacion como tarjeta de WhatsApp (mapa + nombre + direccion), con el
+   * texto del nodo antes si lo tiene, y sigue igual que una respuesta de texto.
+   *
+   * Sin coordenadas validas no se deja al cliente sin nada: si hay link se manda como
+   * texto (sigue sirviendo para llegar), y si no hay ni eso, el aviso de "todavia no
+   * cargamos esta informacion".
+   */
+  private async sendLocation(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, node: MenuNode) {
+    const config = (node.config ?? {}) as LocationConfig;
+    const intro = node.bodyText?.trim();
+
+    if (intro) {
+      const sent = await this.sendText(tenantId, conversationId, phone, account, intro);
+      if (!sent) return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
+    }
+
+    let sent: boolean;
+    if (hasValidCoordinates(config)) {
+      const location = {
+        latitude: config.latitude,
+        longitude: config.longitude,
+        ...(config.name && { name: config.name }),
+        ...(config.address && { address: config.address }),
+      };
+      const payload = { messaging_product: 'whatsapp', recipient_type: 'individual', to: phone, type: 'location', location };
+      const summary = `📍 ${[config.name, config.address].filter(Boolean).join(' — ') || node.title}`;
+      sent = await this.sendAndLog(tenantId, conversationId, account, payload, summary, {
+        type: 'LOCATION',
+        rawPayload: { location: { ...location, url: config.mapsUrl || mapsLinkFor(config.latitude, config.longitude) } },
+      });
+    } else {
+      this.logger.warn(`Nodo de ubicacion "${node.title}" (${node.id}) sin coordenadas validas (tenant ${tenantId}).`);
+      const fallback = config.mapsUrl
+        ? [config.name, config.address, config.mapsUrl].filter(Boolean).join('\n')
+        : intro ? null : DEFAULT_CONFIG_TEXT;
+      sent = fallback ? await this.sendText(tenantId, conversationId, phone, account, fallback) : true;
+    }
+    if (!sent) return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
+
+    await this.prisma.auditLog.create({
+      data: { tenantId, conversationId, action: 'bot.node_selected', metadata: { nodeId: node.id, title: node.title, nodeType: node.type } },
+    });
+    return this.sendPostReplyPrompt(tenantId, conversationId, phone, account, node.parentId);
+  }
 
   private async sendPostReplyPrompt(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, parentNodeId: string | null) {
     const sent = await this.sendButtons(tenantId, conversationId, phone, account, '¿Necesitas algo más?', [
@@ -902,6 +952,8 @@ ${knowledgeBase}
     account: WhatsAppAccountCreds,
     payload: any,
     bodyForHistory: string,
+    /** Para lo que no es texto (hoy, la ubicacion): el tipo y lo que la bandeja necesita para dibujarlo. */
+    extra: { type?: 'TEXT' | 'LOCATION'; rawPayload?: Prisma.InputJsonValue } = {},
   ): Promise<boolean> {
     let externalId: string | undefined;
     try {
@@ -922,10 +974,11 @@ ${knowledgeBase}
           tenantId,
           conversationId,
           direction: 'OUTBOUND',
-          type: 'TEXT',
+          type: extra.type ?? 'TEXT',
           body: bodyForHistory,
           status: 'SENT',
           externalId,
+          ...(extra.rawPayload !== undefined && { rawPayload: extra.rawPayload }),
         },
       }),
       this.prisma.conversation.update({

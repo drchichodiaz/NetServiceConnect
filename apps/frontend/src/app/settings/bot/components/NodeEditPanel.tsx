@@ -1,8 +1,8 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Trash2, Loader2, Plus, X, Play, Plug, AlertCircle, CheckCircle } from 'lucide-react';
+import { Trash2, Loader2, Plus, X, Play, Plug, AlertCircle, CheckCircle, MapPin, ExternalLink } from 'lucide-react';
 import { MenuNode, MenuNodeType } from '@/lib/sortable-tree';
-import { menuNodesApi, LookupConfig, LookupTestResult } from '@/lib/api';
+import { menuNodesApi, LookupConfig, LookupTestResult, LocationConfig } from '@/lib/api';
 import { TYPE_LABEL, ADDABLE_TYPES } from './MenuNodeRow';
 import InfoTooltip from '@/components/ui/InfoTooltip';
 
@@ -15,7 +15,17 @@ interface FormState {
 }
 
 interface SavePatch extends Partial<FormState> {
-  config?: LookupConfig;
+  config?: LookupConfig | LocationConfig;
+}
+
+/** Si un nodo de ubicacion ya tiene con que mandar la tarjeta de WhatsApp. */
+export function hasCoordinates(config: unknown): boolean {
+  const c = (config ?? {}) as LocationConfig;
+  return (
+    typeof c.latitude === 'number' && typeof c.longitude === 'number' &&
+    Math.abs(c.latitude) <= 90 && Math.abs(c.longitude) <= 180 &&
+    !(c.latitude === 0 && c.longitude === 0)
+  );
 }
 
 interface Props {
@@ -94,7 +104,7 @@ export default function NodeEditPanel({ node, descendantCount, saving, onSave, o
         )}
       </div>
 
-      {(node.type === 'TEXT' || node.type === 'MENU') && (
+      {(node.type === 'TEXT' || node.type === 'MENU' || node.type === 'LOCATION') && (
         <div className="space-y-1.5">
           <label className="text-xs font-semibold text-ink flex items-center justify-between">
             <span className="flex items-center gap-1.5">
@@ -134,6 +144,33 @@ export default function NodeEditPanel({ node, descendantCount, saving, onSave, o
             placeholder="Lo que responde el bot cuando el cliente elige esta opción"
           />
         </div>
+      )}
+
+      {node.type === 'LOCATION' && (
+        <>
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-ink flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <span>Texto antes de la ubicación</span>
+                <InfoTooltip
+                  text="Un mensaje que el bot manda justo antes de la tarjeta con el mapa. Sirve para lo que la tarjeta no muestra: horarios, dónde estacionar, el piso."
+                  example="Estamos en el segundo piso, al lado del banco. Abrimos de 9am a 7pm."
+                />
+              </span>
+              <span className="text-[10px] font-normal text-ink-subtle">Opcional</span>
+            </label>
+            <textarea
+              value={form.bodyText}
+              onChange={(e) => setForm((f) => ({ ...f, bodyText: e.target.value }))}
+              onBlur={(e) => saveField('bodyText', e.target.value)}
+              rows={2}
+              className="input w-full text-sm"
+              placeholder="Ej: Abrimos de lunes a sábado de 9am a 7pm."
+            />
+          </div>
+
+          <LocationConfigSection node={node} onSave={onSave} />
+        </>
       )}
 
       {node.type === 'AI_CHAT' && aiMissing.length > 0 && (
@@ -508,4 +545,228 @@ function LookupConfigSection({ node, onSave }: { node: MenuNode; onSave: (patch:
       </div>
     </div>
   );
+}
+
+// ─── Ubicación (nodo LOCATION) ────────────────────────────────────────────────
+
+/**
+ * WhatsApp manda la ubicación como tarjeta con mapa, pero pide latitud y longitud, no
+ * un link. Se pega el link de Google Maps (es lo que cualquiera tiene a mano), el
+ * servidor saca las coordenadas y se muestran para poder revisarlas antes de que las
+ * vea un cliente. Si el link no las trae, se pueden escribir a mano.
+ */
+function LocationConfigSection({ node, onSave }: { node: MenuNode; onSave: (patch: SavePatch) => void }) {
+  const [cfg, setCfg] = useState<LocationConfig>((node.config ?? {}) as LocationConfig);
+  const [lat, setLat] = useState(toText(cfg.latitude));
+  const [lng, setLng] = useState(toText(cfg.longitude));
+  const [detecting, setDetecting] = useState(false);
+  const [detectError, setDetectError] = useState<string | null>(null);
+  const [lastDetected, setLastDetected] = useState(cfg.mapsUrl ?? '');
+
+  useEffect(() => {
+    const next = (node.config ?? {}) as LocationConfig;
+    setCfg(next);
+    setLat(toText(next.latitude));
+    setLng(toText(next.longitude));
+    setDetectError(null);
+    setLastDetected(next.mapsUrl ?? '');
+  }, [node.id]);
+
+  function persist(patch: Partial<LocationConfig>) {
+    const next = { ...cfg, ...patch };
+    setCfg(next);
+    onSave({ config: next });
+  }
+
+  async function detect(url: string) {
+    const clean = url.trim();
+    if (!clean || clean === lastDetected) return;
+    setDetecting(true);
+    setDetectError(null);
+    try {
+      const res = await menuNodesApi.resolveLocation(clean);
+      setLastDetected(clean);
+      if (!res.ok) {
+        setDetectError(res.error);
+        persist({ mapsUrl: clean });
+        return;
+      }
+      setLat(String(res.latitude));
+      setLng(String(res.longitude));
+      persist({
+        mapsUrl: clean,
+        latitude: res.latitude,
+        longitude: res.longitude,
+        // El nombre del lugar solo se sugiere si todavia no escribieron uno.
+        ...(!cfg.name?.trim() && res.name ? { name: res.name } : {}),
+      });
+    } catch (err: any) {
+      setDetectError(err?.response?.data?.message || 'No se pudo revisar el link');
+    } finally {
+      setDetecting(false);
+    }
+  }
+
+  /** Las coordenadas escritas a mano: se guardan solo cuando las dos son numeros. */
+  function persistCoords(nextLat: string, nextLng: string) {
+    if (nextLat.trim() === '' && nextLng.trim() === '') {
+      persist({ latitude: undefined, longitude: undefined });
+      return;
+    }
+    const la = parseCoord(nextLat);
+    const lo = parseCoord(nextLng);
+    if (la === null || lo === null) return;
+    setDetectError(null);
+    persist({ latitude: la, longitude: lo });
+  }
+
+  const ready = hasCoordinates(cfg);
+  const checkUrl = ready ? `https://www.google.com/maps/search/?api=1&query=${cfg.latitude},${cfg.longitude}` : null;
+
+  return (
+    <div className="space-y-3 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
+      <p className="text-xs font-semibold text-ink flex items-center gap-1.5">
+        <MapPin className="w-3.5 h-3.5" />
+        Dónde queda
+      </p>
+
+      <div className="space-y-1.5">
+        <label className="text-xs font-semibold text-ink flex items-center gap-1.5">
+          <span>Link de Google Maps</span>
+          <InfoTooltip
+            text="Buscá el lugar en Google Maps, tocá Compartir y pegá acá el link. Las coordenadas se detectan solas al salir del campo."
+            example="https://maps.app.goo.gl/AbCd1234"
+          />
+        </label>
+        <div className="flex items-center gap-2">
+          <input
+            value={cfg.mapsUrl ?? ''}
+            onChange={(e) => setCfg((c) => ({ ...c, mapsUrl: e.target.value }))}
+            onBlur={(e) => detect(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') detect((e.target as HTMLInputElement).value); }}
+            className="input flex-1 text-xs font-mono"
+            placeholder="https://maps.app.goo.gl/..."
+          />
+          {detecting && <Loader2 className="w-3.5 h-3.5 animate-spin text-ink-subtle shrink-0" />}
+        </div>
+        {detectError && (
+          <p className="text-[11px] flex items-start gap-1.5" style={{ color: '#B91C1C' }}>
+            <AlertCircle className="w-3 h-3 shrink-0 mt-0.5" />
+            {detectError}
+          </p>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-ink">Latitud</label>
+          <input
+            value={lat}
+            onChange={(e) => setLat(e.target.value)}
+            onBlur={(e) => persistCoords(e.target.value, lng)}
+            className="input w-full text-xs font-mono"
+            placeholder="8.9824"
+            inputMode="decimal"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-ink">Longitud</label>
+          <input
+            value={lng}
+            onChange={(e) => setLng(e.target.value)}
+            onBlur={(e) => persistCoords(lat, e.target.value)}
+            className="input w-full text-xs font-mono"
+            placeholder="-79.5199"
+            inputMode="decimal"
+          />
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="text-xs font-semibold text-ink flex items-center justify-between">
+          <span className="flex items-center gap-1.5">
+            <span>Nombre del lugar</span>
+            <InfoTooltip
+              text="Lo que WhatsApp muestra en negrita en la tarjeta de ubicación."
+              example="Sucursal Costa del Este"
+            />
+          </span>
+          <span className="text-[10px] font-normal text-ink-subtle">Opcional</span>
+        </label>
+        <input
+          value={cfg.name ?? ''}
+          onChange={(e) => setCfg((c) => ({ ...c, name: e.target.value }))}
+          onBlur={(e) => persist({ name: e.target.value })}
+          className="input w-full text-sm"
+          placeholder="Ej: Sucursal Costa del Este"
+          maxLength={100}
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="text-xs font-semibold text-ink flex items-center justify-between">
+          <span className="flex items-center gap-1.5">
+            <span>Dirección</span>
+            <InfoTooltip
+              text="Aparece debajo del nombre en la tarjeta."
+              example="Av. Centenario, Plaza Costa del Este, local 12"
+            />
+          </span>
+          <span className="text-[10px] font-normal text-ink-subtle">Opcional</span>
+        </label>
+        <input
+          value={cfg.address ?? ''}
+          onChange={(e) => setCfg((c) => ({ ...c, address: e.target.value }))}
+          onBlur={(e) => persist({ address: e.target.value })}
+          className="input w-full text-sm"
+          placeholder="Ej: Av. Centenario, local 12"
+          maxLength={200}
+        />
+      </div>
+
+      {/* Vista previa: lo que va a ver el cliente, para revisar el lugar antes */}
+      <div
+        className="rounded-xl p-3 space-y-2"
+        style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)' }}
+      >
+        <p className="text-[11px] font-semibold text-ink">Así lo recibe el cliente</p>
+        {ready ? (
+          <div className="rounded-lg px-3 py-2.5 flex items-start gap-2.5" style={{ background: '#DCF8C6' }}>
+            <MapPin className="w-4 h-4 shrink-0 mt-0.5" style={{ color: '#DC2626' }} />
+            <div className="min-w-0 text-xs">
+              <p className="font-semibold text-ink truncate">{cfg.name?.trim() || 'Ubicación'}</p>
+              {cfg.address?.trim() && <p className="text-ink-muted">{cfg.address}</p>}
+              <a
+                href={checkUrl!}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="inline-flex items-center gap-1 mt-1 font-semibold underline"
+                style={{ color: '#128C7E' }}
+              >
+                Revisar el punto en el mapa
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+          </div>
+        ) : (
+          <p className="text-[11px] flex items-start gap-1.5" style={{ color: '#B45309' }}>
+            <AlertCircle className="w-3 h-3 shrink-0 mt-0.5" />
+            {cfg.mapsUrl?.trim()
+              ? 'Todavía no hay coordenadas. Mientras tanto el bot manda el link como texto.'
+              : 'Todavía no hay coordenadas: el bot no puede mandar la tarjeta.'}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function toText(n?: number): string {
+  return typeof n === 'number' ? String(n) : '';
+}
+
+/** Acepta coma decimal: en la región muchos escriben "8,98". */
+function parseCoord(value: string): number | null {
+  const n = Number(value.trim().replace(',', '.'));
+  return value.trim() !== '' && Number.isFinite(n) ? n : null;
 }

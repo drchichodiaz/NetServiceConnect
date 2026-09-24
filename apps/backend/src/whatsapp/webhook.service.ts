@@ -287,6 +287,13 @@ export class WebhookService {
       case 'document':  return msg.document?.filename || '[documento]';
       case 'video':     return msg.video?.caption || '[video]';
       case 'sticker':   return '[sticker]';
+      // Antes caia en el default y la bandeja mostraba "[mensaje]": el agente no sabia
+      // que el cliente le habia mandado donde estaba. El nombre y la direccion solo
+      // vienen si compartio un lugar; si compartio su posicion, no hay texto.
+      case 'location': {
+        const label = [msg.location?.name, msg.location?.address].filter(Boolean).join(' — ');
+        return label ? `📍 ${label}` : '📍 Ubicación';
+      }
       // Cuando el cliente toca una respuesta rapida de una PLANTILLA, Meta manda
       // type 'button' (no 'interactive', que es el de los botones del bot). Sin este
       // caso caia en el default y la bandeja mostraba "[mensaje]": el agente sabia
@@ -320,6 +327,7 @@ export class WebhookService {
       document:    'DOCUMENT',
       video:       'VIDEO',
       sticker:     'STICKER',
+      location:    'LOCATION',
       interactive: 'TEXT',
       button:      'TEXT',
     };

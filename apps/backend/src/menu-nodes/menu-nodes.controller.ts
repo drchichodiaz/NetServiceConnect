@@ -11,6 +11,13 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 export class MenuNodesController {
   constructor(private service: MenuNodesService) {}
 
+  // Va antes de las rutas con :id. Detecta las coordenadas de un link de Google Maps
+  // para el nodo de ubicacion, antes de guardarlo.
+  @Post('resolve-location')
+  resolveLocation(@Body() body: { url?: string }) {
+    return this.service.resolveLocation(body?.url ?? '');
+  }
+
   @Get()
   getTree(@CurrentUser() user: any, @Query('botId') botId: string) {
     return this.service.getTree(user.tenantId, botId);

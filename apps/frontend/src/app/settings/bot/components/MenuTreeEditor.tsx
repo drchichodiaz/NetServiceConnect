@@ -17,7 +17,7 @@ import toast from 'react-hot-toast';
 import { menuNodesApi } from '@/lib/api';
 import { MenuNode, MenuNodeType, flattenTree, getProjection, countDescendants, arrayMove, INDENTATION_WIDTH, Projection } from '@/lib/sortable-tree';
 import MenuNodeRow, { TYPE_LABEL, TYPE_ICON, ADDABLE_TYPES } from './MenuNodeRow';
-import NodeEditPanel from './NodeEditPanel';
+import NodeEditPanel, { hasCoordinates } from './NodeEditPanel';
 
 const DEFAULT_TITLE: Record<MenuNodeType, string> = {
   TEXT: 'Nueva opción',
@@ -26,6 +26,7 @@ const DEFAULT_TITLE: Record<MenuNodeType, string> = {
   AGENT: 'Hablar con un agente',
   // Hasta 24 caracteres: es lo que muestra WhatsApp en la lista, el resto lo corta.
   AI_CHAT: 'Pregúntame lo que sea',
+  LOCATION: 'Ubicación',
 };
 
 export default function MenuTreeEditor({
@@ -254,7 +255,10 @@ export default function MenuTreeEditor({
                       selected={node.id === selectedId}
                       collapsed={collapsed.has(node.id)}
                       hasChildren={(childCountByParent.get(node.id) ?? 0) > 0}
-                      incomplete={node.type === 'AI_CHAT' && aiMissing.length > 0}
+                      incomplete={
+                        (node.type === 'AI_CHAT' && aiMissing.length > 0) ||
+                        (node.type === 'LOCATION' && !hasCoordinates(node.config))
+                      }
                       onSelect={() => setSelectedId(node.id)}
                       onToggleCollapse={() => toggleCollapse(node.id)}
                     />

@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { format } from 'date-fns';
-import { Check, CheckCheck, Clock, AlertCircle, Image, Mic, FileText, Loader2, Download, Bot, ChevronDown, ExternalLink } from 'lucide-react';
+import { Check, CheckCheck, Clock, AlertCircle, Image, Mic, FileText, Loader2, Download, Bot, ChevronDown, ExternalLink, MapPin } from 'lucide-react';
 import { Message } from '@/types';
 import { useAuthedMedia } from '@/hooks/useAuthedMedia';
 import clsx from 'clsx';
@@ -45,6 +45,11 @@ function MediaBadge({ type }: { type: string }) {
 }
 
 const MEDIA_TYPES = ['IMAGE', 'AUDIO', 'DOCUMENT', 'VIDEO', 'STICKER'];
+
+function hasLocationCard(message: Message): boolean {
+  const loc = message.rawPayload?.location;
+  return message.type === 'LOCATION' && typeof loc?.latitude === 'number' && typeof loc?.longitude === 'number';
+}
 
 // El backend guarda un placeholder tipo "[imagen]"/"[audio]"/etc. como body cuando el
 // mensaje no trae una leyenda real (sirve para la vista previa de la lista de chats,
@@ -110,6 +115,43 @@ function MediaContent({ message }: { message: Message }) {
       <FileText className="w-3.5 h-3.5 shrink-0" />
       <span className="text-xs">Descargar documento</span>
       <Download className="w-3 h-3 shrink-0" />
+    </a>
+  );
+}
+
+/**
+ * Una ubicacion, la comparta el cliente o la mande el bot. Las coordenadas vienen en
+ * rawPayload.location. El link se arma siempre desde las coordenadas y no se usa el
+ * `url` que puede mandar Meta: cuando alguien comparte un negocio, ese campo es la web
+ * del negocio, y aca no se renderiza como link cualquier cosa que llegue de afuera.
+ */
+function LocationCard({ message }: { message: Message }) {
+  const loc = message.rawPayload?.location;
+  if (typeof loc?.latitude !== 'number' || typeof loc?.longitude !== 'number') return null;
+  const href = `https://www.google.com/maps/search/?api=1&query=${loc.latitude},${loc.longitude}`;
+
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer noopener"
+      className="flex items-start gap-2.5 rounded-xl px-3 py-2.5 mb-1 transition-opacity hover:opacity-90"
+      style={{ background: 'rgba(255,255,255,0.6)', border: '1px solid rgba(0,0,0,0.06)' }}
+    >
+      <span
+        className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
+        style={{ background: '#FEE2E2' }}
+      >
+        <MapPin className="w-4 h-4" style={{ color: '#DC2626' }} />
+      </span>
+      <span className="min-w-0 text-xs">
+        <span className="block font-semibold text-ink">{loc.name || 'Ubicación'}</span>
+        {loc.address && <span className="block text-ink-muted">{loc.address}</span>}
+        <span className="flex items-center gap-1 mt-0.5 font-semibold" style={{ color: '#128C7E' }}>
+          Ver en Google Maps
+          <ExternalLink className="w-3 h-3" />
+        </span>
+      </span>
     </a>
   );
 }
@@ -230,7 +272,10 @@ export default function MessageBubble({ message }: Props) {
 
         {message.type !== 'TEXT' && <MediaContent message={message} />}
 
-        {message.body && !isPlaceholderBody(message.body) && (
+        {message.type === 'LOCATION' && <LocationCard message={message} />}
+
+        {/* Con la tarjeta dibujada, el "📍 nombre — direccion" del body la repetiria */}
+        {message.body && !isPlaceholderBody(message.body) && !hasLocationCard(message) && (
           <p className="whitespace-pre-wrap break-words">{message.body}</p>
         )}
 

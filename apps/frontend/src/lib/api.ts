@@ -255,15 +255,28 @@ export interface MenuNodeInput {
   /** Obligatorio para una opción de la raíz; con parentId se hereda del padre. */
   botId?: string;
   parentId?: string | null;
-  type?: 'MENU' | 'TEXT' | 'ORDER_LOOKUP' | 'AGENT' | 'AI_CHAT';
+  type?: 'MENU' | 'TEXT' | 'ORDER_LOOKUP' | 'AGENT' | 'AI_CHAT' | 'LOCATION';
   title: string;
   subtitle?: string;
   bodyText?: string;
   promptText?: string;
   active?: boolean;
-  /** Config del nodo ORDER_LOOKUP: URL del sistema externo, plantilla de respuesta, etc. */
-  config?: LookupConfig | null;
+  /** Config del nodo ORDER_LOOKUP (URL del sistema externo, plantilla...) o LOCATION (coordenadas). */
+  config?: LookupConfig | LocationConfig | null;
 }
+
+/** Config de un nodo LOCATION. Las coordenadas salen del link al detectarlo. */
+export interface LocationConfig {
+  mapsUrl?: string;
+  latitude?: number;
+  longitude?: number;
+  name?: string;
+  address?: string;
+}
+
+export type ResolveLocationResult =
+  | { ok: true; latitude: number; longitude: number; name: string | null; resolvedUrl: string }
+  | { ok: false; error: string };
 
 export interface LookupConfig {
   apiUrl?: string;
@@ -294,6 +307,9 @@ export const menuNodesApi = {
   // Prueba la consulta al sistema externo sin mandarse un WhatsApp
   testLookup: (id: string, value: string): Promise<LookupTestResult> =>
     api.post(`/menu-nodes/${id}/test-lookup`, { value }).then((r) => r.data),
+  // Coordenadas de un link de Google Maps, para el nodo de ubicacion
+  resolveLocation: (url: string): Promise<ResolveLocationResult> =>
+    api.post('/menu-nodes/resolve-location', { url }).then((r) => r.data),
 };
 
 // ─── Stats ────────────────────────────────────────────────────────────────────
