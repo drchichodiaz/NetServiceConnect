@@ -50,7 +50,6 @@ export default function MenuTreeEditor({
 
   useEffect(() => {
     setSelectedId(null);
-    setCollapsed(new Set());
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [botId]);
@@ -63,8 +62,10 @@ export default function MenuTreeEditor({
   async function load() {
     setLoading(true);
     try {
-      const tree = await menuNodesApi.getTree(botId);
+      const tree: MenuNode[] = await menuNodesApi.getTree(botId);
       setNodes(tree);
+      // Los submenús arrancan plegados: abiertos, un menú grande ocupaba varias pantallas.
+      setCollapsed(new Set(tree.filter((n) => n.parentId).map((n) => n.parentId!)));
     } catch {
       toast.error('Error al cargar el menú del bot');
     } finally {
@@ -254,7 +255,7 @@ export default function MenuTreeEditor({
                       node={node}
                       selected={node.id === selectedId}
                       collapsed={collapsed.has(node.id)}
-                      hasChildren={(childCountByParent.get(node.id) ?? 0) > 0}
+                      childCount={childCountByParent.get(node.id) ?? 0}
                       incomplete={
                         (node.type === 'AI_CHAT' && aiMissing.length > 0) ||
                         (node.type === 'LOCATION' && !hasCoordinates(node.config))

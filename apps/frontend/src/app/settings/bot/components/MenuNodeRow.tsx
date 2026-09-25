@@ -47,16 +47,18 @@ interface Props {
   node: FlattenedNode;
   selected: boolean;
   collapsed: boolean;
-  hasChildren: boolean;
+  /** Cuántas opciones tiene adentro (solo cuenta el primer nivel). */
+  childCount: number;
   /** Opción que no va a funcionar tal como está (hoy: modo IA sin configurar). */
   incomplete?: boolean;
   onSelect: () => void;
   onToggleCollapse: () => void;
 }
 
-export default function MenuNodeRow({ node, selected, collapsed, hasChildren, incomplete, onSelect, onToggleCollapse }: Props) {
+export default function MenuNodeRow({ node, selected, collapsed, childCount, incomplete, onSelect, onToggleCollapse }: Props) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: node.id });
   const Icon = TYPE_ICON[node.type];
+  const hasChildren = childCount > 0;
 
   const style: React.CSSProperties = {
     transform: CSS.Translate.toString(transform),
@@ -101,7 +103,10 @@ export default function MenuNodeRow({ node, selected, collapsed, hasChildren, in
           <span className={clsx('block text-sm font-medium truncate', node.active ? 'text-ink' : 'text-ink-subtle line-through')}>
             {node.title || '(sin título)'}
           </span>
-          <span className="block text-[10px] text-ink-subtle">{TYPE_LABEL[node.type]}</span>
+          <span className="block text-[10px] text-ink-subtle">
+            {TYPE_LABEL[node.type]}
+            {node.type === 'MENU' && collapsed && hasChildren && ` · ${childCount} ${childCount === 1 ? 'opción' : 'opciones'} adentro`}
+          </span>
         </span>
       </button>
 

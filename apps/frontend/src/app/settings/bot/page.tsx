@@ -19,6 +19,8 @@ export default function BotSettingsPage() {
   const [hasOpenaiKey, setHasOpenaiKey] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
+  // '' = crear vacío; si no, el id del bot que se copia
+  const [copyFromId, setCopyFromId] = useState('');
   const [busy, setBusy] = useState(false);
   // Arranca siempre plegada: abierta ocupaba la pantalla entera al entrar.
   const [showHelp, setShowHelp] = useState(false);
@@ -52,16 +54,23 @@ export default function BotSettingsPage() {
     if (!newName.trim()) return;
     setBusy(true);
     try {
-      const created = await botsApi.create(newName.trim());
+      const created = copyFromId
+        ? await botsApi.duplicate(copyFromId, newName.trim())
+        : await botsApi.create(newName.trim());
       await reload(created.id);
-      setCreating(false);
-      setNewName('');
-      toast.success('Bot creado');
+      closeCreate();
+      toast.success(copyFromId ? `Se creó "${created.name}" con todas las opciones del original` : 'Bot creado');
     } catch (err: any) {
       toast.error(err?.response?.data?.message || 'No se pudo crear el bot');
     } finally {
       setBusy(false);
     }
+  }
+
+  function closeCreate() {
+    setCreating(false);
+    setNewName('');
+    setCopyFromId('');
   }
 
   async function handleDuplicate(bot: BotSummary) {
@@ -224,28 +233,43 @@ export default function BotSettingsPage() {
         </div>
 
         {creating && (
-          <form onSubmit={handleCreate} className="px-5 py-3 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border)' }}>
-            <input
-              autoFocus
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Escape') { setCreating(false); setNewName(''); } }}
-              placeholder="Ej: Bot de ventas"
-              maxLength={60}
-              className="input flex-1 text-sm py-1.5"
-            />
-            <button type="submit" disabled={busy || !newName.trim()} className="btn-primary text-xs px-3 py-1.5">
-              {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Crear vacío'}
-            </button>
-            <button type="button" onClick={() => { setCreating(false); setNewName(''); }} className="btn-ghost text-xs px-2.5 py-1.5">
-              Cancelar
-            </button>
+          <form onSubmit={handleCreate} className="px-5 py-3 space-y-2" style={{ borderBottom: '1px solid var(--border)' }}>
+            <div className="flex items-center gap-2 flex-wrap">
+              <input
+                autoFocus
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Escape') closeCreate(); }}
+                placeholder="Ej: Bot de ventas"
+                maxLength={60}
+                className="input flex-1 min-w-[160px] text-sm py-1.5"
+              />
+              <select
+                value={copyFromId}
+                onChange={(e) => setCopyFromId(e.target.value)}
+                className="input text-sm py-1.5 w-auto max-w-full"
+                title="Crearlo vacío o como copia de otro bot"
+              >
+                <option value="">Vacío</option>
+                {bots.map((b) => (
+                  <option key={b.id} value={b.id}>Copia de {b.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <button type="submit" disabled={busy || !newName.trim()} className="btn-primary text-xs px-3 py-1.5">
+                {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : copyFromId ? 'Crear copia' : 'Crear vacío'}
+              </button>
+              <button type="button" onClick={closeCreate} className="btn-ghost text-xs px-2.5 py-1.5">
+                Cancelar
+              </button>
+            </div>
+            <p className="text-[11px] text-ink-subtle">
+              {copyFromId
+                ? 'La copia trae todas las opciones del menú, la información de IA y el modo de arranque. No atiende ninguna línea hasta que se la asignes.'
+                : 'Arranca sin opciones. Si quieres partir de uno que ya tienes, elige "Copia de…".'}
+            </p>
           </form>
-        )}
-        {creating && (
-          <p className="px-5 pt-2 pb-3 text-[11px] text-ink-subtle" style={{ borderBottom: '1px solid var(--border)' }}>
-            ¿Quieres partir de uno que ya tienes? Usa <strong>Duplicar</strong> en ese bot: copia todas sus opciones y su información de IA.
-          </p>
         )}
 
         <div className="divide-y divide-border">
@@ -412,18 +436,27 @@ function BotRow({
           <span>{lineNames.length ? `Atiende: ${lineNames.join(', ')}` : 'No atiende ninguna línea'}</span>
         </p>
 
-        <div className="flex items-center gap-3 mt-2" onClick={(e) => e.stopPropagation()}>
-          <button onClick={onDuplicate} disabled={busy} className="text-[11px] text-ink-subtle hover:text-ink transition-colors flex items-center gap-1">
-            <Copy className="w-3 h-3" /> Duplicar
+        <div className="flex items-center gap-2 mt-2.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
+          <button
+            onClick={onDuplicate}
+            disabled={busy}
+            className="btn-secondary text-xs px-2.5 py-1 flex items-center gap-1.5"
+            title="Crea otro bot igual a este, con todas sus opciones y su información de IA"
+          >
+            <Copy className="w-3.5 h-3.5" /> Duplicar
           </button>
           {!bot.isDefault && (
-            <button onClick={onSetDefault} className="text-[11px] text-ink-subtle hover:text-ink transition-colors">
-              Marcar como predeterminado
+            <button onClick={onSetDefault} disabled={busy} className="btn-secondary text-xs px-2.5 py-1 flex items-center gap-1.5">
+              <Star className="w-3.5 h-3.5" /> Marcar como predeterminado
             </button>
           )}
           {!bot.isDefault && (
-            <button onClick={onDelete} className="text-[11px] text-red-500 hover:text-red-600 transition-colors flex items-center gap-1">
-              <Trash2 className="w-3 h-3" /> Eliminar
+            <button
+              onClick={onDelete}
+              disabled={busy}
+              className="btn-ghost text-xs px-2.5 py-1 flex items-center gap-1.5 text-red-500 hover:text-red-600"
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Eliminar
             </button>
           )}
         </div>
