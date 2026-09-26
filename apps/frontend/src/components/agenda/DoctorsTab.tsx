@@ -142,7 +142,7 @@ function DoctorModal({ doctor, onClose, onSaved }: { doctor: Doctor | null; onCl
           </div>
           <div>
             <label className="text-[11px] text-ink-subtle block mb-1">WhatsApp del doctor</label>
-            <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+502 5300 0000" className="input" />
+            <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Número con código de país" className="input" />
             <p className="text-[11px] text-ink-subtle mt-1">Con código de país. Ahí le llega cada mañana el enlace a sus citas del día.</p>
           </div>
           {doctor && (

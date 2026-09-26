@@ -254,3 +254,16 @@
 .rbc-legend-mid    { background: #fef3c7; border: 1px solid #fcd34d; }
 .rbc-legend-full   { background: #fee2e2; border: 1px solid #fca5a5; }
 .rbc-legend-closed { background: repeating-linear-gradient(135deg, #e5e7eb 0 3px, #f7f8fa 3px 6px); border: 1px solid #e5e7eb; }
+
+/* Resumen por hora de un dia con muchas citas a la vez (semana sin filtro de doctor). */
+.rbc-agenda .rbc-ev-summary {
+  background: #f0fdf6;
+  border: 1px solid #86efb8;
+  border-left: 4px solid #22c55e;
+  color: #15803d;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+.rbc-agenda .rbc-ev-summary:hover {
+  background: #dcfced;
+}

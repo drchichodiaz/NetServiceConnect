@@ -239,7 +239,7 @@ export class DoctorsService {
     const phone = normalizePhone(raw);
     if (!phone) return null;
     // Con codigo de pais: un numero local de 8 digitos no le llega a nadie por WhatsApp.
-    if (phone.length < 10) throw new BadRequestException('El WhatsApp del doctor va con código de país (ej: 502 5300 0000)');
+    if (phone.length < 10) throw new BadRequestException('Falta el código de país en el WhatsApp del doctor: escriba el número completo, con el código de país adelante');
     return phone;
   }
 }

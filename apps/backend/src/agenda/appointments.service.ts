@@ -304,7 +304,7 @@ export class AppointmentsService {
     }
     const phone = dto.phone ? normalizePhone(dto.phone) : '';
     if (!phone) throw new BadRequestException('Falta el paciente: elija uno o escriba su WhatsApp');
-    if (phone.length < 10) throw new BadRequestException('El WhatsApp del paciente va con código de país (ej: 502 5300 0000)');
+    if (phone.length < 10) throw new BadRequestException('Falta el código de país en el WhatsApp del paciente: escriba el número completo, con el código de país adelante');
     const contact = await this.identities.resolve(tenantId, 'WHATSAPP', phone, { name: dto.name?.trim() || undefined });
     // Si ya existia sin nombre y ahora nos lo dicen, se completa.
     if (!contact.name && dto.name?.trim()) {

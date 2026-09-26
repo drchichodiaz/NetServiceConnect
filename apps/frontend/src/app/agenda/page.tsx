@@ -94,9 +94,25 @@ export default function AgendaPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  // En vivo: si otra recepcion (u otra clinica que comparte doctor) cambia algo, se recarga.
+  // Una sola recarga por rafaga: al mover una cita llegan casi juntos el "listo" del
+  // propio pedido y el aviso en vivo de que la agenda cambio. Antes eran dos recargas
+  // seguidas del dia entero; ahora se juntan en una.
   const loadRef = useRef(load);
   loadRef.current = load;
+  const reloadTimer = useRef<ReturnType<typeof setTimeout>>();
+  const requestReload = useCallback(() => {
+    clearTimeout(reloadTimer.current);
+    reloadTimer.current = setTimeout(() => loadRef.current(), 400);
+  }, []);
+  useEffect(() => () => clearTimeout(reloadTimer.current), []);
+
+  // Estables para que el calendario no se redibuje entero en cada render de la pagina.
+  const openCreateAt = useCallback((d: string, minute: number) => setCreating({ date: d, minute }), []);
+  const dateRef = useRef(date);
+  dateRef.current = date;
+  const openCreateToday = useCallback((minute: number) => setCreating({ date: dateRef.current, minute }), []);
+
+  // En vivo: si otra recepcion (u otra clinica que comparte doctor) cambia algo, se recarga.
   useEffect(() => {
     const token = getToken();
     if (!token) return;
@@ -105,11 +121,11 @@ export default function AgendaPage() {
       try {
         const data = JSON.parse(ev.data);
         // Un cambio en otra clinica tambien importa: puede ocupar a un doctor que hoy esta aca.
-        if (data.type === 'agenda_changed') loadRef.current();
+        if (data.type === 'agenda_changed') requestReload();
       } catch { /* evento que no es JSON */ }
     };
     return () => es.close();
-  }, []);
+  }, [requestReload]);
 
   function pickClinic(id: string) {
     setClinicId(id);
@@ -119,10 +135,11 @@ export default function AgendaPage() {
     setView(v);
     remember('agenda.view', v);
   }
-  function drill(d: string) {
+  const drill = useCallback((d: string) => {
     setDate(d);
-    pickView('day');
-  }
+    setView('day');
+    remember('agenda.view', 'day');
+  }, []);
   function step(n: number) {
     setDate((d) => (view === 'day' ? addDays(d, n) : view === 'week' ? addDays(d, 7 * n) : addMonths(d, n)));
   }
@@ -194,9 +211,9 @@ export default function AgendaPage() {
               day={day}
               isPast={date < today}
               nowMinute={date === today ? now.minute : null}
-              onSlot={(minute) => setCreating({ date, minute })}
+              onSlot={openCreateToday}
               onOpen={setOpen}
-              onChanged={load}
+              onChanged={requestReload}
             />
           ))}
 
@@ -208,10 +225,10 @@ export default function AgendaPage() {
               days={week}
               today={today}
               nowMinute={now.minute}
-              onSlot={(d, minute) => setCreating({ date: d, minute })}
+              onSlot={openCreateAt}
               onOpen={setOpen}
               onDrill={drill}
-              onChanged={load}
+              onChanged={requestReload}
             />
           ))}
 

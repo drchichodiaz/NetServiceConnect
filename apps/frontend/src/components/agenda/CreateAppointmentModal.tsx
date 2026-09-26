@@ -134,7 +134,7 @@ export default function CreateAppointmentModal({
                   <PatientSearch onPick={setPatient} />
                 ) : (
                   <div className="grid grid-cols-2 gap-2">
-                    <input required value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="WhatsApp: +502 5300 0000" className="input" />
+                    <input required value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="WhatsApp con código de país" className="input" />
                     <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nombre" className="input" />
                   </div>
                 )}
