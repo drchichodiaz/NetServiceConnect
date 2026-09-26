@@ -1,10 +1,11 @@
-import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { PartnersService } from '../partners/partners.service';
 import { AiWalletService } from '../ai-usage/ai-wallet.service';
 import * as bcrypt from 'bcryptjs';
+import { isValidTimeZone } from '../agenda/agenda-time';
 
 @Injectable()
 export class TenantsService {
@@ -91,6 +92,7 @@ export class TenantsService {
       include: {
         _count: { select: { users: true, conversations: true } },
         partner: { select: { id: true, name: true, isActive: true } },
+        agendaSettings: { select: { enabled: true } },
       },
     });
   }
@@ -101,6 +103,7 @@ export class TenantsService {
       include: {
         _count: { select: { users: true, conversations: true, contacts: true } },
         partner: { select: { id: true, name: true, isActive: true } },
+        agendaSettings: { select: { enabled: true } },
       },
     });
     if (!tenant) throw new NotFoundException('Tenant not found');
@@ -142,7 +145,23 @@ export class TenantsService {
     }
     if (dto.soldAt !== undefined && data.soldAt === undefined) data.soldAt = new Date(dto.soldAt);
 
-    return this.prisma.tenant.update({ where: { id }, data });
+    if (dto.timezone !== undefined) {
+      // Una zona mal escrita no falla aca: falla despues, en cada calculo de la agenda.
+      if (!isValidTimeZone(dto.timezone)) throw new BadRequestException('Zona horaria desconocida');
+      data.timezone = dto.timezone;
+    }
+
+    // La fila de configuracion se crea la primera vez que se prende, con los defaults.
+    if (dto.agendaEnabled !== undefined) {
+      await this.prisma.agendaSettings.upsert({
+        where: { tenantId: id },
+        create: { tenantId: id, enabled: dto.agendaEnabled },
+        update: { enabled: dto.agendaEnabled },
+      });
+    }
+
+    await this.prisma.tenant.update({ where: { id }, data });
+    return this.findOne(id);
   }
 
   async remove(id: string) {

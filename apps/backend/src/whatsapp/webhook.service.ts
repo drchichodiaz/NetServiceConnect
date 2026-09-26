@@ -7,6 +7,8 @@ import { MediaService } from '../media/media.service';
 import { BotService } from '../bot/bot.service';
 import { BotsService } from '../bots/bots.service';
 import { AssignmentService } from './assignment.service';
+import { AgendaRepliesService, AgendaReplyMatch } from '../agenda/agenda-replies.service';
+import axios from 'axios';
 
 /**
  * Palabras con las que alguien pide dejar de recibir envios masivos.
@@ -33,6 +35,7 @@ export class WebhookService {
     private botService: BotService,
     private bots: BotsService,
     private assignmentService: AssignmentService,
+    private agendaReplies: AgendaRepliesService,
     config: ConfigService,
   ) {
     this.apiVersion = config.get('META_API_VERSION') || 'v19.0';
@@ -99,6 +102,18 @@ export class WebhookService {
         data: { status: mapped as any, ...(failureReason && { failureReason }) },
       });
 
+      // Si lo que no se entrego es un aviso de cita, la clinica tiene que verlo en la
+      // cita: si no, cree que el paciente sabe y no sabe.
+      if (failureReason) {
+        const failed = await this.prisma.message.findFirst({ where: { externalId: status.id, tenantId }, select: { id: true } });
+        if (failed) {
+          await this.prisma.appointment.updateMany({
+            where: { tenantId, OR: [{ confirmationMessageId: failed.id }, { reminderMessageId: failed.id }] },
+            data: { notifyError: `WhatsApp no lo entregó: ${failureReason}` },
+          });
+        }
+      }
+
       this.eventBus.publish({
         type: 'message_status',
         tenantId,
@@ -116,6 +131,15 @@ export class WebhookService {
   }
 
   private async handleInboundMessage(tenantId: string, accountId: string, accessToken: string, msg: any, contactInfo: any) {
+    // La respuesta a un recordatorio de cita ("Confirmo" / "Reprogramar") va por su
+    // propio camino y antes que todo: el bot no tiene que contestarle con el menu, y
+    // un "Confirmo" no tiene por que abrir una conversacion en la bandeja.
+    const agendaReply = await this.agendaReplies.match(tenantId, msg);
+    if (agendaReply) {
+      await this.handleAgendaReply(tenantId, accountId, msg, contactInfo, agendaReply);
+      return;
+    }
+
     // Extraer texto del mensaje según su tipo
     const body = this.extractBody(msg);
     const type = this.mapType(msg.type);
@@ -259,6 +283,127 @@ export class WebhookService {
     } else if (!isNewConversation && conversation.mode === 'BOT') {
       await this.botService.handleBotReply(tenantId, conversation.id, conversation.botState, phone, msg);
     }
+  }
+
+  /**
+   * Respuesta a los botones de un recordatorio de cita.
+   *
+   * La respuesta queda en el historial igual que cualquier mensaje. Lo que cambia es la
+   * bandeja: "Confirmo" no abre nada (la clinica no tiene que hacer nada), y
+   * "Reprogramar" -o tocar el boton de una cita que ya no esta vigente- si, en modo
+   * agente y repartida como una conversacion sin bot, porque ahi alguien tiene que
+   * hablar con el paciente.
+   */
+  private async handleAgendaReply(tenantId: string, accountId: string, msg: any, contactInfo: any, match: AgendaReplyMatch) {
+    const existing = await this.prisma.message.findFirst({ where: { externalId: msg.id, tenantId } });
+    if (existing) return;
+
+    const body = this.extractBody(msg);
+    const phone = msg.from;
+    const contact = await this.identities.resolve(tenantId, 'WHATSAPP', phone, { name: contactInfo?.profile?.name });
+    const toClinic = match.kind !== 'CONFIRM';
+    const now = new Date();
+
+    // Si ya hay una conversacion abierta en esta linea, la respuesta va ahi, como
+    // cualquier mensaje. Si no, a la del recordatorio (que se creo cerrada).
+    let conversation =
+      (await this.prisma.conversation.findFirst({
+        where: { tenantId, contactId: contact.id, channelAccountId: accountId, status: { not: 'CLOSED' } },
+        orderBy: { createdAt: 'desc' },
+      })) ?? (await this.prisma.conversation.findFirst({ where: { id: match.conversationId, tenantId } }));
+    if (!conversation) {
+      conversation = await this.prisma.conversation.create({
+        data: { tenantId, contactId: contact.id, channelAccountId: accountId, status: 'CLOSED', closedReason: 'Aviso automático' },
+      });
+    }
+
+    const data: Record<string, unknown> = { lastMessageAt: now, lastMessageText: body, lastInboundAt: now };
+    if (toClinic) {
+      data.status = 'OPEN';
+      data.unreadCount = { increment: 1 };
+      data.mode = 'AGENT';
+      data.botState = null;
+      if (!conversation.assignedUserId) {
+        const assignedUserId = await this.assignmentService.findLeastBusyAgent(tenantId, accountId);
+        if (assignedUserId) Object.assign(data, { assignedUserId, assignedAt: now });
+      }
+    }
+    conversation = await this.prisma.conversation.update({ where: { id: conversation.id }, data: data as any });
+
+    const message = await this.prisma.message.create({
+      data: {
+        tenantId,
+        conversationId: conversation.id,
+        direction: 'INBOUND',
+        type: 'TEXT',
+        body,
+        mediaType: 'button',
+        status: 'DELIVERED',
+        externalId: msg.id,
+        rawPayload: msg,
+      },
+    });
+    const open = conversation.status !== 'CLOSED';
+    if (open) this.publishMessage(tenantId, conversation.id, contact, message, body, now);
+
+    const ack = await this.agendaReplies.apply(tenantId, match);
+    await this.sendAgendaAck(tenantId, accountId, conversation.id, open, contact, phone, ack);
+  }
+
+  /**
+   * El "gracias" despues de tocar un boton. Se puede mandar como texto libre porque el
+   * paciente acaba de escribir (ventana de 24 horas abierta). Si falla no pasa nada
+   * grave: la cita ya quedo confirmada o marcada, y eso es lo que importa.
+   */
+  private async sendAgendaAck(
+    tenantId: string,
+    accountId: string,
+    conversationId: string,
+    announce: boolean,
+    contact: { id: string; name: string | null; phone: string | null },
+    phone: string,
+    body: string,
+  ) {
+    const account = await this.prisma.channelAccount.findFirst({ where: { id: accountId, tenantId } });
+    if (!account?.phoneNumberId) return;
+    let externalId: string | undefined;
+    try {
+      const { data } = await axios.post(
+        `https://graph.facebook.com/${this.apiVersion}/${account.phoneNumberId}/messages`,
+        { messaging_product: 'whatsapp', recipient_type: 'individual', to: phone, type: 'text', text: { preview_url: false, body } },
+        { headers: { Authorization: `Bearer ${account.accessToken}`, 'Content-Type': 'application/json' } },
+      );
+      externalId = data?.messages?.[0]?.id;
+    } catch (err: any) {
+      this.logger.error('[agenda] no se pudo mandar el acuse de la respuesta', err?.response?.data || err?.message);
+    }
+    const now = new Date();
+    const message = await this.prisma.message.create({
+      data: { tenantId, conversationId, direction: 'OUTBOUND', type: 'TEXT', body, status: externalId ? 'SENT' : 'FAILED', externalId },
+    });
+    await this.prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: now, lastMessageText: body } });
+    if (announce) this.publishMessage(tenantId, conversationId, contact, message, body, now);
+  }
+
+  private publishMessage(
+    tenantId: string,
+    conversationId: string,
+    contact: { id: string; name: string | null; phone: string | null },
+    message: any,
+    text: string,
+    at: Date,
+  ) {
+    this.eventBus.publish({
+      type: 'new_message',
+      tenantId,
+      payload: {
+        message,
+        conversationId,
+        contact: { id: contact.id, name: contact.name, phone: contact.phone, channel: 'WHATSAPP' as const, displayId: displayId('WHATSAPP', contact, null) },
+        lastMessageText: text,
+        lastMessageAt: at.toISOString(),
+      },
+    });
   }
 
   /**

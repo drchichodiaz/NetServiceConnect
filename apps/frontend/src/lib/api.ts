@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { WhatsAppAccount, Contact, ContactTag } from '@/types';
+import type { AgendaSettings, Doctor, Shift, DoctorException, AgendaDay, FreeDoctor, Appointment, AppointmentStatus, MonthSummary } from './agenda';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
@@ -394,6 +395,9 @@ export const tenantsApi = {
       partnerId?: string;
       soldAt?: string;
       partnerNote?: string;
+      /** Zona IANA, ej. "America/Guatemala". */
+      timezone?: string;
+      agendaEnabled?: boolean;
     },
   ) => api.patch(`/tenants/${id}`, data).then((r) => r.data),
 };
@@ -805,4 +809,65 @@ export const supportApi = {
         },
       })
       .then((r) => r.data),
+};
+
+// ─── Agenda ───────────────────────────────────────────────────────────────────
+
+export const agendaApi = {
+  settings: (): Promise<AgendaSettings> => api.get('/agenda/settings').then((r) => r.data),
+  updateSettings: (data: Partial<Omit<AgendaSettings, 'enabled' | 'timezone'>>): Promise<AgendaSettings> =>
+    api.patch('/agenda/settings', data).then((r) => r.data),
+
+  doctors: (): Promise<Doctor[]> => api.get('/agenda/doctors').then((r) => r.data),
+  createDoctor: (data: { code: string; name: string; phone?: string }): Promise<Doctor> =>
+    api.post('/agenda/doctors', data).then((r) => r.data),
+  updateDoctor: (id: string, data: { code?: string; name?: string; phone?: string; isActive?: boolean }): Promise<Doctor> =>
+    api.patch(`/agenda/doctors/${id}`, data).then((r) => r.data),
+  setShifts: (id: string, shifts: Shift[]): Promise<Shift[]> =>
+    api.put(`/agenda/doctors/${id}/shifts`, { shifts }).then((r) => r.data),
+
+  exceptions: (params?: { from?: string; to?: string; doctorId?: string }): Promise<DoctorException[]> =>
+    api.get('/agenda/exceptions', { params }).then((r) => r.data),
+  createException: (data: {
+    doctorId: string;
+    date: string;
+    kind: 'ABSENT' | 'WORKS_AT';
+    startMinute?: number;
+    endMinute?: number;
+    channelAccountId?: string;
+    note?: string;
+  }): Promise<DoctorException & { affectedAppointments: number }> =>
+    api.post('/agenda/exceptions', data).then((r) => r.data),
+  deleteException: (id: string) => api.delete(`/agenda/exceptions/${id}`).then((r) => r.data),
+
+  day: (channelAccountId: string, date: string): Promise<AgendaDay> =>
+    api.get('/agenda/day', { params: { channelAccountId, date } }).then((r) => r.data),
+  month: (channelAccountId: string, month: string): Promise<MonthSummary> =>
+    api.get('/agenda/month', { params: { channelAccountId, month } }).then((r) => r.data),
+  freeDoctors: (params: { channelAccountId: string; startsAt: string; minutes?: number; excludeAppointmentId?: string }): Promise<FreeDoctor[]> =>
+    api.get('/agenda/free-doctors', { params }).then((r) => r.data),
+
+  appointmentsFor: (contactId: string): Promise<Appointment[]> =>
+    api.get('/agenda/appointments', { params: { contactId } }).then((r) => r.data),
+  createAppointment: (data: {
+    channelAccountId: string;
+    startsAt: string;
+    minutes?: number;
+    contactId?: string;
+    phone?: string;
+    name?: string;
+    doctorId?: string;
+    reason?: string;
+    notes?: string;
+  }): Promise<Appointment> => api.post('/agenda/appointments', data).then((r) => r.data),
+  updateAppointment: (
+    id: string,
+    data: { channelAccountId?: string; startsAt?: string; minutes?: number; doctorId?: string; reason?: string; notes?: string },
+  ): Promise<Appointment> => api.patch(`/agenda/appointments/${id}`, data).then((r) => r.data),
+  extendAppointment: (id: string, minutes = 15): Promise<Appointment> =>
+    api.post(`/agenda/appointments/${id}/extend`, { minutes }).then((r) => r.data),
+  setAppointmentStatus: (id: string, status: AppointmentStatus): Promise<Appointment> =>
+    api.post(`/agenda/appointments/${id}/status`, { status }).then((r) => r.data),
+  /** "El doctor viene con unos minutos de atraso" al paciente de esa cita. */
+  notifyDelay: (id: string) => api.post(`/agenda/appointments/${id}/notify-delay`).then((r) => r.data),
 };

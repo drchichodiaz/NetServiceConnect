@@ -7,6 +7,7 @@ import { usersApi } from '@/lib/api';
 import toast from 'react-hot-toast';
 import InternalNoteModal from './InternalNoteModal';
 import NetServicePanel from './NetServicePanel';
+import ConversationAppointmentButton from '@/components/agenda/ConversationAppointmentButton';
 import { BRAND } from '@/lib/brand';
 import clsx from 'clsx';
 
@@ -193,6 +194,12 @@ export default function ConversationHeader({ conversation, sidebarOpen, onToggle
               </div>
             )}
           </div>
+
+          {/* Agendar al paciente, solo si la empresa tiene agenda */}
+          <ConversationAppointmentButton
+            patient={{ id: contact.id, name: contact.name ?? null, phone: contact.phone ?? null }}
+            channelAccountId={conversation.channelAccountId}
+          />
 
           {/* Internal note */}
           <button

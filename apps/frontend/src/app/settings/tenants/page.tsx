@@ -17,8 +17,27 @@ interface TenantRow {
   soldAt?: string | null;
   partnerNote?: string | null;
   partner?: { id: string; name: string; isActive: boolean } | null;
+  timezone?: string;
+  agendaSettings?: { enabled: boolean } | null;
   _count: { users: number; conversations: number };
 }
+
+/**
+ * Zonas que se ofrecen en el selector. Son las de los mercados donde se vende; la que
+ * tenga la empresa se agrega aunque no este en la lista, para no pisarla sin querer.
+ */
+const TIMEZONES: { value: string; label: string }[] = [
+  { value: 'America/Panama', label: 'Panamá (UTC−5)' },
+  { value: 'America/Guatemala', label: 'Guatemala (UTC−6)' },
+  { value: 'America/El_Salvador', label: 'El Salvador (UTC−6)' },
+  { value: 'America/Tegucigalpa', label: 'Honduras (UTC−6)' },
+  { value: 'America/Managua', label: 'Nicaragua (UTC−6)' },
+  { value: 'America/Costa_Rica', label: 'Costa Rica (UTC−6)' },
+  { value: 'America/Mexico_City', label: 'México, centro (UTC−6)' },
+  { value: 'America/Bogota', label: 'Colombia (UTC−5)' },
+  { value: 'America/Santo_Domingo', label: 'República Dominicana (UTC−4)' },
+  { value: 'America/Argentina/Buenos_Aires', label: 'Argentina (UTC−3)' },
+];
 
 interface CreatedResult {
   tenant: TenantRow;
@@ -288,6 +307,7 @@ export default function TenantsPage() {
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-medium text-ink truncate">{t.name}</p>
                     {!t.isActive && <span className="text-[10px] text-red-400 font-medium">Inactiva</span>}
+                    {t.agendaSettings?.enabled && <span className="text-[10px] text-ink-subtle font-medium">· Agenda</span>}
                   </div>
                   <p className="text-xs text-ink-subtle truncate font-mono">{t.slug}</p>
                   {t.partner && (
@@ -350,7 +370,12 @@ function EditTenantModal({
   const [isActive, setIsActive] = useState(tenant.isActive);
   const [partnerId, setPartnerId] = useState(tenant.partnerId ?? '');
   const [partnerNote, setPartnerNote] = useState(tenant.partnerNote ?? '');
+  const [timezone, setTimezone] = useState(tenant.timezone ?? 'America/Panama');
+  const [agendaEnabled, setAgendaEnabled] = useState(!!tenant.agendaSettings?.enabled);
   const [saving, setSaving] = useState(false);
+  const timezones = TIMEZONES.some((z) => z.value === timezone)
+    ? TIMEZONES
+    : [{ value: timezone, label: timezone }, ...TIMEZONES];
 
   // Al corregir una atribución vieja puede hacer falta un partner que ya no vende, así
   // que acá sí se listan los inactivos — a diferencia del alta, donde no se ofrecen.
@@ -360,7 +385,7 @@ function EditTenantModal({
     e.preventDefault();
     setSaving(true);
     try {
-      await tenantsApi.update(tenant.id, { name, plan, isActive, partnerId, partnerNote });
+      await tenantsApi.update(tenant.id, { name, plan, isActive, partnerId, partnerNote, timezone, agendaEnabled });
       toast.success('Empresa actualizada');
       onSaved();
     } catch (err: any) {
@@ -418,6 +443,33 @@ function EditTenantModal({
                 />
               </div>
             )}
+
+            <div>
+              <label className="text-[11px] text-ink-subtle block mb-1">Zona horaria</label>
+              <select value={timezone} onChange={(e) => setTimezone(e.target.value)} className="input w-full">
+                {timezones.map((z) => (
+                  <option key={z.value} value={z.value}>{z.label}</option>
+                ))}
+              </select>
+              <p className="text-[11px] text-ink-subtle mt-1">Es la hora de reloj de la agenda: turnos, citas y avisos.</p>
+            </div>
+
+            {/* La agenda se vende aparte: la prende el operador, no la empresa. */}
+            <label className="flex items-start gap-2 cursor-pointer rounded-lg p-3" style={{ background: 'var(--surface-muted)' }}>
+              <input
+                type="checkbox"
+                checked={agendaEnabled}
+                onChange={(e) => setAgendaEnabled(e.target.checked)}
+                className="w-3.5 h-3.5 mt-0.5"
+              />
+              <span className="text-xs text-ink">
+                Agenda de citas
+                <span className="block text-[11px] text-ink-subtle">
+                  Agrega la agenda por clínica y la configuración de doctores y turnos. Apagarla no borra nada:
+                  doctores y citas vuelven al prenderla.
+                </span>
+              </span>
+            </label>
 
             {/* El interruptor de corte. Es la alternativa a borrar, que es irreversible. */}
             <label

@@ -1,9 +1,10 @@
 'use client';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { MessageSquare, Users, Settings, LogOut, LayoutDashboard, Zap, Sparkles, BookUser, ShieldCheck, Building2, FileText, Bot, UserCircle, Megaphone, LifeBuoy, Handshake, Coins } from 'lucide-react';
+import { MessageSquare, Users, Settings, LogOut, LayoutDashboard, Zap, Sparkles, BookUser, ShieldCheck, Building2, FileText, Bot, UserCircle, Megaphone, LifeBuoy, Handshake, Coins, CalendarDays, Stethoscope } from 'lucide-react';
 import { useState } from 'react';
 import { useAuthStore } from '@/store/auth.store';
+import { useAgendaSettings } from '@/hooks/useAgendaSettings';
 import SupportModal from '@/components/support/SupportModal';
 import { User } from '@/types';
 import clsx from 'clsx';
@@ -14,6 +15,8 @@ const navItems = [
   { href: '/dashboard',          icon: LayoutDashboard, label: 'Dashboard' },
   { href: '/inbox',              icon: MessageSquare,   label: 'Conversaciones' },
   { href: '/contacts',           icon: BookUser,        label: 'Contactos' },
+  // Solo en las empresas con la agenda activada (se vende aparte).
+  { href: '/agenda',             icon: CalendarDays,    label: 'Agenda', requiresAgenda: true },
   { href: '/settings/team',      icon: Users,           label: 'Equipo' },
   { href: '/settings/quick-replies', icon: Zap,       label: 'Respuestas rápidas' },
   // El saldo de IA de la propia empresa. El super admin no lo ve: para eso tiene el
@@ -23,6 +26,7 @@ const navItems = [
   { href: '/settings/templates',     icon: FileText,     label: 'Plantillas',    roles: ['ADMIN', 'SUPERVISOR'] },
   { href: '/campaigns',              icon: Megaphone,    label: 'Campañas',      roles: ['ADMIN', 'SUPERVISOR'] },
   { href: '/settings/bot',           icon: Bot,          label: 'Bots de WhatsApp', roles: ['ADMIN', 'SUPERVISOR'] },
+  { href: '/settings/agenda',        icon: Stethoscope,  label: 'Doctores y turnos', roles: ['ADMIN', 'SUPERVISOR'], requiresAgenda: true },
   { href: '/settings/system',        icon: ShieldCheck,  label: 'Sistema',       superAdminOnly: true },
   { href: '/settings/tenants',       icon: Building2,    label: 'Empresas',      superAdminOnly: true },
   { href: '/settings/partners',      icon: Handshake,    label: 'Partners',      superAdminOnly: true },
@@ -36,7 +40,9 @@ export default function Sidebar({ user }: Props) {
   // El boton de soporte vive aca y no en una pantalla: un error puede pasar en
   // cualquier lado, y si hay que ir a buscar el formulario, nadie lo reporta.
   const [showSupport, setShowSupport] = useState(false);
+  const agenda = useAgendaSettings(!!user);
   const visibleItems = navItems.filter((item) => {
+    if ((item as { requiresAgenda?: boolean }).requiresAgenda && !agenda?.enabled) return false;
     if (item.superAdminOnly) return !!user?.isSuperAdmin;
     if ((item as { hideForSuperAdmin?: boolean }).hideForSuperAdmin && user?.isSuperAdmin) return false;
     if (item.roles) return !!user?.role && (item.roles as string[]).includes(user.role);

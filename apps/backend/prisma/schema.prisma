@@ -44,6 +44,10 @@ model Tenant {
   // calcula comisiones — no hay precios modelados — y un campo numerico daria a
   // entender que si.
   partnerNote   String?
+  /// Zona horaria IANA de la empresa. La necesita la agenda: "las 9:00 del lunes" de un
+  /// turno o una cita es hora local de la clinica, y el servidor corre en UTC. El default
+  /// es Panama porque ahi estaban todas las empresas cuando se agrego el campo.
+  timezone      String        @default("America/Panama")
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
@@ -69,7 +73,13 @@ model Tenant {
   aiCreditLots     AiCreditLot[]
   aiCreditEntries  AiCreditEntry[]
   aiHolds          AiHold[]
-  partner          Partner?          @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+  agendaSettings   AgendaSettings?
+  doctors          Doctor[]
+  doctorShifts     DoctorShift[]
+  doctorExceptions DoctorException[]
+  appointments     Appointment[]
+  doctorSummaries  DoctorDailySummary[]
+  partner          Partner?             @relation(fields: [partnerId], references: [id], onDelete: SetNull)
 
   @@index([partnerId])
 }
@@ -135,6 +145,7 @@ model User {
   auditLogs       AuditLog[]
   supportRequests SupportRequest[]
   aiUsages        AiUsage[]
+  appointments    Appointment[]
 
   // Unico en todo el sistema, no por empresa: con el email repetido entre empresas el
   // login no puede saber a cual entrar (se quedaba con el primero que encontraba) y
@@ -228,11 +239,14 @@ model ChannelAccount {
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
 
-  tenant        Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  bot           Bot?                 @relation(fields: [botId], references: [id], onDelete: SetNull)
-  conversations Conversation[]
-  campaigns     Campaign[]
-  userAccess    UserChannelAccount[]
+  tenant           Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  bot              Bot?                 @relation(fields: [botId], references: [id], onDelete: SetNull)
+  conversations    Conversation[]
+  campaigns        Campaign[]
+  userAccess       UserChannelAccount[]
+  doctorShifts     DoctorShift[]
+  doctorExceptions DoctorException[]
+  appointments     Appointment[]
 
   // Los dos unique conviven porque en Postgres los NULL no colisionan entre si: una
   // cuenta de Instagram tiene phoneNumberId NULL y no pelea con las lineas de WhatsApp,
@@ -308,6 +322,7 @@ model Contact {
   identities    ContactIdentity[]
   campaignItems CampaignRecipient[]
   tags          ContactTagLink[]
+  appointments  Appointment[]
 
   // Se queda tal cual aunque phone sea nullable: en Postgres varios NULL no colisionan,
   // asi que esto sigue impidiendo dos contactos de WhatsApp con el mismo numero y no
@@ -1243,4 +1258,205 @@ model AiCreditEntry {
   usage  AiUsage?     @relation(fields: [usageId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, createdAt])
+}
+
+// ─── Agenda de citas ──────────────────────────────────────────────────────────
+// Citas por clinica, con doctores que rotan entre clinicas. Nacio para Red Dental.
+//
+// La clinica es la LINEA de WhatsApp (ChannelAccount), no un modelo aparte: cada
+// clinica ya tiene su linea, y asi la recepcion ve solo su agenda con el mismo permiso
+// por linea (UserChannelAccount) que ya limita su bandeja. El costo: si una clinica se
+// reconecta como linea nueva, sus citas quedan en la vieja y hay que moverlas.
+//
+// Los horarios de turnos y excepciones son MINUTOS DESDE MEDIANOCHE en hora local de
+// la empresa (Tenant.timezone), porque "los lunes de 8:00 a 13:00" no es un instante:
+// es una hora de reloj que se repite. Las citas si son instantes (UTC, como todo el
+// resto de la base).
+
+/// Configuracion de la agenda de una empresa. Sin fila = la empresa no usa agenda.
+model AgendaSettings {
+  id                      String   @id @default(cuid())
+  tenantId                String   @unique
+  enabled                 Boolean  @default(true)
+  /// Duracion por defecto de una cita. Red Dental: 45. Se puede alargar de a 15.
+  slotMinutes             Int      @default(45)
+  reminderHoursBefore     Int      @default(24)
+  /// Hora local a la que sale el resumen del dia a cada doctor.
+  doctorSummaryHour       Int      @default(7)
+  /// Plantilla de cada aviso. Null = ese aviso no se manda. Se eligen en pantalla y no
+  /// por nombre fijo porque cada empresa crea y nombra las suyas, y Meta tiene que
+  /// aprobarlas antes: la agenda tiene que funcionar mientras tanto.
+  confirmationTemplateId  String?
+  reminderTemplateId      String?
+  doctorSummaryTemplateId String?
+  delayTemplateId         String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+/// Quien atiende. NO es un User: el doctor no entra al sistema, ve sus citas por el
+/// enlace que le llega por WhatsApp. Si algun dia necesita acceso se le asocia un
+/// usuario sin rehacer nada de esto.
+model Doctor {
+  id        String   @id @default(cuid())
+  tenantId  String
+  /// Como lo nombra la clinica: "Dr.02", "Dra.03". Es lo que se ve en la grilla.
+  code      String
+  name      String
+  /// WhatsApp del doctor, solo digitos con codigo de pais (igual que ContactIdentity).
+  /// Null = no recibe el resumen del dia.
+  phone     String?
+  /// Un doctor que se va se desactiva, no se borra: sus citas pasadas lo nombran.
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant       Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  shifts       DoctorShift[]
+  exceptions   DoctorException[]
+  appointments Appointment[]
+  summaries    DoctorDailySummary[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+}
+
+/// Turno que se repite todas las semanas: "los lunes de 8:00 a 13:00 en Villa Clarita".
+/// Un doctor puede tener varios el mismo dia (mañana en una clinica, tarde en otra);
+/// que no se pisen entre si lo valida el servicio.
+model DoctorShift {
+  id               String   @id @default(cuid())
+  tenantId         String
+  doctorId         String
+  channelAccountId String
+  /// 0 = domingo ... 6 = sabado, como Date.getDay().
+  weekday          Int
+  startMinute      Int
+  endMinute        Int
+  createdAt        DateTime @default(now())
+
+  tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  doctor         Doctor         @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  channelAccount ChannelAccount @relation(fields: [channelAccountId], references: [id], onDelete: Cascade)
+
+  @@index([doctorId, weekday])
+  @@index([channelAccountId, weekday])
+}
+
+/// Lo que cambia UN dia respecto del turno semanal.
+///
+/// ABSENT resta: vacaciones o ausencia, del dia entero (sin horario) o de unas horas.
+/// WORKS_AT reemplaza: si un dia tiene al menos un WORKS_AT, los turnos semanales de ese
+/// dia no cuentan y valen solo los WORKS_AT ("este jueves va a Zona 5"). Asi un cambio
+/// puntual se carga como una fila, sin tocar el turno semanal.
+model DoctorException {
+  id               String              @id @default(cuid())
+  tenantId         String
+  doctorId         String
+  date             DateTime            @db.Date
+  kind             DoctorExceptionKind
+  /// Null en los dos = el dia entero (solo tiene sentido en ABSENT).
+  startMinute      Int?
+  endMinute        Int?
+  /// Solo WORKS_AT: la clinica de ese dia.
+  channelAccountId String?
+  note             String?
+  createdAt        DateTime            @default(now())
+
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  doctor         Doctor          @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  channelAccount ChannelAccount? @relation(fields: [channelAccountId], references: [id], onDelete: Cascade)
+
+  @@index([doctorId, date])
+  @@index([tenantId, date])
+}
+
+enum DoctorExceptionKind {
+  ABSENT
+  WORKS_AT
+}
+
+/// Una cita. El paciente elige clinica y hora; el doctor lo asigna el sistema.
+///
+/// Dos citas activas del mismo doctor NO pueden pisarse: lo garantiza una restriccion
+/// de exclusion en Postgres (ver la migracion 20261002000000_agenda), no solo el
+/// servicio. Si dos recepciones agendan al mismo doctor en el mismo segundo, la base
+/// rechaza la segunda. Prisma no sabe expresar esa restriccion, por eso no aparece aca.
+model Appointment {
+  id               String            @id @default(cuid())
+  tenantId         String
+  /// La clinica.
+  channelAccountId String
+  doctorId         String
+  contactId        String
+  startsAt         DateTime
+  endsAt           DateTime
+  reason           String?
+  notes            String?
+  status           AppointmentStatus @default(SCHEDULED)
+  createdById      String?
+
+  /// Mensajes de aviso (Message.id). El del recordatorio es el que permite reconocer a
+  /// que cita responde el paciente cuando toca "Confirmo" o "Reprogramar": Meta manda
+  /// en la respuesta el id del mensaje original (context.id = Message.externalId).
+  confirmationMessageId String?
+  reminderMessageId     String?
+  /// Se marca al TOMAR la cita para mandarle la confirmacion, igual que reminderSentAt:
+  /// es lo que impide mandarla dos veces. Al mover la cita vuelve a null y sale una
+  /// confirmacion nueva con el horario nuevo.
+  confirmationSentAt    DateTime?
+  /// Por que no se le pudo avisar al paciente la ultima vez (plantilla sin aprobar,
+  /// linea caida, numero invalido). Se muestra en la cita: si no, un aviso que no salio
+  /// no deja rastro y la clinica cree que el paciente sabe.
+  notifyError           String?
+  /// Se marca ANTES de mandar, al tomar la cita: es lo que impide mandar dos veces el
+  /// recordatorio si hay dos procesos o el worker se reinicia.
+  reminderSentAt        DateTime?
+  confirmedAt           DateTime?
+  rescheduleRequestedAt DateTime?
+  cancelledAt           DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  // Restrict: borrar una linea o un contacto con citas tiene que fallar, no llevarse
+  // la agenda de una clinica por delante.
+  channelAccount ChannelAccount @relation(fields: [channelAccountId], references: [id], onDelete: Restrict)
+  doctor         Doctor         @relation(fields: [doctorId], references: [id], onDelete: Restrict)
+  contact        Contact        @relation(fields: [contactId], references: [id], onDelete: Restrict)
+  createdBy      User?          @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, channelAccountId, startsAt])
+  @@index([doctorId, startsAt])
+  @@index([contactId])
+  @@index([status, startsAt])
+  @@index([reminderMessageId])
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  CONFIRMED
+  ARRIVED
+  DONE
+  NO_SHOW
+  CANCELLED
+}
+
+/// Registro del resumen de la mañana que se le manda a cada doctor. El unique por
+/// (doctor, dia) es lo que impide mandarlo dos veces si el proceso se reinicia.
+model DoctorDailySummary {
+  id        String   @id @default(cuid())
+  tenantId  String
+  doctorId  String
+  date      DateTime @db.Date
+  messageId String?
+  error     String?
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  doctor Doctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@unique([doctorId, date])
 }

@@ -1,0 +1,256 @@
+/*
+ * react-big-calendar vestido como la grilla propia de la agenda (DayGrid): mismas
+ * alturas por cuarto de hora, rayado donde el doctor no atiende, colores por estado y
+ * una columna angosta de "Libres" al final.
+ * Todo va bajo .rbc-agenda para no tocar ningun otro calendario.
+ */
+
+.rbc-agenda .rbc-calendar {
+  height: auto;
+  font-family: inherit;
+}
+
+.rbc-agenda .rbc-time-view {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.06);
+}
+
+/* Sin fila de "todo el dia": en una clinica no hay citas de dia entero. En la vista de
+   dia tampoco la fila con la fecha, que ya esta arriba; en la semana si, son los dias. */
+.rbc-agenda .rbc-allday-cell,
+.rbc-agenda-day .rbc-time-header-content > .rbc-row:not(.rbc-row-resource) {
+  display: none;
+}
+
+.rbc-agenda .rbc-time-content {
+  overflow: visible;
+  border-top: 1px solid var(--border);
+}
+
+.rbc-agenda .rbc-header {
+  border-bottom: 0;
+  padding: 6px 4px;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+}
+
+/* 4 cuartos de hora de 22px, igual que la grilla propia. */
+.rbc-agenda .rbc-timeslot-group {
+  min-height: 88px;
+  border-bottom: 1px solid var(--border);
+}
+.rbc-agenda .rbc-time-slot {
+  border-top: 1px dotted rgb(232 234 237 / 0.6) !important;
+}
+.rbc-agenda .rbc-time-gutter .rbc-time-slot {
+  border-top: 0 !important;
+}
+.rbc-agenda .rbc-label {
+  font-size: 10px;
+  color: #9ca3af;
+  padding: 0 8px;
+}
+.rbc-agenda .rbc-time-gutter {
+  width: 56px;
+}
+
+/* Donde el doctor no atiende en esta clinica. */
+.rbc-agenda .rbc-off {
+  background: repeating-linear-gradient(135deg, #f0f1f5 0 6px, #f7f8fa 6px 12px);
+}
+.rbc-agenda .rbc-day-slot .rbc-time-slot:not(.rbc-off):hover {
+  background: rgb(240 253 246 / 0.7);
+}
+.rbc-agenda .rbc-today {
+  background: transparent;
+}
+
+/*
+ * La columna de libres, angosta y sin rayado. El encabezado y el cuerpo viven en
+ * contenedores distintos, y en la vista con recursos la libreria les pone un ancho
+ * minimo de 140px: hay que achicar los dos o no quedan alineados.
+ */
+.rbc-agenda-day .rbc-time-header > .rbc-time-header-content:last-child,
+.rbc-agenda-day .rbc-time-content > .rbc-day-slot:last-child {
+  flex: 0 0 64px;
+  max-width: 64px;
+  min-width: 0;
+}
+.rbc-agenda .rbc-row-resource .rbc-header {
+  flex: 1 1 0;
+  max-width: none;
+  overflow: hidden;
+}
+.rbc-agenda-day .rbc-time-header > .rbc-time-header-content:last-child .rbc-header {
+  justify-content: center;
+}
+.rbc-agenda-day .rbc-time-header > .rbc-time-header-content:last-child .rbc-header span {
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #9ca3af;
+}
+.rbc-agenda-day .rbc-time-content > .rbc-day-slot:last-child .rbc-time-slot:hover {
+  background: transparent;
+}
+
+/* Citas */
+.rbc-agenda .rbc-event {
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid;
+  border-left-width: 4px;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+  color: #1a1d23;
+}
+.rbc-agenda .rbc-event.rbc-selected,
+.rbc-agenda .rbc-event:focus {
+  outline: none;
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+}
+.rbc-agenda .rbc-event-label {
+  display: none;
+}
+.rbc-agenda .rbc-st-scheduled { background: #fff; border-color: #4ade8a; }
+.rbc-agenda .rbc-st-confirmed { background: #f0fdf6; border-color: #25d366; }
+.rbc-agenda .rbc-st-arrived   { background: #f0f9ff; border-color: #0ea5e9; }
+.rbc-agenda .rbc-st-done      { background: #f9fafb; border-color: #d1d5db; color: #6b7280; }
+.rbc-agenda .rbc-st-no_show   { background: #fef2f2; border-color: #fca5a5; color: #b91c1c; }
+
+/* "En otra clinica" */
+.rbc-agenda .rbc-background-event.rbc-ev-elsewhere {
+  background: rgb(229 231 235 / 0.85);
+  border: 0;
+  border-radius: 6px;
+  opacity: 1;
+  padding: 2px 8px;
+}
+
+/* Numeros de la columna de libres: sin caja, solo el numero. */
+.rbc-agenda .rbc-background-event.rbc-ev-free {
+  /* La libreria le calcula un ancho propio de evento de fondo: aca ocupa la columna. */
+  left: 0 !important;
+  width: 100% !important;
+  background: transparent;
+  border: 0;
+  opacity: 1;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.rbc-agenda .rbc-background-event.rbc-ev-free:hover {
+  background: #f0fdf6;
+}
+.rbc-agenda .rbc-free-count {
+  font-size: 11px;
+  font-weight: 600;
+  color: #16a34a;
+}
+
+/* Hora actual */
+.rbc-agenda .rbc-current-time-indicator {
+  background-color: #ef4444;
+  height: 2px;
+}
+/* El contenido del evento ocupa todo el ancho y alinea a la izquierda: se centra aca. */
+.rbc-agenda .rbc-ev-free .rbc-event-content {
+  width: 100%;
+  text-align: center;
+}
+
+/* ─── Semana ─────────────────────────────────────────────────────────────── */
+
+.rbc-agenda-week .rbc-time-header-cell .rbc-header {
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1a1d23;
+}
+.rbc-agenda-week .rbc-time-header-cell .rbc-header.rbc-today {
+  color: #16a34a;
+}
+.rbc-agenda-week .rbc-time-header-cell .rbc-header a:hover {
+  text-decoration: underline;
+}
+.rbc-agenda .rbc-ev-week {
+  padding: 2px 6px;
+}
+.rbc-agenda .rbc-wk-done { opacity: 0.55; }
+.rbc-agenda .rbc-wk-no_show { opacity: 0.55; text-decoration: line-through; }
+
+/* ─── Mes ────────────────────────────────────────────────────────────────── */
+
+/* La vista de mes reparte las filas con flex dentro de la altura del calendario: con
+   la altura automatica de las otras vistas queda en cero y no se ve nada. */
+.rbc-agenda-month .rbc-calendar {
+  height: 700px;
+}
+
+.rbc-agenda-month .rbc-month-view {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.06);
+}
+.rbc-agenda-month .rbc-month-header .rbc-header {
+  min-height: 0;
+  padding: 8px 4px;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: #9ca3af;
+  border-bottom: 1px solid var(--border);
+}
+.rbc-agenda-month .rbc-month-row {
+  min-height: 104px;
+}
+.rbc-agenda-month .rbc-date-cell {
+  padding: 6px 8px 2px;
+  text-align: left;
+  font-size: 12px;
+  color: #6b7280;
+}
+.rbc-agenda-month .rbc-date-cell.rbc-now {
+  color: #16a34a;
+  font-weight: 700;
+}
+.rbc-agenda-month .rbc-off-range-bg {
+  background: #fafafb;
+}
+.rbc-agenda-month .rbc-off-range {
+  color: #d1d5db;
+}
+.rbc-agenda-month .rbc-closed {
+  background: repeating-linear-gradient(135deg, #f0f1f5 0 6px, #f7f8fa 6px 12px);
+}
+.rbc-agenda-month .rbc-day-bg:not(.rbc-off-range-bg):hover {
+  background-color: #f0fdf6;
+  cursor: pointer;
+}
+.rbc-agenda-month .rbc-row-segment {
+  padding: 2px 6px;
+}
+.rbc-agenda .rbc-ev-month {
+  border: 0;
+  border-left: 0;
+  border-radius: 8px;
+  padding: 6px 8px;
+  box-shadow: none;
+}
+.rbc-agenda .rbc-occ-low  { background: #ecfdf3; color: #15803d; }
+.rbc-agenda .rbc-occ-mid  { background: #fef3c7; color: #b45309; }
+.rbc-agenda .rbc-occ-full { background: #fee2e2; color: #b91c1c; }
+.rbc-agenda .rbc-occ-none { background: #f3f4f6; color: #6b7280; }
+.rbc-legend-low    { background: #ecfdf3; border: 1px solid #86efb8; }
+.rbc-legend-mid    { background: #fef3c7; border: 1px solid #fcd34d; }
+.rbc-legend-full   { background: #fee2e2; border: 1px solid #fca5a5; }
+.rbc-legend-closed { background: repeating-linear-gradient(135deg, #e5e7eb 0 3px, #f7f8fa 3px 6px); border: 1px solid #e5e7eb; }

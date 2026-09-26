@@ -289,8 +289,16 @@ export class WhatsAppService {
     senderId: string | null;
     /** A quien queda asignado el hilo nuevo. Null lo deja sin asignar. */
     assignTo: string | null;
+    /**
+     * Si no hay conversacion abierta, en que estado se crea la nueva. CLOSED es para los
+     * avisos automaticos (confirmacion y recordatorio de citas): el mensaje queda en el
+     * historial del paciente pero no ocupa la bandeja; si la persona responde, el
+     * webhook abre una conversacion como siempre.
+     */
+    newConversationStatus?: 'OPEN' | 'CLOSED';
   }) {
     const { tenantId, account, template, contact, recipient, senderId, assignTo } = params;
+    const newStatus = params.newConversationStatus ?? 'OPEN';
     const bodyVariables = params.variables.body ?? [];
     const headerVariables = params.variables.header ?? [];
     const buttonVariables = params.variables.buttons ?? [];
@@ -313,7 +321,8 @@ export class WhatsAppService {
           tenantId,
           contactId: contact.id,
           channelAccountId: account.id,
-          status: 'OPEN',
+          status: newStatus,
+          ...(newStatus === 'CLOSED' && { closedReason: 'Aviso automático' }),
           // Null en una campaña: el hilo aparece sin dueño y alguien lo toma cuando
           // la persona responde. Asignarlos al que lanzo la campaña le dejaria miles.
           assignedUserId: assignTo,
@@ -412,25 +421,29 @@ export class WhatsAppService {
       }),
     ]);
 
-    this.eventBus.publish({
-      type: 'new_message',
-      tenantId,
-      payload: {
-        message,
-        conversationId: conversation.id,
-        contact: {
-          id: contact.id,
-          name: contact.name,
-          phone: contact.phone,
-          channel: 'WHATSAPP' as const,
-          // El evento en vivo tiene que traer el mismo nombre que devuelve la API al
-          // recargar; si no, la conversacion cambia de titulo sola al refrescar.
-          displayId: displayId('WHATSAPP', contact, null),
+    // Un aviso automatico en una conversacion cerrada no se anuncia: la bandeja lo
+    // mostraria como una conversacion activa, que es justo lo que se quiere evitar.
+    if (conversation.status !== 'CLOSED') {
+      this.eventBus.publish({
+        type: 'new_message',
+        tenantId,
+        payload: {
+          message,
+          conversationId: conversation.id,
+          contact: {
+            id: contact.id,
+            name: contact.name,
+            phone: contact.phone,
+            channel: 'WHATSAPP' as const,
+            // El evento en vivo tiene que traer el mismo nombre que devuelve la API al
+            // recargar; si no, la conversacion cambia de titulo sola al refrescar.
+            displayId: displayId('WHATSAPP', contact, null),
+          },
+          lastMessageText: renderedBody,
+          lastMessageAt: now.toISOString(),
         },
-        lastMessageText: renderedBody,
-        lastMessageAt: now.toISOString(),
-      },
-    });
+      });
+    }
 
     return { conversation, message };
   }

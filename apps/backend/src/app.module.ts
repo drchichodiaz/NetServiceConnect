@@ -29,6 +29,8 @@ import { MenuNodesModule } from './menu-nodes/menu-nodes.module';
 import { ChannelAccessModule } from './common/services/channel-access.module';
 import { MailModule } from './mail/mail.module';
 import { SupportModule } from './support/support.module';
+import { AgendaModule } from './agenda/agenda.module';
+import { AgendaNotifyModule } from './agenda-notify/agenda-notify.module';
 import { RequestIdMiddleware } from './common/request-id.middleware';
 import { RequestLogInterceptor } from './common/request-log.interceptor';
 
@@ -62,6 +64,8 @@ import { RequestLogInterceptor } from './common/request-log.interceptor';
     BotsModule,
     MenuNodesModule,
     SupportModule,
+    AgendaModule,
+    AgendaNotifyModule,
   ],
   providers: [
     // Escribe una linea por pedido fallido, con el id que le pone RequestIdMiddleware:

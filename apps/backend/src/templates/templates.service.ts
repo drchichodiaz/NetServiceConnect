@@ -181,7 +181,11 @@ export class TemplatesService {
       status = data?.status || 'PENDING';
     } catch (err) {
       this.logger.error('Failed to create template in Meta', err?.response?.data);
-      throw new BadRequestException(err?.response?.data?.error?.message || 'Failed to create template in Meta');
+      // `message` es generico ("Invalid parameter"); el motivo que se puede corregir
+      // viene en error_user_msg, y en el idioma de la cuenta. Sin esto, dos personas
+      // intentaron crear la misma plantilla varias veces sin saber que estaba mal.
+      const metaError = err?.response?.data?.error;
+      throw new BadRequestException(metaError?.error_user_msg || metaError?.message || 'Failed to create template in Meta');
     }
 
     return this.prisma.messageTemplate.create({

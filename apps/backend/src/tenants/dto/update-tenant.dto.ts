@@ -49,4 +49,18 @@ export class UpdateTenantDto {
   @IsString()
   @MaxLength(500)
   partnerNote?: string;
+
+  /**
+   * Prende o apaga la agenda de citas. Lo decide el super admin y no la empresa porque
+   * se vende aparte. Apagarla no borra nada: doctores y citas quedan para cuando vuelva.
+   */
+  @IsOptional()
+  @IsBoolean()
+  agendaEnabled?: boolean;
+
+  /** Zona horaria IANA ("America/Guatemala"). Es la hora de reloj de turnos y citas. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  timezone?: string;
 }
