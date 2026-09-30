@@ -13,11 +13,14 @@ const STATS_ACTIONS = [
 
 const DEFAULT_BOT_NAME = 'Bot principal';
 const NAME_MAX_LENGTH = 60;
+// Tope de WhatsApp para el cuerpo de una lista interactiva.
+export const MENU_GREETING_MAX_LENGTH = 1024;
 
 export interface BotUpdateDto {
   name?: string;
   aiKnowledgeBase?: string;
   startInAiChat?: boolean;
+  menuGreeting?: string;
 }
 
 /**
@@ -105,6 +108,13 @@ export class BotsService {
     if (dto.name !== undefined) data.name = this.cleanName(dto.name);
     if (dto.aiKnowledgeBase !== undefined) data.aiKnowledgeBase = dto.aiKnowledgeBase.trim() || null;
     if (dto.startInAiChat !== undefined) data.startInAiChat = !!dto.startInAiChat;
+    if (dto.menuGreeting !== undefined) {
+      const greeting = String(dto.menuGreeting ?? '').trim();
+      if (greeting.length > MENU_GREETING_MAX_LENGTH) {
+        throw new BadRequestException(`El saludo puede tener hasta ${MENU_GREETING_MAX_LENGTH} caracteres`);
+      }
+      data.menuGreeting = greeting || null;
+    }
     return this.prisma.bot.update({ where: { id }, data });
   }
 
@@ -155,6 +165,7 @@ export class BotsService {
           name: this.cleanName(name?.trim() || `${source.name} (copia)`),
           aiKnowledgeBase: source.aiKnowledgeBase,
           startInAiChat: source.startInAiChat,
+          menuGreeting: source.menuGreeting,
           isDefault: false,
         },
       }),

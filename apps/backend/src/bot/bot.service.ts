@@ -39,6 +39,8 @@ interface BotContext {
 }
 
 const DEFAULT_CONFIG_TEXT = 'Todavía no cargamos esta información. Ya te paso con un agente para ayudarte.';
+const DEFAULT_MENU_GREETING = '¡Hola! ¿En qué te podemos ayudar?';
+const NAME_PLACEHOLDER_RE = /\s*\{nombre\}/gi;
 // Meta permite máx. 10 filas por interactive list. En un nodo no-raíz reservamos
 // 1 fila para "‹ Volver" (UP_ID), así que ahí el cupo real de opciones es 9.
 const ROOT_ROW_CAP = 10;
@@ -145,9 +147,9 @@ export class BotService {
       }
     }
 
-    const botId = await this.getBotId(tenantId, conversationId);
+    const bot = await this.getBot(tenantId, conversationId);
     const children = await this.prisma.tenantMenuNode.findMany({
-      where: { tenantId, botId, parentId: nodeId, active: true },
+      where: { tenantId, botId: bot.id, parentId: nodeId, active: true },
       orderBy: [{ sortOrder: 'asc' }],
     });
 
@@ -164,9 +166,11 @@ export class BotService {
 
     const isRoot = nodeId === null;
     const rowCap = isRoot ? ROOT_ROW_CAP : CHILD_ROW_CAP;
+    const greeting = isRoot ? await this.renderMenuGreeting(bot.menuGreeting, conversationId) : null;
 
     if (children.length > rowCap) {
-      const prompt = node?.promptText?.trim() || '¿Qué estás buscando? Escríbeme el nombre de la opción.';
+      const askForName = '¿Qué estás buscando? Escríbeme el nombre de la opción.';
+      const prompt = node?.promptText?.trim() || (greeting ? `${greeting}\n\n${askForName}` : askForName);
       const sent = await this.sendText(tenantId, conversationId, phone, acc, prompt);
       if (!sent) {
         return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
@@ -190,7 +194,7 @@ export class BotService {
       type: 'interactive',
       interactive: {
         type: 'list',
-        body: { text: node?.promptText?.trim() || (isRoot ? '¡Hola! ¿En qué te podemos ayudar?' : `¿Qué necesitas de "${node!.title}"?`) },
+        body: { text: node?.promptText?.trim() || (isRoot ? greeting || DEFAULT_MENU_GREETING : `¿Qué necesitas de "${node!.title}"?`) },
         action: { button: 'Ver opciones', sections: [{ title: node?.title || 'Menú', rows }] },
       },
     };
@@ -450,6 +454,19 @@ ${knowledgeBase}
   }
 
   /** Nombre del contacto capturado del perfil de WhatsApp (puede no existir). */
+  /**
+   * El saludo del menú principal que configuró el admin, con {nombre} reemplazado.
+   * Sin nombre conocido, el comodín se borra junto con el espacio que lo precede:
+   * "¡Hola {nombre}!" queda "¡Hola!". null = no hay saludo propio.
+   */
+  private async renderMenuGreeting(template: string | null, conversationId: string): Promise<string | null> {
+    const text = template?.trim();
+    if (!text) return null;
+    if (!/\{nombre\}/i.test(text)) return text;
+    const name = await this.getContactName(conversationId);
+    return text.replace(NAME_PLACEHOLDER_RE, name ? ` ${name}` : '').trim() || null;
+  }
+
   private async getContactName(conversationId: string): Promise<string | null> {
     const conv = await this.prisma.conversation.findUnique({
       where: { id: conversationId },

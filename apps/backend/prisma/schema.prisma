@@ -685,6 +685,9 @@ model Bot {
   // mostrar el arbol de menu. El menu sigue siendo alcanzable si el cliente
   // escribe "menu"/"volver" en medio del chat.
   startInAiChat   Boolean  @default(false)
+  // Texto que acompaña al menu principal ("{nombre}" = nombre del contacto).
+  // null = el saludo por defecto.
+  menuGreeting    String?
   isDefault       Boolean  @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

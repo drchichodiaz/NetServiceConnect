@@ -11,6 +11,9 @@ import clsx from 'clsx';
 import MenuTreeEditor from './components/MenuTreeEditor';
 
 const AI_KNOWLEDGE_MAX_LENGTH = 20000;
+// Tope de WhatsApp para el texto de una lista interactiva.
+const MENU_GREETING_MAX_LENGTH = 1024;
+const DEFAULT_MENU_GREETING = '¡Hola! ¿En qué te podemos ayudar?';
 
 export default function BotSettingsPage() {
   const [loading, setLoading] = useState(true);
@@ -307,6 +310,8 @@ export default function BotSettingsPage() {
             </div>
           )}
 
+          <MenuGreetingCard key={`greeting-${selected.id}`} bot={selected} onSaved={patchSelected} />
+
           <MenuTreeEditor
             botId={selected.id}
             onCountChange={(nodeCount) => patchSelected({ nodeCount })}
@@ -462,6 +467,62 @@ function BotRow({
         </div>
       </div>
     </div>
+  );
+}
+
+// ─── Saludo del menú principal ────────────────────────────────────────────────
+
+function MenuGreetingCard({
+  bot, onSaved,
+}: { bot: BotSummary; onSaved: (patch: Partial<BotSummary>) => void }) {
+  const [greeting, setGreeting] = useState(bot.menuGreeting ?? '');
+  const [saving, setSaving] = useState(false);
+  const dirty = greeting.trim() !== (bot.menuGreeting ?? '').trim();
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const updated = await botsApi.update(bot.id, { menuGreeting: greeting });
+      onSaved({ menuGreeting: updated.menuGreeting });
+      setGreeting(updated.menuGreeting ?? '');
+      toast.success('Saludo guardado');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Error al guardar el saludo');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSave} className="card p-5 space-y-3">
+      <div className="flex items-center gap-2">
+        <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: '#E8FBF0' }}>
+          <Bot className="w-3.5 h-3.5" style={{ color: '#128C7E' }} />
+        </div>
+        <label className="text-xs font-semibold text-ink">Saludo inicial del menú</label>
+      </div>
+      <p className="text-[11px] text-ink-subtle">
+        El texto que acompaña al menú principal cuando el bot le escribe a un cliente. Escribe <strong>{'{nombre}'}</strong> donde
+        quieras el nombre del contacto. Si lo dejas vacío, el bot dice &quot;{DEFAULT_MENU_GREETING}&quot;.
+        {bot.startInAiChat && ' Este bot arranca en chat con IA: el saludo solo aparece si el cliente escribe "menú".'}
+      </p>
+      <textarea
+        value={greeting}
+        onChange={(e) => setGreeting(e.target.value)}
+        maxLength={MENU_GREETING_MAX_LENGTH}
+        rows={3}
+        className="input w-full text-sm"
+        placeholder="Ej: ¡Hola {nombre}! Gracias por escribirnos. Elige una opción para ayudarte:"
+      />
+      <div className="flex items-center justify-between gap-2">
+        <button type="submit" disabled={saving || !dirty} className="btn-primary text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+          Guardar
+        </button>
+        <span className="text-[11px] text-ink-subtle">{greeting.length}/{MENU_GREETING_MAX_LENGTH}</span>
+      </div>
+    </form>
   );
 }
 
