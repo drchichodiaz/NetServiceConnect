@@ -32,6 +32,16 @@ export type AiUnavailableReason =
   | 'PROVIDER_ERROR'
   | 'EMPTY_RESPONSE';
 
+/**
+ * Si hoy la IA de un tenant contestaria, para mostrarlo en pantalla. reason null = lista.
+ * NOT_CONFIGURED = sin clave con que llamar: la propia en BYOK, la de la plataforma en
+ * PLATFORM (ahi no es algo que la empresa pueda resolver sola).
+ */
+export interface AiReadiness {
+  mode: 'BYOK' | 'PLATFORM';
+  reason: 'NOT_CONFIGURED' | 'NO_CREDITS' | 'AI_DISABLED' | null;
+}
+
 export type AiChatResult =
   | { ok: true; text: string; credits: number }
   | { ok: false; reason: AiUnavailableReason };
@@ -80,6 +90,23 @@ export class AiGatewayService {
 
     const wallet = await this.wallet.getWallet(tenantId);
     return !!wallet && wallet.aiEnabled && wallet.spendable > 0;
+  }
+
+  /** Las mismas dos preguntas que hace el bot antes de entrar al chat de IA, juntas. */
+  async readiness(tenantId: string): Promise<AiReadiness> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { aiBillingMode: true },
+    });
+    const mode = tenant?.aiBillingMode === 'PLATFORM' ? 'PLATFORM' : 'BYOK';
+
+    if (!(await this.isConfigured(tenantId))) return { mode, reason: 'NOT_CONFIGURED' };
+    if (mode === 'BYOK') return { mode, reason: null };
+
+    const wallet = await this.wallet.getWallet(tenantId);
+    if (wallet && !wallet.aiEnabled) return { mode, reason: 'AI_DISABLED' };
+    if (!wallet || wallet.spendable <= 0) return { mode, reason: 'NO_CREDITS' };
+    return { mode, reason: null };
   }
 
   async chat(tenantId: string, req: AiChatRequest): Promise<AiChatResult> {

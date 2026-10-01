@@ -217,6 +217,12 @@ export const usersApi = {
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
+/** Si la IA de la empresa contestaría hoy. reason null = lista. */
+export interface AiReadiness {
+  mode: 'BYOK' | 'PLATFORM';
+  reason: 'NOT_CONFIGURED' | 'NO_CREDITS' | 'AI_DISABLED' | null;
+}
+
 export const settingsApi = {
   get: () => api.get('/settings').then((r) => r.data),
   update: (data: { openaiApiKey?: string; openaiModel?: string }) =>

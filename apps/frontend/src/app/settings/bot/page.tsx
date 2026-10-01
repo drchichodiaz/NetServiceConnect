@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { botsApi, settingsApi, BotSummary } from '@/lib/api';
+import { botsApi, settingsApi, BotSummary, AiReadiness } from '@/lib/api';
 import {
   Bot, Check, Loader2, LayoutDashboard, ArrowRight, Sparkles, AlertTriangle, Plus, Copy, Star, Trash2, Pencil, X, Phone,
   HelpCircle, ChevronDown,
@@ -15,11 +15,22 @@ const AI_KNOWLEDGE_MAX_LENGTH = 20000;
 const MENU_GREETING_MAX_LENGTH = 1024;
 const DEFAULT_MENU_GREETING = '¡Hola! ¿En qué te podemos ayudar?';
 
+/** Lo que le falta a la IA de la empresa para contestar, en palabras para "Falta ...". null = lista. */
+function aiProblemText(ai: AiReadiness | undefined): string | null {
+  switch (ai?.reason) {
+    case 'NO_CREDITS': return 'saldo de créditos de IA';
+    case 'AI_DISABLED': return 'reactivar el asistente de IA, que está suspendido';
+    case 'NOT_CONFIGURED': return 'activar el asistente de IA';
+    default: return null;
+  }
+}
+
 export default function BotSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [bots, setBots] = useState<BotSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [hasOpenaiKey, setHasOpenaiKey] = useState(false);
+  // Arranca sin aviso: mejor no mostrar nada un instante que mostrar uno que no corresponde.
+  const [ai, setAi] = useState<AiReadiness>({ mode: 'PLATFORM', reason: null });
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
   // '' = crear vacío; si no, el id del bot que se copia
@@ -34,7 +45,7 @@ export default function BotSettingsPage() {
         const [list, settings] = await Promise.all([botsApi.list(), settingsApi.get()]);
         setBots(list);
         setSelectedId(list.find((b) => b.isDefault)?.id ?? list[0]?.id ?? null);
-        setHasOpenaiKey(!!settings.hasOpenaiKey);
+        if (settings.ai) setAi(settings.ai);
       } catch {
         toast.error('Error al cargar los bots');
       } finally {
@@ -212,8 +223,11 @@ export default function BotSettingsPage() {
                 Si eliminas un bot, sus líneas pasan al predeterminado.
               </p>
               <p className="text-[11px] text-ink-muted leading-relaxed">
-                <strong className="text-ink font-medium">La clave de OpenAI es una sola</strong> para todos los bots
-                (en Configuración → IA). Lo que cambia de un bot a otro es la información del negocio que usa para responder.
+                <strong className="text-ink font-medium">
+                  {ai.mode === 'PLATFORM' ? 'Los créditos de IA son unos solos' : 'La clave de OpenAI es una sola'}
+                </strong>{' '}
+                para todos los bots (en Configuración → Créditos de IA). Lo que cambia de un bot a otro es la información
+                del negocio que usa para responder.
               </p>
               <p className="text-[11px] text-ink-muted leading-relaxed">
                 <strong className="text-ink font-medium">Las métricas</strong> del Dashboard se pueden ver por bot o de
@@ -317,14 +331,14 @@ export default function BotSettingsPage() {
             onCountChange={(nodeCount) => patchSelected({ nodeCount })}
             aiMissing={[
               ...(!selected.aiKnowledgeBase?.trim() ? ['la información del negocio (más abajo en esta página)'] : []),
-              ...(!hasOpenaiKey ? ['la clave de OpenAI (Configuración → IA)'] : []),
+              ...(aiProblemText(ai) ? [`${aiProblemText(ai)} (Configuración → Créditos de IA)`] : []),
             ]}
           />
 
           <AiCard
             key={selected.id}
             bot={selected}
-            hasOpenaiKey={hasOpenaiKey}
+            aiProblem={aiProblemText(ai)}
             onSaved={patchSelected}
           />
         </>
@@ -529,8 +543,8 @@ function MenuGreetingCard({
 // ─── Info del negocio + modo de arranque de un bot ────────────────────────────
 
 function AiCard({
-  bot, hasOpenaiKey, onSaved,
-}: { bot: BotSummary; hasOpenaiKey: boolean; onSaved: (patch: Partial<BotSummary>) => void }) {
+  bot, aiProblem, onSaved,
+}: { bot: BotSummary; aiProblem: string | null; onSaved: (patch: Partial<BotSummary>) => void }) {
   const [aiKnowledgeBase, setAiKnowledgeBase] = useState(bot.aiKnowledgeBase ?? '');
   const [savingAi, setSavingAi] = useState(false);
   const [savingMode, setSavingMode] = useState(false);
@@ -606,22 +620,23 @@ function AiCard({
         </p>
       </div>
 
-      {startInAiChat && (!hasOpenaiKey || !aiKnowledgeBase.trim()) && (
+      {startInAiChat && (aiProblem || !aiKnowledgeBase.trim()) && (
         <div className="flex items-start gap-2 rounded-xl p-3 text-xs" style={{ background: '#FEF2F2', color: '#991B1B' }}>
           <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
           <span>
             Con &quot;Chat con IA directo&quot; activado, <strong>todas</strong> las conversaciones nuevas de las líneas de este bot van a
-            derivar directo a un agente hasta que completes {!hasOpenaiKey && !aiKnowledgeBase.trim() ? 'la clave de OpenAI y la info del negocio' : !hasOpenaiKey ? 'la clave de OpenAI' : 'la info del negocio'} de acá abajo.
+            derivar directo a un agente. Falta{' '}
+            {[...(aiProblem ? [aiProblem] : []), ...(!aiKnowledgeBase.trim() ? ['la info del negocio de acá abajo'] : [])].join(' y ')}.
           </span>
         </div>
       )}
 
-      {!hasOpenaiKey && (
+      {aiProblem && (
         <div className="flex items-start gap-2 rounded-xl p-3 text-xs" style={{ background: '#FEF3C7', color: '#92400E' }}>
           <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
           <span>
-            Todavía no tienes una clave de OpenAI conectada — sin eso, el modo IA siempre va a derivar a un agente. Configúrala en{' '}
-            <Link href="/settings/ai" className="underline font-semibold">Configuración → IA</Link>. La clave es una sola para todos los bots.
+            El modo IA todavía no puede contestar: falta {aiProblem}. Mientras tanto, siempre deriva a un agente. Lo ves en{' '}
+            <Link href="/settings/ai" className="underline font-semibold">Configuración → Créditos de IA</Link>, que vale para todos los bots.
           </span>
         </div>
       )}

@@ -1,17 +1,24 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AiGatewayService } from '../ai-usage/ai-gateway.service';
 
 const MODELS = ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo'];
 
 @Injectable()
 export class SettingsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private ai: AiGatewayService,
+  ) {}
 
   async getSettings(tenantId: string) {
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { id: tenantId },
-      select: { openaiApiKey: true, openaiModel: true },
-    });
+    const [tenant, ai] = await Promise.all([
+      this.prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { openaiApiKey: true, openaiModel: true },
+      }),
+      this.ai.readiness(tenantId),
+    ]);
 
     return {
       hasOpenaiKey: !!tenant?.openaiApiKey,
@@ -21,6 +28,9 @@ export class SettingsService {
         : null,
       openaiModel: tenant?.openaiModel ?? 'gpt-4o-mini',
       availableModels: MODELS,
+      // Si la IA contestaria hoy. En modo creditos no hay clave propia, asi que
+      // hasOpenaiKey no sirve para decidirlo.
+      ai,
     };
   }
 
