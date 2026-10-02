@@ -19,6 +19,10 @@ export interface AgendaSettings {
   /** Reserva por WhatsApp: dias hacia adelante que se ofrecen y anticipacion minima. */
   bookingDaysAhead: number;
   bookingMinNoticeMinutes: number;
+  /** "Reprogramar" en el recordatorio: el paciente cambia o cancela solo, hasta X horas antes. */
+  patientCanReschedule: boolean;
+  patientCanCancel: boolean;
+  selfServiceCutoffHours: number;
   confirmationTemplateId: string | null;
   reminderTemplateId: string | null;
   doctorSummaryTemplateId: string | null;
@@ -67,6 +71,10 @@ export interface Appointment {
   status: AppointmentStatus;
   confirmedAt: string | null;
   rescheduleRequestedAt: string | null;
+  /** El paciente la cambio de horario por WhatsApp (la ultima vez). */
+  patientRescheduledAt?: string | null;
+  /** La cancelo el paciente por WhatsApp. */
+  cancelledByPatient?: boolean;
   /** Null = la reservo el paciente desde el bot de WhatsApp. */
   createdById?: string | null;
   confirmationSentAt?: string | null;

@@ -69,6 +69,21 @@ export class AgendaRepliesService {
     return { kind, appointmentId: appt.id, conversationId: original.conversationId };
   }
 
+  /**
+   * Si el "Reprogramar" de esta cita lo atiende el bot (el paciente cambia o cancela
+   * solo) en vez de la recepcion: la empresa lo tiene que permitir y faltar mas que el
+   * limite para la cita. El bot lo vuelve a revisar en cada paso.
+   */
+  async selfServiceAllowed(tenantId: string, appointmentId: string): Promise<boolean> {
+    const [settings, appt] = await Promise.all([
+      this.prisma.agendaSettings.findUnique({ where: { tenantId } }),
+      this.prisma.appointment.findFirst({ where: { id: appointmentId, tenantId }, select: { status: true, startsAt: true } }),
+    ]);
+    if (!settings?.enabled || !(settings.patientCanReschedule || settings.patientCanCancel) || !appt) return false;
+    if (appt.status !== 'SCHEDULED' && appt.status !== 'CONFIRMED') return false;
+    return appt.startsAt.getTime() - Date.now() >= settings.selfServiceCutoffHours * 3600_000;
+  }
+
   /** Aplica la respuesta a la cita y devuelve el texto con el que se le contesta. */
   async apply(tenantId: string, match: AgendaReplyMatch): Promise<string> {
     const now = new Date();

@@ -48,6 +48,23 @@ export class UpdateAgendaSettingsDto {
   @Max(2880)
   bookingMinNoticeMinutes?: number;
 
+  /** "Reprogramar" en el recordatorio: el paciente elige otro horario solo. */
+  @IsOptional()
+  @IsBoolean()
+  patientCanReschedule?: boolean;
+
+  /** "Reprogramar" en el recordatorio: el paciente puede cancelar solo. */
+  @IsOptional()
+  @IsBoolean()
+  patientCanCancel?: boolean;
+
+  /** Con menos horas que esto para la cita, el cambio va a la recepcion. */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(168)
+  selfServiceCutoffHours?: number;
+
   /** Cadena vacia = ese aviso no se manda. */
   @IsOptional()
   @IsString()

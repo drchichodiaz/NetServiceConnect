@@ -222,8 +222,18 @@ export class AvailabilityService {
    * Nada que empiece antes de `notBefore` (ahora mas la anticipacion minima). Como en
    * month(), se carga el rango de una vez y se calcula en memoria; las citas son las de
    * todas las clinicas, porque un doctor que rota esta ocupado donde sea que atienda.
+   *
+   * `excludeAppointmentId`: al cambiar una cita de horario, la cita no se ocupa a si misma.
    */
-  async bookableStarts(tenantId: string, channelAccountId: string, fromDate: string, days: number, minutes: number, notBefore: Date) {
+  async bookableStarts(
+    tenantId: string,
+    channelAccountId: string,
+    fromDate: string,
+    days: number,
+    minutes: number,
+    notBefore: Date,
+    excludeAppointmentId?: string,
+  ) {
     const settings = await this.settings.requireEnabled(tenantId);
     const tz = settings.timezone;
     const limit = toLocal(notBefore, tz);
@@ -245,6 +255,7 @@ export class AvailabilityService {
           status: { not: 'CANCELLED' },
           startsAt: { lt: fromLocal(last, MINUTES_PER_DAY, tz) },
           endsAt: { gt: fromLocal(first, 0, tz) },
+          ...(excludeAppointmentId && { id: { not: excludeAppointmentId } }),
         },
         select: { doctorId: true, startsAt: true, endsAt: true },
       }),

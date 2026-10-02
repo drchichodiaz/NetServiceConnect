@@ -1295,6 +1295,13 @@ model AgendaSettings {
   /// anticipacion minima (no se ofrece un horario que empieza en menos de eso).
   bookingDaysAhead        Int      @default(14)
   bookingMinNoticeMinutes Int      @default(120)
+  /// El boton "Reprogramar" del recordatorio deja al paciente cambiar el horario o
+  /// cancelar solo, en vez de pasarlo a la recepcion. Apagados por defecto: lo decide
+  /// la clinica. Con menos de selfServiceCutoffHours para la cita, va a la recepcion
+  /// igual, para que un cambio de ultimo momento no le llegue tarde a nadie.
+  patientCanReschedule    Boolean  @default(false)
+  patientCanCancel        Boolean  @default(false)
+  selfServiceCutoffHours  Int      @default(24)
   /// Plantilla de cada aviso. Null = ese aviso no se manda. Se eligen en pantalla y no
   /// por nombre fijo porque cada empresa crea y nombra las suyas, y Meta tiene que
   /// aprobarlas antes: la agenda tiene que funcionar mientras tanto.
@@ -1429,7 +1436,11 @@ model Appointment {
   reminderSentAt        DateTime?
   confirmedAt           DateTime?
   rescheduleRequestedAt DateTime?
+  /// El paciente la cambio de horario por WhatsApp (la ultima vez).
+  patientRescheduledAt  DateTime?
   cancelledAt           DateTime?
+  /// La cancelo el paciente por WhatsApp, no la recepcion.
+  cancelledByPatient    Boolean   @default(false)
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 

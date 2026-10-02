@@ -31,6 +31,25 @@ function isOverlapError(err: unknown): boolean {
   return text.includes('Appointment_no_overlap') || text.includes('23P01');
 }
 
+/**
+ * Lo que se resetea al cambiar una cita de hora o de clinica: la confirmacion que habia
+ * dado el paciente era para el horario viejo, y el recordatorio y la confirmacion tienen
+ * que volver a salir para el nuevo.
+ */
+function noticesReset(status: AppointmentStatus) {
+  return {
+    status: status === 'CONFIRMED' ? ('SCHEDULED' as const) : status,
+    confirmedAt: null,
+    reminderSentAt: null,
+    reminderMessageId: null,
+    rescheduleRequestedAt: null,
+    // Sale una confirmacion nueva con el horario nuevo (la manda el worker).
+    confirmationSentAt: null,
+    confirmationMessageId: null,
+    notifyError: null,
+  };
+}
+
 function hhmm(minute: number) {
   return `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
 }
@@ -137,6 +156,98 @@ export class AppointmentsService {
     return appt;
   }
 
+  /**
+   * La cita de un paciente que la quiere cambiar o cancelar solo, si todavia se puede:
+   * sigue abierta (agendada o confirmada) y no empezo. Null si no.
+   */
+  async findOpenForPatient(tenantId: string, appointmentId: string) {
+    const appt = await this.prisma.appointment.findFirst({
+      where: { id: appointmentId, tenantId, status: { in: ['SCHEDULED', 'CONFIRMED'] } },
+      include: { ...INCLUDE, channelAccount: { select: { label: true, displayName: true, businessName: true } } },
+    });
+    return appt && appt.startsAt.getTime() > Date.now() ? appt : null;
+  }
+
+  /**
+   * El paciente cambia su cita de horario desde el bot. Misma clinica y misma duracion;
+   * se queda con su doctor si sigue libre, si no se le asigna otro, igual que cuando la
+   * mueve la recepcion. Como en createForPatient, la confirmacion la manda el bot por
+   * texto, asi que queda marcada para que el worker no mande ademas la plantilla.
+   */
+  async rescheduleForPatient(input: { tenantId: string; appointmentId: string; startsAt: Date; conversationId: string }) {
+    const settings = await this.settings.requireEnabled(input.tenantId);
+    const current = await this.findOpenForPatient(input.tenantId, input.appointmentId);
+    if (!current) throw new BadRequestException('La cita ya no está vigente');
+    const startsAt = this.parseStart(input.startsAt.toISOString(), settings.timezone);
+    const minutes = Math.round((current.endsAt.getTime() - current.startsAt.getTime()) / 60000);
+    const endsAt = new Date(startsAt.getTime() + minutes * 60000);
+    this.assertNotPast(endsAt);
+
+    const free = await this.availability.freeDoctors(input.tenantId, current.channelAccountId, startsAt, minutes, current.id);
+    if (free.length === 0) throw new ConflictException('Ese horario se acaba de ocupar. Elija otro.');
+    const doctorId = free.some((d) => d.id === current.doctorId) ? current.doctorId : free[0].id;
+
+    const now = new Date();
+    try {
+      const appt = await this.prisma.appointment.update({
+        where: { id: current.id },
+        data: { doctorId, startsAt, endsAt, ...noticesReset(current.status), confirmationSentAt: now, patientRescheduledAt: now },
+        include: INCLUDE,
+      });
+      await this.prisma.auditLog.create({
+        data: {
+          tenantId: input.tenantId,
+          conversationId: input.conversationId,
+          action: 'appointment.moved',
+          metadata: {
+            appointmentId: current.id,
+            from: { startsAt: current.startsAt, doctorId: current.doctorId },
+            to: { startsAt, doctorId },
+            source: 'patient',
+          } as any,
+        },
+      });
+      this.publish(input.tenantId, current.channelAccountId);
+      return appt;
+    } catch (err) {
+      throw this.translate(err);
+    }
+  }
+
+  /**
+   * El paciente cancela su cita desde el bot. Devuelve false si ya no estaba abierta
+   * (la cancelo la recepcion, o ya paso): ahi no hay nada que cancelar.
+   */
+  async cancelForPatient(input: { tenantId: string; appointmentId: string; conversationId: string }) {
+    const { count } = await this.prisma.appointment.updateMany({
+      where: { id: input.appointmentId, tenantId: input.tenantId, status: { in: ['SCHEDULED', 'CONFIRMED'] }, startsAt: { gt: new Date() } },
+      data: { status: 'CANCELLED', cancelledAt: new Date(), cancelledByPatient: true, rescheduleRequestedAt: null },
+    });
+    if (count === 0) return false;
+    const appt = await this.prisma.appointment.findUnique({ where: { id: input.appointmentId }, select: { channelAccountId: true } });
+    await this.prisma.auditLog.create({
+      data: {
+        tenantId: input.tenantId,
+        conversationId: input.conversationId,
+        action: 'appointment.status',
+        metadata: { appointmentId: input.appointmentId, to: 'CANCELLED', source: 'patient' } as any,
+      },
+    });
+    if (appt) this.publish(input.tenantId, appt.channelAccountId);
+    return true;
+  }
+
+  /** El paciente toco "Reprogramar" pero decidio dejarla como estaba: ya no pide nada. */
+  async clearRescheduleRequest(tenantId: string, appointmentId: string) {
+    const { count } = await this.prisma.appointment.updateMany({
+      where: { id: appointmentId, tenantId, rescheduleRequestedAt: { not: null } },
+      data: { rescheduleRequestedAt: null },
+    });
+    if (count === 0) return;
+    const appt = await this.prisma.appointment.findUnique({ where: { id: appointmentId }, select: { channelAccountId: true } });
+    if (appt) this.publish(tenantId, appt.channelAccountId);
+  }
+
   /** El bot ya confirmo por texto: deja anotado ese mensaje como la confirmacion. */
   async markConfirmationMessage(tenantId: string, appointmentId: string, messageId: string) {
     await this.prisma.appointment.updateMany({ where: { id: appointmentId, tenantId }, data: { confirmationMessageId: messageId } });
@@ -198,17 +309,7 @@ export class AppointmentsService {
     if (dto.reason !== undefined) data.reason = dto.reason.trim() || null;
     if (dto.notes !== undefined) data.notes = dto.notes.trim() || null;
     if (moved && (startsAt.getTime() !== current.startsAt.getTime() || channelAccountId !== current.channelAccountId)) {
-      Object.assign(data, {
-        status: current.status === 'CONFIRMED' ? 'SCHEDULED' : current.status,
-        confirmedAt: null,
-        reminderSentAt: null,
-        reminderMessageId: null,
-        rescheduleRequestedAt: null,
-        // Sale una confirmacion nueva con el horario nuevo (la manda el worker).
-        confirmationSentAt: null,
-        confirmationMessageId: null,
-        notifyError: null,
-      });
+      Object.assign(data, noticesReset(current.status));
     }
 
     try {

@@ -293,6 +293,11 @@ export class WebhookService {
    * "Reprogramar" -o tocar el boton de una cita que ya no esta vigente- si, en modo
    * agente y repartida como una conversacion sin bot, porque ahi alguien tiene que
    * hablar con el paciente.
+   *
+   * Si la empresa deja que el paciente cambie o cancele solo, "Reprogramar" lo atiende
+   * el bot (BotService.startPatientReschedule), con el bot de la linea. Salvo que la
+   * linea no tenga bot, o que el paciente ya este hablando con alguien de la clinica en
+   * esa linea: ahi no se le saca la conversacion al agente.
    */
   private async handleAgendaReply(tenantId: string, accountId: string, msg: any, contactInfo: any, match: AgendaReplyMatch) {
     const existing = await this.prisma.message.findFirst({ where: { externalId: msg.id, tenantId } });
@@ -311,6 +316,12 @@ export class WebhookService {
         where: { tenantId, contactId: contact.id, channelAccountId: accountId, status: { not: 'CLOSED' } },
         orderBy: { createdAt: 'desc' },
       })) ?? (await this.prisma.conversation.findFirst({ where: { id: match.conversationId, tenantId } }));
+    const withAgent = conversation?.status !== 'CLOSED' && conversation?.mode === 'AGENT';
+    const lineBot =
+      match.kind === 'RESCHEDULE' && !withAgent && (await this.agendaReplies.selfServiceAllowed(tenantId, match.appointmentId))
+        ? await this.bots.resolveForAccount(tenantId, accountId)
+        : null;
+    const selfService = !!lineBot;
     if (!conversation) {
       conversation = await this.prisma.conversation.create({
         data: { tenantId, contactId: contact.id, channelAccountId: accountId, status: 'CLOSED', closedReason: 'Aviso automático' },
@@ -318,7 +329,9 @@ export class WebhookService {
     }
 
     const data: Record<string, unknown> = { lastMessageAt: now, lastMessageText: body, lastInboundAt: now };
-    if (toClinic) {
+    if (selfService) {
+      Object.assign(data, { status: 'OPEN', mode: 'BOT', botState: null, botId: lineBot!.id, closedReason: null });
+    } else if (toClinic) {
       data.status = 'OPEN';
       data.unreadCount = { increment: 1 };
       data.mode = 'AGENT';
@@ -346,7 +359,13 @@ export class WebhookService {
     const open = conversation.status !== 'CLOSED';
     if (open) this.publishMessage(tenantId, conversation.id, contact, message, body, now);
 
+    // La marca "pide reprogramar" queda igual con el bot: si el paciente no termina, la
+    // recepcion lo ve en la agenda. La borra el bot cuando la cambia, cancela o deja.
     const ack = await this.agendaReplies.apply(tenantId, match);
+    if (selfService) {
+      await this.botService.startPatientReschedule(tenantId, conversation.id, phone, match.appointmentId);
+      return;
+    }
     await this.sendAgendaAck(tenantId, accountId, conversation.id, open, contact, phone, ack);
   }
 

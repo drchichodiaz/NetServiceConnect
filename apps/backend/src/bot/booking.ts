@@ -2,7 +2,8 @@ import { hourText, shortDayText } from '../agenda/agenda-text';
 import { addDays, isValidDate, MINUTES_PER_DAY } from '../agenda/agenda-time';
 
 /**
- * Reserva de citas desde el bot (nodo BOOK_APPOINTMENT): las pantallas y los ids de sus
+ * Reserva de citas desde el bot (nodo BOOK_APPOINTMENT), y cambio o cancelacion de una
+ * cita desde el boton "Reprogramar" del recordatorio: las pantallas y los ids de sus
  * filas y botones, sin base de datos.
  *
  * Cada fila lleva en su id todo lo que hace falta para seguir (`bk:ask:2026-10-03:570`
@@ -23,10 +24,30 @@ export type BookingView =
   /** Confirmo: se reserva. */
   | { kind: 'book'; date: string; minute: number }
   /** Volver al menu del que colgaba la opcion. */
-  | { kind: 'menu' };
+  | { kind: 'menu' }
+  // ─── Cambiar o cancelar una cita que ya existe (botContext.bookingAppointmentId) ───
+  /** "Tu cita es el... ¿Qué quieres hacer?": cambiar horario, cancelar o dejarla. */
+  | { kind: 'manage' }
+  /** "¿Seguro que quieres cancelar tu cita?" */
+  | { kind: 'cancel' }
+  /** Si, cancelarla. */
+  | { kind: 'cancelOk' }
+  /** Dejarla como esta. */
+  | { kind: 'keep' }
+  /** Que lo atienda alguien de la clinica. */
+  | { kind: 'human' };
 
-/** Lo que es una pantalla (se muestra y se puede volver a mostrar): todo menos reservar y salir. */
-export type BookingScreen = Exclude<BookingView, { kind: 'book' } | { kind: 'menu' }>;
+/** Lo que hace algo en vez de mostrar una pantalla. Solo vale en el paso en que se ofrecio. */
+export type BookingAction = Extract<BookingView, { kind: 'book' | 'cancelOk' | 'keep' | 'human' }>;
+
+/** Lo que es una pantalla (se muestra y se puede volver a mostrar): todo menos las acciones y salir. */
+export type BookingScreen = Exclude<BookingView, BookingAction | { kind: 'menu' }>;
+
+const ACTIONS = new Set(['book', 'cancelOk', 'keep', 'human']);
+
+export function isAction(view: BookingView): view is BookingAction {
+  return ACTIONS.has(view.kind);
+}
 
 export interface Row {
   id: string;
@@ -56,6 +77,16 @@ export function viewId(v: BookingView): string {
       return `bk:ok:${v.date}:${v.minute}`;
     case 'menu':
       return 'bk:menu';
+    case 'manage':
+      return 'bk:manage';
+    case 'cancel':
+      return 'bk:cancel';
+    case 'cancelOk':
+      return 'bk:cancelok';
+    case 'keep':
+      return 'bk:keep';
+    case 'human':
+      return 'bk:human';
   }
 }
 
@@ -70,6 +101,11 @@ export function parseViewId(id: string | undefined): BookingView | null {
   if (!id?.startsWith('bk:')) return null;
   const [, kind, a, b, c] = id.split(':');
   if (kind === 'menu') return { kind: 'menu' };
+  if (kind === 'manage') return { kind: 'manage' };
+  if (kind === 'cancel') return { kind: 'cancel' };
+  if (kind === 'cancelok') return { kind: 'cancelOk' };
+  if (kind === 'keep') return { kind: 'keep' };
+  if (kind === 'human') return { kind: 'human' };
   if (kind === 'days') {
     const offset = minuteOf(a, 1000);
     return offset === null ? null : { kind: 'days', offset };
@@ -100,8 +136,16 @@ export function dayTitle(date: string, today: string) {
   return short.charAt(0).toUpperCase() + short.slice(1);
 }
 
-/** Una pagina de la lista de dias, con "Más días" si quedan y siempre "‹ Volver". */
-export function dayRows(days: { date: string; starts: number[] }[], today: string, offset: number): Row[] {
+/**
+ * Una pagina de la lista de dias, con "Más días" si quedan y al final la salida: "‹ Volver"
+ * al menu al reservar, o lo que corresponda al cambiar una cita que ya existe.
+ */
+export function dayRows(
+  days: { date: string; starts: number[] }[],
+  today: string,
+  offset: number,
+  exit: Row = { id: viewId({ kind: 'menu' }), title: '‹ Volver' },
+): Row[] {
   const page = days.slice(offset, offset + DAYS_PER_PAGE);
   const rows: Row[] = page.map((d) => ({
     id: viewId({ kind: 'day', date: d.date }),
@@ -109,7 +153,7 @@ export function dayRows(days: { date: string; starts: number[] }[], today: strin
     description: countText(d.starts.length),
   }));
   if (offset + DAYS_PER_PAGE < days.length) rows.push({ id: viewId({ kind: 'days', offset: offset + DAYS_PER_PAGE }), title: 'Más días' });
-  rows.push({ id: viewId({ kind: 'menu' }), title: '‹ Volver' });
+  rows.push(exit);
   return rows;
 }
 
@@ -135,5 +179,5 @@ export function needsDayPart(starts: number[]) {
 /** La ultima pantalla guardada en botContext, para volver a mostrarla. */
 export function parseScreenId(id: string | null): BookingScreen | null {
   const view = parseViewId(id ?? undefined);
-  return view && view.kind !== 'book' && view.kind !== 'menu' ? view : null;
+  return view && !isAction(view) && view.kind !== 'menu' ? view : null;
 }

@@ -15,7 +15,7 @@ import { AvailabilityService } from '../agenda/availability.service';
 import { AppointmentsService } from '../agenda/appointments.service';
 import { addDays, fromLocal, toLocal } from '../agenda/agenda-time';
 import { clinicName, dayText, hourText } from '../agenda/agenda-text';
-import { BookingScreen, NOON, Row, dayRows, needsDayPart, parseScreenId, parseViewId, timeRows, viewId } from './booking';
+import { BookingScreen, NOON, Row, dayRows, isAction, needsDayPart, parseScreenId, parseViewId, timeRows, viewId } from './booking';
 
 type MenuNodeType = 'MENU' | 'TEXT' | 'ORDER_LOOKUP' | 'AGENT' | 'AI_CHAT' | 'LOCATION' | 'BOOK_APPOINTMENT';
 
@@ -47,8 +47,13 @@ interface BotContext {
   // que no es una opcion. El resto del estado viaja en el id de cada fila.
   bookingNodeId: string | null;
   bookingView: string | null;
+  // La cita que el paciente esta cambiando o cancelando (boton "Reprogramar" del
+  // recordatorio). Null = esta reservando una nueva.
+  bookingAppointmentId: string | null;
 }
 
+// Cuando un cambio de cita no se puede hacer por el bot y lo toma la clinica.
+const BY_CLINIC_TEXT = 'Con gusto. En un momento alguien de la clínica te escribe por aquí para ayudarte con tu cita.';
 const DEFAULT_CONFIG_TEXT = 'Todavía no cargamos esta información. Ya te paso con un agente para ayudarte.';
 const DEFAULT_MENU_GREETING = '¡Hola! ¿En qué te podemos ayudar?';
 const NAME_PLACEHOLDER_RE = /\s*\{nombre\}/gi;
@@ -78,6 +83,9 @@ const AI_CHAT_HISTORY_LIMIT = 60;
 // comando si el mensaje es corto — si no, una pregunta real como "¿tienen un agente
 // de viajes?" o "¿cuál es el menú de precios?" dispararía una salida incorrecta.
 const SHORT_MESSAGE_MAX_WORDS = 4;
+
+/** Lo que bookingScope devuelve cuando se puede seguir. */
+type BookingScope = Extract<Awaited<ReturnType<BotService['bookingScope']>>, { ok: true }>;
 
 @Injectable()
 export class BotService {
@@ -122,11 +130,12 @@ export class BotService {
     }
 
     // Una fila de una lista de reserva vieja (la conversacion ya siguio a otro paso):
-    // se retoma la reserva desde esa pantalla, revalidada. Menos "Sí, reservar": ese
-    // solo vale en el paso de confirmar, y fuera de el se ignora (es el segundo toque
-    // de un doble toque, o un boton de hace horas).
+    // se retoma la reserva desde esa pantalla, revalidada. Menos los botones que hacen
+    // algo ("Sí, reservar", "Sí, cancelarla"...): esos solo valen en el paso en que se
+    // ofrecieron, y fuera de el se ignoran (es el segundo toque de un doble toque, o un
+    // boton de hace horas).
     const bookingTap = botState !== 'AWAITING_BOOKING' ? parseViewId(this.extractReplyId(msg)) : null;
-    if (bookingTap?.kind === 'book') return;
+    if (bookingTap && isAction(bookingTap)) return;
     if (bookingTap && bookingTap.kind !== 'menu') {
       return this.handleBookingReply(tenantId, conversationId, phone, msg, account);
     }
@@ -687,16 +696,39 @@ ${knowledgeBase}
     this.eventBus.publish({ type: 'conversation_updated', tenantId, payload: { conversationId } });
   }
 
-  // ─── Reservar una cita (nodo BOOK_APPOINTMENT) ─────────────────────────────
+  // ─── Reservar, cambiar o cancelar una cita ─────────────────────────────────
 
   /**
-   * El paciente reserva solo, eligiendo de listas: dia → (mañana o tarde) → hora →
-   * confirmar. La clinica es la linea a la que escribio y el doctor lo asigna la agenda,
-   * igual que cuando reserva la recepcion. Las pantallas y sus ids estan en booking.ts.
+   * Dos caminos con las mismas pantallas (booking.ts):
+   * - Reservar (nodo BOOK_APPOINTMENT): dia → (mañana o tarde) → hora → confirmar. La
+   *   clinica es la linea a la que escribio y el doctor lo asigna la agenda, igual que
+   *   cuando reserva la recepcion.
+   * - Cambiar o cancelar una cita que ya existe, desde el boton "Reprogramar" del
+   *   recordatorio, si la empresa lo permite (startPatientReschedule). La cita viaja en
+   *   botContext.bookingAppointmentId.
    */
   private async startBooking(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, node: MenuNode) {
-    await this.setContext(conversationId, { bookingNodeId: node.id, bookingView: null, retryCount: 0 });
+    await this.setContext(conversationId, { bookingNodeId: node.id, bookingAppointmentId: null, bookingView: null, retryCount: 0 });
     return this.showBookingView(tenantId, conversationId, phone, account, { kind: 'days', offset: 0 });
+  }
+
+  /**
+   * El paciente toco "Reprogramar" en el recordatorio y la empresa lo deja cambiar o
+   * cancelar solo (lo decide el webhook con AgendaRepliesService.selfServiceAllowed).
+   * Arranca en "¿Qué quieres hacer?", que pasa directo a los dias si solo puede cambiar
+   * el horario.
+   */
+  async startPatientReschedule(tenantId: string, conversationId: string, phone: string, appointmentId: string) {
+    const account = await this.accounts.getForConversation(conversationId);
+    if (!account) return this.handoffToHuman(tenantId, conversationId, 'whatsapp_account_unavailable');
+    await this.setContext(conversationId, {
+      nodeId: null,
+      bookingNodeId: null,
+      bookingAppointmentId: appointmentId,
+      bookingView: null,
+      retryCount: 0,
+    });
+    return this.showBookingView(tenantId, conversationId, phone, account, { kind: 'manage' });
   }
 
   private async handleBookingReply(tenantId: string, conversationId: string, phone: string, msg: any, account: WhatsAppAccountCreds) {
@@ -722,15 +754,27 @@ ${knowledgeBase}
     }
 
     await this.resetRetryCount(conversationId);
-    if (view.kind === 'menu') return this.enterNode(tenantId, conversationId, phone, nodeId, account);
-    if (view.kind === 'book') return this.bookSlot(tenantId, conversationId, phone, account, view.date, view.minute);
-    return this.showBookingView(tenantId, conversationId, phone, account, view);
+    switch (view.kind) {
+      case 'menu':
+        return this.enterNode(tenantId, conversationId, phone, nodeId, account);
+      case 'book':
+        return this.bookSlot(tenantId, conversationId, phone, account, view.date, view.minute);
+      case 'cancelOk':
+        return this.cancelAppointment(tenantId, conversationId, phone, account);
+      case 'keep':
+        return this.keepAppointment(tenantId, conversationId, phone, account);
+      case 'human':
+        await this.sendText(tenantId, conversationId, phone, account, BY_CLINIC_TEXT);
+        return this.handoffToHuman(tenantId, conversationId, 'reschedule_by_clinic');
+      default:
+        return this.showBookingView(tenantId, conversationId, phone, account, view);
+    }
   }
 
   /**
-   * Lo que hace falta saber para reservar en esta conversacion, o por que no se puede.
-   * Se arma en cada paso: si la recepcion ocupa un horario o el admin apaga la agenda
-   * mientras el paciente elige, el paso siguiente ya lo sabe.
+   * Lo que hace falta saber para reservar o cambiar la cita en esta conversacion, o por
+   * que no se puede. Se arma en cada paso: si la recepcion ocupa un horario, cancela la
+   * cita o el admin apaga algo mientras el paciente elige, el paso siguiente ya lo sabe.
    */
   private async bookingScope(tenantId: string, conversationId: string) {
     const settings = await this.agendaSettings.get(tenantId);
@@ -744,32 +788,73 @@ ${knowledgeBase}
         channelAccount: { select: { label: true, displayName: true, businessName: true } },
       },
     });
-    if (!conv?.channelAccountId || !conv.channelAccount) return { ok: false as const, error: 'no_line' };
+    if (!conv) return { ok: false as const, error: 'no_line' };
+    const { bookingAppointmentId } = await this.getContext(conversationId);
     const now = new Date();
-    return {
+    const base = {
       ok: true as const,
       settings,
-      channelAccountId: conv.channelAccountId,
       contactId: conv.contactId,
       contactName: conv.contact?.name?.trim() || null,
-      clinic: clinicName(conv.channelAccount),
       today: toLocal(now, settings.timezone).date,
       notBefore: new Date(now.getTime() + settings.bookingMinNoticeMinutes * 60000),
     };
+
+    if (!bookingAppointmentId) {
+      if (!conv.channelAccountId || !conv.channelAccount) return { ok: false as const, error: 'no_line' };
+      return { ...base, channelAccountId: conv.channelAccountId, clinic: clinicName(conv.channelAccount), minutes: settings.slotMinutes, change: null };
+    }
+
+    // Cambiar una cita: tiene que seguir abierta, ser de este paciente, la empresa lo
+    // tiene que permitir y faltar mas que el limite. Si no, la atiende la clinica.
+    const appt = await this.appointments.findOpenForPatient(tenantId, bookingAppointmentId);
+    if (!appt || appt.contactId !== conv.contactId) return { ok: false as const, error: 'stale' };
+    const { patientCanReschedule: canReschedule, patientCanCancel: canCancel } = settings;
+    if (!canReschedule && !canCancel) return { ok: false as const, error: 'self_service_off' };
+    if (appt.startsAt.getTime() - now.getTime() < settings.selfServiceCutoffHours * 3600_000) return { ok: false as const, error: 'too_late' };
+    const start = toLocal(appt.startsAt, settings.timezone);
+    return {
+      ...base,
+      channelAccountId: appt.channelAccountId,
+      clinic: clinicName(appt.channelAccount),
+      minutes: Math.round((appt.endsAt.getTime() - appt.startsAt.getTime()) / 60000),
+      change: { appointmentId: appt.id, date: start.date, minute: start.minute, canReschedule, canCancel },
+    };
+  }
+
+  /**
+   * Los dias con horarios que se le ofrecen al paciente, desde `fromDate`. Al cambiar una
+   * cita, la cita no se ocupa a si misma y su horario actual no se ofrece: elegirlo no
+   * cambiaria nada.
+   */
+  private async offeredStarts(tenantId: string, scope: BookingScope, fromDate: string, days: number) {
+    const { settings, change } = scope;
+    const result = await this.availability.bookableStarts(
+      tenantId,
+      scope.channelAccountId,
+      fromDate,
+      days,
+      scope.minutes,
+      scope.notBefore,
+      change?.appointmentId,
+    );
+    if (!change) return result;
+    return result
+      .map((d) => (d.date === change.date ? { ...d, starts: d.starts.filter((s) => s !== change.minute) } : d))
+      .filter((d) => d.starts.length > 0 && d.date < addDays(scope.today, settings.bookingDaysAhead));
   }
 
   /** Los horarios libres de un dia, o ninguno si cae fuera de los dias que se ofrecen. */
-  private async bookableStartsOf(tenantId: string, scope: Extract<Awaited<ReturnType<BotService['bookingScope']>>, { ok: true }>, date: string) {
-    const { settings } = scope;
-    if (date < scope.today || date >= addDays(scope.today, settings.bookingDaysAhead)) return [];
-    const [day] = await this.availability.bookableStarts(tenantId, scope.channelAccountId, date, 1, settings.slotMinutes, scope.notBefore);
+  private async bookableStartsOf(tenantId: string, scope: BookingScope, date: string) {
+    if (date < scope.today || date >= addDays(scope.today, scope.settings.bookingDaysAhead)) return [];
+    const [day] = await this.offeredStarts(tenantId, scope, date, 1);
     return day?.starts ?? [];
   }
 
   /**
-   * Muestra una pantalla de la reserva. Cada una se valida contra la agenda de ahora:
-   * si lo que el paciente toco ya no esta (dia lleno, horario ocupado), se le dice y se le
-   * muestra lo que queda. `notice` va arriba del texto de la pantalla, en el mismo mensaje.
+   * Muestra una pantalla. Cada una se valida contra la agenda de ahora: si lo que el
+   * paciente toco ya no esta (dia lleno, horario ocupado), se le dice y se le muestra lo
+   * que queda. `notice` va arriba del texto de la pantalla, en el mismo mensaje.
    */
   private async showBookingView(
     tenantId: string,
@@ -781,48 +866,70 @@ ${knowledgeBase}
   ): Promise<unknown> {
     const scope = await this.bookingScope(tenantId, conversationId);
     if (!scope.ok) return this.bookingUnavailable(tenantId, conversationId, phone, account, scope.error);
+    const { change } = scope;
     const withNotice = (body: string) => (notice ? `${notice}\n\n${body}` : body);
     const fail = () => this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
+    const show = (next: BookingScreen, nextNotice = notice) => this.showBookingView(tenantId, conversationId, phone, account, next, nextNotice);
 
     try {
+      // ─── Cambiar o cancelar una cita que ya existe ───
+      if (view.kind === 'manage' || view.kind === 'cancel') {
+        if (!change) return show({ kind: 'days', offset: 0 });
+        if (!change.canCancel) return view.kind === 'manage' ? show({ kind: 'days', offset: 0 }) : show({ kind: 'manage' });
+        const when = `${dayText(change.date)} a las ${hourText(change.minute)} en ${scope.clinic}`;
+        const sent =
+          view.kind === 'manage'
+            ? await this.sendButtons(tenantId, conversationId, phone, account, withNotice(`Tu cita es el ${when}. ¿Qué quieres hacer?`), [
+                change.canReschedule
+                  ? { id: viewId({ kind: 'days', offset: 0 }), title: 'Cambiar horario' }
+                  : { id: viewId({ kind: 'human' }), title: 'Hablar con alguien' },
+                { id: viewId({ kind: 'cancel' }), title: 'Cancelar cita' },
+                { id: viewId({ kind: 'keep' }), title: 'Dejarla así' },
+              ])
+            : await this.sendButtons(tenantId, conversationId, phone, account, withNotice(`¿Seguro que quieres cancelar tu cita del ${when}?`), [
+                { id: viewId({ kind: 'cancelOk' }), title: 'Sí, cancelarla' },
+                { id: viewId({ kind: 'keep' }), title: 'No, mantenerla' },
+              ]);
+        if (!sent) return fail();
+        return this.setBookingView(conversationId, view);
+      }
+
+      // Puede cancelar pero no cambiar el horario: no hay dias que mostrarle.
+      if (change && !change.canReschedule) return show({ kind: 'manage' });
+
       if (view.kind === 'days') {
-        const days = await this.availability.bookableStarts(
-          tenantId,
-          scope.channelAccountId,
-          scope.today,
-          scope.settings.bookingDaysAhead,
-          scope.settings.slotMinutes,
-          scope.notBefore,
-        );
+        const days = await this.offeredStarts(tenantId, scope, scope.today, scope.settings.bookingDaysAhead);
         if (days.length === 0) {
           this.logger.warn(`[booking] tenant ${tenantId}: sin horarios libres en ${scope.clinic} en ${scope.settings.bookingDaysAhead} dias`);
-          await this.sendText(
-            tenantId,
-            conversationId,
-            phone,
-            account,
-            `Por ahora no tenemos horarios libres para reservar por aquí. Ya te paso con alguien de ${scope.clinic} para buscarte un lugar.`,
-          );
-          return this.handoffToHuman(tenantId, conversationId, 'booking_no_slots');
+          const text = change
+            ? `Por ahora no tenemos otros horarios libres para cambiar tu cita por aquí. ${BY_CLINIC_TEXT}`
+            : `Por ahora no tenemos horarios libres para reservar por aquí. Ya te paso con alguien de ${scope.clinic} para buscarte un lugar.`;
+          await this.sendText(tenantId, conversationId, phone, account, text);
+          return this.handoffToHuman(tenantId, conversationId, change ? 'reschedule_no_slots' : 'booking_no_slots');
         }
         const offset = view.offset < days.length ? view.offset : 0;
-        const { bookingNodeId } = await this.getContext(conversationId);
-        const node = bookingNodeId ? await this.resolveNode(tenantId, bookingNodeId) : null;
-        const body = node?.bodyText?.trim() || `¿Qué día te queda bien para tu cita en ${scope.clinic}?`;
-        const rows = dayRows(days, scope.today, offset);
+        let body: string;
+        let exit: Row | undefined;
+        if (change) {
+          body = `Tu cita es el ${dayText(change.date)} a las ${hourText(change.minute)}. ¿Qué día te queda mejor?`;
+          exit = change.canCancel ? { id: viewId({ kind: 'manage' }), title: '‹ Volver' } : { id: viewId({ kind: 'keep' }), title: 'Dejarla así' };
+        } else {
+          const { bookingNodeId } = await this.getContext(conversationId);
+          const node = bookingNodeId ? await this.resolveNode(tenantId, bookingNodeId) : null;
+          body = node?.bodyText?.trim() || `¿Qué día te queda bien para tu cita en ${scope.clinic}?`;
+        }
+        const rows = dayRows(days, scope.today, offset, exit);
         if (!(await this.sendList(tenantId, conversationId, phone, account, withNotice(body), 'Ver días', 'Días con lugar', rows))) return fail();
         return this.setBookingView(conversationId, { kind: 'days', offset });
       }
 
       const starts = await this.bookableStartsOf(tenantId, scope, view.date);
       if (starts.length === 0) {
-        return this.showBookingView(tenantId, conversationId, phone, account, { kind: 'days', offset: 0 }, `El ${dayText(view.date)} ya no tiene horarios libres.`);
+        return show({ kind: 'days', offset: 0 }, `El ${dayText(view.date)} ya no tiene horarios libres.`);
       }
 
       if (view.kind === 'day') {
-        if (!needsDayPart(starts)) {
-          return this.showBookingView(tenantId, conversationId, phone, account, { kind: 'times', date: view.date, from: 0, to: 24 * 60 }, notice);
-        }
+        if (!needsDayPart(starts)) return show({ kind: 'times', date: view.date, from: 0, to: 24 * 60 });
         const body = `El ${dayText(view.date)} tenemos ${starts.length} horarios libres. ¿Te queda mejor en la mañana o en la tarde?`;
         const sent = await this.sendButtons(tenantId, conversationId, phone, account, withNotice(body), [
           { id: viewId({ kind: 'times', date: view.date, from: 0, to: NOON }), title: 'En la mañana' },
@@ -835,7 +942,7 @@ ${knowledgeBase}
 
       if (view.kind === 'times') {
         if (!starts.some((s) => s >= view.from && s < view.to)) {
-          return this.showBookingView(tenantId, conversationId, phone, account, { kind: 'day', date: view.date }, 'Ya no quedan horarios libres en esa parte del día.');
+          return show({ kind: 'day', date: view.date }, 'Ya no quedan horarios libres en esa parte del día.');
         }
         const part = view.from === 0 && view.to === NOON ? ' en la mañana' : view.from >= NOON ? ' en la tarde' : '';
         const body = `Horarios libres el ${dayText(view.date)}${part}:`;
@@ -846,12 +953,13 @@ ${knowledgeBase}
 
       if (view.kind === 'ask') {
         if (!starts.includes(view.minute)) {
-          return this.showBookingView(tenantId, conversationId, phone, account, { kind: 'day', date: view.date }, 'Ese horario ya no está libre. Estos son los que quedan:');
+          return show({ kind: 'day', date: view.date }, 'Ese horario ya no está libre. Estos son los que quedan:');
         }
+        const at = `el ${dayText(view.date)} a las ${hourText(view.minute)} en ${scope.clinic}`;
         const forWhom = scope.contactName ? `, a nombre de ${scope.contactName}` : '';
-        const body = `Te reservo el ${dayText(view.date)} a las ${hourText(view.minute)} en ${scope.clinic}${forWhom}. ¿Confirmo?`;
+        const body = change ? `Te cambio la cita al ${dayText(view.date)} a las ${hourText(view.minute)} en ${scope.clinic}. ¿Confirmo?` : `Te reservo ${at}${forWhom}. ¿Confirmo?`;
         const sent = await this.sendButtons(tenantId, conversationId, phone, account, withNotice(body), [
-          { id: viewId({ kind: 'book', date: view.date, minute: view.minute }), title: 'Sí, reservar' },
+          { id: viewId({ kind: 'book', date: view.date, minute: view.minute }), title: change ? 'Sí, cambiarla' : 'Sí, reservar' },
           { id: viewId({ kind: 'day', date: view.date }), title: 'Otro horario' },
         ]);
         if (!sent) return fail();
@@ -862,34 +970,40 @@ ${knowledgeBase}
     }
   }
 
-  private async bookSlot(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, date: string, minute: number) {
-    const scope = await this.bookingScope(tenantId, conversationId);
-    if (!scope.ok) return this.bookingUnavailable(tenantId, conversationId, phone, account, scope.error);
-    const taken = 'Ese horario se acaba de ocupar. Estos son los que quedan:';
-
-    // Dos toques seguidos en "Sí, reservar" llegan como dos mensajes casi a la vez, y
-    // serian dos citas. Sigue solo el que saca a la conversacion del paso de confirmar;
-    // el otro no hace nada. Cada salida de aca vuelve a fijar el estado que corresponde.
+  /**
+   * Dos toques seguidos en un boton que hace algo ("Sí, reservar", "Sí, cancelarla")
+   * llegan como dos mensajes casi a la vez, y serian dos citas o dos cancelaciones. Sigue
+   * solo el que saca a la conversacion del paso en que estaba; el otro no hace nada. Cada
+   * salida de quien lo gana vuelve a fijar el estado que corresponde.
+   */
+  private async claimBookingStep(conversationId: string) {
     const claimed = await this.prisma.conversation.updateMany({
       where: { id: conversationId, botState: 'AWAITING_BOOKING' },
       data: { botState: 'MENU' },
     });
-    if (claimed.count === 0) return;
+    return claimed.count > 0;
+  }
+
+  /** Reserva el horario, o lo cambia si la conversacion esta cambiando una cita que ya existe. */
+  private async bookSlot(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, date: string, minute: number) {
+    const scope = await this.bookingScope(tenantId, conversationId);
+    if (!scope.ok) return this.bookingUnavailable(tenantId, conversationId, phone, account, scope.error);
+    if (!(await this.claimBookingStep(conversationId))) return;
+    const taken = 'Ese horario se acaba de ocupar. Estos son los que quedan:';
+    const { change } = scope;
 
     let appointmentId: string;
     try {
+      if (change && !change.canReschedule) return this.showBookingView(tenantId, conversationId, phone, account, { kind: 'manage' });
       // Se revalida contra lo que se ofrece (anticipacion minima, dias hacia adelante),
       // no solo contra la agenda: el boton puede ser de una conversacion de ayer.
       const starts = await this.bookableStartsOf(tenantId, scope, date);
       if (!starts.includes(minute)) return this.showBookingView(tenantId, conversationId, phone, account, { kind: 'day', date }, taken);
 
-      const appt = await this.appointments.createForPatient({
-        tenantId,
-        channelAccountId: scope.channelAccountId,
-        contactId: scope.contactId,
-        startsAt: fromLocal(date, minute, scope.settings.timezone),
-        conversationId,
-      });
+      const startsAt = fromLocal(date, minute, scope.settings.timezone);
+      const appt = change
+        ? await this.appointments.rescheduleForPatient({ tenantId, appointmentId: change.appointmentId, startsAt, conversationId })
+        : await this.appointments.createForPatient({ tenantId, channelAccountId: scope.channelAccountId, contactId: scope.contactId, startsAt, conversationId });
       appointmentId = appt.id;
     } catch (err) {
       // 409: otra recepcion o paciente lo tomo entre que se mostro y se confirmo.
@@ -900,12 +1014,13 @@ ${knowledgeBase}
     }
 
     const reminder = scope.settings.reminderTemplateId ? ' Antes de la cita te enviamos un recordatorio.' : '';
+    const at = `el ${dayText(date)} a las ${hourText(minute)} en ${scope.clinic}`;
     const messageId = await this.sendText(
       tenantId,
       conversationId,
       phone,
       account,
-      `¡Listo! Tu cita quedó para el ${dayText(date)} a las ${hourText(minute)} en ${scope.clinic}.${reminder}`,
+      change ? `¡Listo! Cambiamos tu cita para ${at}.${reminder}` : `¡Listo! Tu cita quedó para ${at}.${reminder}`,
     );
     if (!messageId) {
       // La cita ya esta tomada; lo que falta es que el paciente se entere. Sin la marca,
@@ -914,8 +1029,39 @@ ${knowledgeBase}
       return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
     }
     await this.appointments.markConfirmationMessage(tenantId, appointmentId, messageId);
-    await this.setContext(conversationId, { bookingNodeId: null, bookingView: null });
+    return this.finishBooking(tenantId, conversationId, phone, account);
+  }
 
+  private async cancelAppointment(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds) {
+    const scope = await this.bookingScope(tenantId, conversationId);
+    if (!scope.ok) return this.bookingUnavailable(tenantId, conversationId, phone, account, scope.error);
+    const { change } = scope;
+    if (!change?.canCancel) return this.showBookingView(tenantId, conversationId, phone, account, { kind: 'manage' });
+    if (!(await this.claimBookingStep(conversationId))) return;
+
+    const cancelled = await this.appointments.cancelForPatient({ tenantId, appointmentId: change.appointmentId, conversationId });
+    if (!cancelled) return this.bookingUnavailable(tenantId, conversationId, phone, account, 'stale');
+    const when = `${dayText(change.date)} a las ${hourText(change.minute)} en ${scope.clinic}`;
+    await this.sendText(tenantId, conversationId, phone, account, `Listo, cancelamos tu cita del ${when}. Si quieres agendar otra, escríbenos por aquí.`);
+    return this.finishBooking(tenantId, conversationId, phone, account);
+  }
+
+  private async keepAppointment(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds) {
+    const scope = await this.bookingScope(tenantId, conversationId);
+    if (!scope.ok) return this.bookingUnavailable(tenantId, conversationId, phone, account, scope.error);
+    const { change } = scope;
+    if (!change) return this.showBookingView(tenantId, conversationId, phone, account, { kind: 'days', offset: 0 });
+    if (!(await this.claimBookingStep(conversationId))) return;
+
+    await this.appointments.clearRescheduleRequest(tenantId, change.appointmentId);
+    const when = `${dayText(change.date)} a las ${hourText(change.minute)} en ${scope.clinic}`;
+    await this.sendText(tenantId, conversationId, phone, account, `Perfecto, tu cita sigue el ${when}.`);
+    return this.finishBooking(tenantId, conversationId, phone, account);
+  }
+
+  /** Termino la reserva o el cambio: se limpia el contexto y sigue "¿Necesitas algo más?". */
+  private async finishBooking(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds) {
+    await this.setContext(conversationId, { bookingNodeId: null, bookingAppointmentId: null, bookingView: null });
     const { nodeId } = await this.getContext(conversationId);
     return this.sendPostReplyPrompt(tenantId, conversationId, phone, account, nodeId);
   }
@@ -925,16 +1071,26 @@ ${knowledgeBase}
     await this.prisma.conversation.update({ where: { id: conversationId }, data: { botState: 'AWAITING_BOOKING' } });
   }
 
-  /** La empresa no tiene la agenda activa, o la conversacion no tiene linea: no hay donde reservar. */
+  /**
+   * No se puede seguir por el bot: la agenda esta apagada, la conversacion no tiene linea,
+   * o (al cambiar una cita) la cita ya no esta vigente, la empresa apago el autoservicio o
+   * falta menos que el limite. Se le avisa al paciente y lo atiende la clinica.
+   */
   private async bookingUnavailable(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, reason: string) {
-    this.logger.warn(`[booking] tenant ${tenantId}: no se puede reservar (${reason})`);
-    await this.sendText(tenantId, conversationId, phone, account, 'En este momento no puedo agendar citas por aquí. Ya te paso con alguien de la clínica para ayudarte.');
+    this.logger.warn(`[booking] tenant ${tenantId}: no se puede seguir por el bot (${reason})`);
+    const text =
+      reason === 'stale'
+        ? `Esa cita ya no está vigente. ${BY_CLINIC_TEXT}`
+        : reason === 'too_late' || reason === 'self_service_off'
+          ? BY_CLINIC_TEXT
+          : 'En este momento no puedo agendar citas por aquí. Ya te paso con alguien de la clínica para ayudarte.';
+    await this.sendText(tenantId, conversationId, phone, account, text);
     return this.handoffToHuman(tenantId, conversationId, `booking_${reason}`);
   }
 
   private async bookingFailed(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, err: unknown) {
     this.logger.error(`[booking] tenant ${tenantId}: fallo la reserva`, (err as any)?.stack || err);
-    await this.sendText(tenantId, conversationId, phone, account, 'Perdón, tuve un problema para agendar tu cita. Ya te paso con alguien de la clínica.');
+    await this.sendText(tenantId, conversationId, phone, account, 'Perdón, tuve un problema con tu cita. Ya te paso con alguien de la clínica.');
     return this.handoffToHuman(tenantId, conversationId, 'booking_error');
   }
 
@@ -1151,6 +1307,7 @@ ${knowledgeBase}
       aiSince: ctx.aiSince ?? null,
       bookingNodeId: ctx.bookingNodeId ?? null,
       bookingView: ctx.bookingView ?? null,
+      bookingAppointmentId: ctx.bookingAppointmentId ?? null,
     };
   }
 
