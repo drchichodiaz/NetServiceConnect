@@ -90,32 +90,64 @@ export class AppointmentsService {
 
     const contactId = await this.resolveContact(actor.tenantId, dto);
 
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const doctorId = await this.pickDoctor(actor.tenantId, dto.channelAccountId, startsAt, minutes, dto.doctorId);
-      try {
-        const appt = await this.prisma.appointment.create({
-          data: {
-            tenantId: actor.tenantId,
-            channelAccountId: dto.channelAccountId,
-            doctorId,
-            contactId,
-            startsAt,
-            endsAt,
-            reason: dto.reason?.trim() || null,
-            notes: dto.notes?.trim() || null,
-            createdById: actor.id,
-          },
-          include: INCLUDE,
-        });
-        await this.audit(actor, 'appointment.created', appt.id, { doctorId, startsAt });
-        this.publish(actor.tenantId, appt.channelAccountId);
-        return appt;
-      } catch (err) {
-        // Doctor elegido a mano: no hay a quien pasar la cita, se explica y listo.
-        if (!isOverlapError(err) || dto.doctorId || attempt === 1) throw this.translate(err);
-      }
-    }
-    throw new ConflictException('Ese horario se acaba de ocupar. Elija otro.');
+    const appt = await this.insert(
+      actor.tenantId,
+      dto.channelAccountId,
+      startsAt,
+      minutes,
+      { contactId, reason: dto.reason?.trim() || null, notes: dto.notes?.trim() || null, createdById: actor.id },
+      dto.doctorId,
+    );
+    await this.audit(actor, 'appointment.created', appt.id, { doctorId: appt.doctorId, startsAt });
+    this.publish(actor.tenantId, appt.channelAccountId);
+    return appt;
+  }
+
+  /**
+   * La cita que reserva el paciente solo, desde el bot de WhatsApp.
+   *
+   * No hay usuario: no pasa por los permisos de linea (la clinica es la linea a la que
+   * escribio el paciente) y queda con createdById null. Lo demas es igual que create():
+   * duracion por defecto, grilla de 15, doctor libre con menos citas, reintento si la base
+   * rechaza por choque.
+   *
+   * La cita nace con confirmationSentAt marcado: el bot confirma por texto en la misma
+   * conversacion, y sin la marca el worker mandaria ademas la plantilla. Si ese texto no
+   * sale, el bot llama a releaseConfirmation y la plantilla sale como con cualquier cita.
+   */
+  async createForPatient(input: { tenantId: string; channelAccountId: string; contactId: string; startsAt: Date; conversationId: string }) {
+    const settings = await this.settings.requireEnabled(input.tenantId);
+    const startsAt = this.parseStart(input.startsAt.toISOString(), settings.timezone);
+    this.assertNotPast(new Date(startsAt.getTime() + settings.slotMinutes * 60000));
+
+    const appt = await this.insert(input.tenantId, input.channelAccountId, startsAt, settings.slotMinutes, {
+      contactId: input.contactId,
+      createdById: null,
+      confirmationSentAt: new Date(),
+    });
+    await this.prisma.auditLog.create({
+      data: {
+        tenantId: input.tenantId,
+        conversationId: input.conversationId,
+        action: 'appointment.created',
+        metadata: { appointmentId: appt.id, doctorId: appt.doctorId, startsAt, source: 'bot' } as any,
+      },
+    });
+    this.publish(input.tenantId, appt.channelAccountId);
+    return appt;
+  }
+
+  /** El bot ya confirmo por texto: deja anotado ese mensaje como la confirmacion. */
+  async markConfirmationMessage(tenantId: string, appointmentId: string, messageId: string) {
+    await this.prisma.appointment.updateMany({ where: { id: appointmentId, tenantId }, data: { confirmationMessageId: messageId } });
+  }
+
+  /** El texto de confirmacion del bot no salio: que la mande el worker con la plantilla. */
+  async releaseConfirmation(tenantId: string, appointmentId: string) {
+    await this.prisma.appointment.updateMany({
+      where: { id: appointmentId, tenantId, confirmationMessageId: null },
+      data: { confirmationSentAt: null },
+    });
   }
 
   /**
@@ -279,6 +311,35 @@ export class AppointmentsService {
       throw new ForbiddenException('No tiene acceso a la agenda de esa clínica');
     }
     return appt;
+  }
+
+  /**
+   * Guarda la cita con el doctor libre que toque (o el elegido a mano). Entre calcular
+   * quien esta libre y guardar, otra recepcion puede haber dado el mismo horario: la base
+   * rechaza la segunda y se reintenta una vez con el siguiente doctor libre.
+   */
+  private async insert(
+    tenantId: string,
+    channelAccountId: string,
+    startsAt: Date,
+    minutes: number,
+    data: { contactId: string; createdById: string | null; reason?: string | null; notes?: string | null; confirmationSentAt?: Date },
+    wantedDoctorId?: string,
+  ) {
+    const endsAt = new Date(startsAt.getTime() + minutes * 60000);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const doctorId = await this.pickDoctor(tenantId, channelAccountId, startsAt, minutes, wantedDoctorId);
+      try {
+        return await this.prisma.appointment.create({
+          data: { tenantId, channelAccountId, doctorId, startsAt, endsAt, ...data },
+          include: INCLUDE,
+        });
+      } catch (err) {
+        // Doctor elegido a mano: no hay a quien pasar la cita, se explica y listo.
+        if (!isOverlapError(err) || wantedDoctorId || attempt === 1) throw this.translate(err);
+      }
+    }
+    throw new ConflictException('Ese horario se acaba de ocupar. Elija otro.');
   }
 
   private async pickDoctor(tenantId: string, channelAccountId: string, startsAt: Date, minutes: number, wanted?: string) {

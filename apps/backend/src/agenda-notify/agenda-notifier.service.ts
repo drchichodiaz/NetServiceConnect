@@ -5,6 +5,7 @@ import { WhatsAppAccountsService } from '../whatsapp/accounts.service';
 import { ContactIdentityService } from '../contacts/contact-identity.service';
 import { fromLocal, MINUTES_PER_DAY, toLocal } from '../agenda/agenda-time';
 import { DoctorLinkService } from '../agenda/doctor-link.service';
+import { clinicName, dayText, hourText } from '../agenda/agenda-text';
 
 export type NoticeKind = 'CONFIRMATION' | 'REMINDER' | 'DELAY';
 
@@ -13,28 +14,6 @@ const SETTING: Record<NoticeKind, 'confirmationTemplateId' | 'reminderTemplateId
   REMINDER: 'reminderTemplateId',
   DELAY: 'delayTemplateId',
 };
-
-const WEEKDAYS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
-const MONTHS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
-
-/**
- * "viernes 2 de octubre", en la hora de la clinica. Armado a mano: toLocaleDateString
- * pone "viernes, 2 de octubre", y esa coma queda rara en medio de una oracion.
- */
-function dayText(instant: Date, timeZone: string) {
-  const { date } = toLocal(instant, timeZone);
-  const [y, m, d] = date.split('-').map(Number);
-  const weekday = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
-  return `${WEEKDAYS[weekday]} ${d} de ${MONTHS[m - 1]}`;
-}
-
-/** "9:30 a.m.", como se escribe en Centroamerica. */
-function hourText(instant: Date, timeZone: string) {
-  const { minute } = toLocal(instant, timeZone);
-  const h = Math.floor(minute / 60);
-  const h12 = h % 12 === 0 ? 12 : h % 12;
-  return `${h12}:${String(minute % 60).padStart(2, '0')} ${h < 12 ? 'a.m.' : 'p.m.'}`;
-}
 
 /**
  * "a las {{3}}." con una hora que ya termina en punto ("10:00 a.m.") daria "a.m..": si en
@@ -88,10 +67,10 @@ export class AgendaNotifierService {
     if (!recipient) throw new BadRequestException('El paciente no tiene WhatsApp');
 
     const tz = appt.tenant.timezone;
-    const clinic =
-      appt.channelAccount.label?.trim() || appt.channelAccount.displayName?.trim() || appt.channelAccount.businessName?.trim() || 'la clínica';
-    const day = dayText(appt.startsAt, tz);
-    const hour = hourText(appt.startsAt, tz);
+    const clinic = clinicName(appt.channelAccount);
+    const start = toLocal(appt.startsAt, tz);
+    const day = dayText(start.date);
+    const hour = hourText(start.minute);
     const values = kind === 'CONFIRMATION' ? [clinic, day, hour] : kind === 'REMINDER' ? [day, hour, clinic] : [clinic];
     const body = fitToTemplate(template.bodyText, values);
 
@@ -145,15 +124,13 @@ export class AgendaNotifierService {
     const buttonIndex = ((template.buttons as any[]) ?? []).findIndex((b) => b?.type === 'URL');
     if (buttonIndex < 0) throw new BadRequestException(`La plantilla "${template.name}" no tiene el botón de enlace`);
 
-    const clinicOf = (a: (typeof appts)[number]) =>
-      a.channelAccount.label?.trim() || a.channelAccount.displayName?.trim() || a.channelAccount.businessName?.trim() || 'la clínica';
-    const clinics = Array.from(new Set(appts.map(clinicOf)));
+    const clinics = Array.from(new Set(appts.map((a) => clinicName(a.channelAccount))));
     const values = [
       doctor.name,
       String(appts.length),
       joinNames(clinics),
-      hourText(appts[0].startsAt, tz),
-      hourText(appts.reduce((last, a) => (a.endsAt > last ? a.endsAt : last), appts[0].endsAt), tz),
+      hourText(toLocal(appts[0].startsAt, tz).minute),
+      hourText(toLocal(appts.reduce((last, a) => (a.endsAt > last ? a.endsAt : last), appts[0].endsAt), tz).minute),
     ];
 
     // El doctor queda como contacto de WhatsApp de la empresa: es la forma de mandarle

@@ -16,6 +16,9 @@ export interface AgendaSettings {
   slotMinutes: number;
   reminderHoursBefore: number;
   doctorSummaryHour: number;
+  /** Reserva por WhatsApp: dias hacia adelante que se ofrecen y anticipacion minima. */
+  bookingDaysAhead: number;
+  bookingMinNoticeMinutes: number;
   confirmationTemplateId: string | null;
   reminderTemplateId: string | null;
   doctorSummaryTemplateId: string | null;
@@ -64,6 +67,8 @@ export interface Appointment {
   status: AppointmentStatus;
   confirmedAt: string | null;
   rescheduleRequestedAt: string | null;
+  /** Null = la reservo el paciente desde el bot de WhatsApp. */
+  createdById?: string | null;
   confirmationSentAt?: string | null;
   reminderSentAt?: string | null;
   /** Por que no se le pudo avisar al paciente la ultima vez. */

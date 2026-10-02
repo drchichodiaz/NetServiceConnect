@@ -16,7 +16,8 @@ import { Plus, FolderTree } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { menuNodesApi } from '@/lib/api';
 import { MenuNode, MenuNodeType, flattenTree, getProjection, countDescendants, arrayMove, INDENTATION_WIDTH, Projection } from '@/lib/sortable-tree';
-import MenuNodeRow, { TYPE_LABEL, TYPE_ICON, ADDABLE_TYPES } from './MenuNodeRow';
+import MenuNodeRow, { TYPE_LABEL, TYPE_ICON, addableTypes } from './MenuNodeRow';
+import { useAgendaSettings } from '@/hooks/useAgendaSettings';
 import NodeEditPanel, { hasCoordinates } from './NodeEditPanel';
 
 const DEFAULT_TITLE: Record<MenuNodeType, string> = {
@@ -27,6 +28,7 @@ const DEFAULT_TITLE: Record<MenuNodeType, string> = {
   // Hasta 24 caracteres: es lo que muestra WhatsApp en la lista, el resto lo corta.
   AI_CHAT: 'Pregúntame lo que sea',
   LOCATION: 'Ubicación',
+  BOOK_APPOINTMENT: 'Agendar cita',
 };
 
 export default function MenuTreeEditor({
@@ -39,6 +41,8 @@ export default function MenuTreeEditor({
 }) {
   const [nodes, setNodes] = useState<MenuNode[]>([]);
   const [loading, setLoading] = useState(true);
+  const agenda = useAgendaSettings();
+  const agendaEnabled = agenda?.enabled ?? false;
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -209,7 +213,7 @@ export default function MenuTreeEditor({
             </button>
             {showRootAdd && (
               <div className="absolute right-0 mt-2 w-56 card p-2 z-10 space-y-1">
-                {ADDABLE_TYPES.map((t) => {
+                {addableTypes(agendaEnabled).map((t) => {
                   const Icon = TYPE_ICON[t.type];
                   return (
                     <button
@@ -258,7 +262,8 @@ export default function MenuTreeEditor({
                       childCount={childCountByParent.get(node.id) ?? 0}
                       incomplete={
                         (node.type === 'AI_CHAT' && aiMissing.length > 0) ||
-                        (node.type === 'LOCATION' && !hasCoordinates(node.config))
+                        (node.type === 'LOCATION' && !hasCoordinates(node.config)) ||
+                        (node.type === 'BOOK_APPOINTMENT' && agenda !== null && !agenda.enabled)
                       }
                       onSelect={() => setSelectedId(node.id)}
                       onToggleCollapse={() => toggleCollapse(node.id)}
@@ -289,6 +294,7 @@ export default function MenuTreeEditor({
             node={selectedNode}
             descendantCount={countDescendants(nodes, selectedNode.id)}
             aiMissing={aiMissing}
+            agendaEnabled={agenda ? agenda.enabled : null}
             saving={saving}
             onSave={(patch) => handleUpdate(selectedNode.id, patch)}
             onDelete={() => handleDelete(selectedNode.id)}

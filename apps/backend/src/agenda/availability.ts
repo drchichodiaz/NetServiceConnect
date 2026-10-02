@@ -96,3 +96,24 @@ export function doctorDayWindows(weekday: number, shifts: ShiftLike[], exception
 export function fitsInside(windows: Interval[], slot: Interval): boolean {
   return windows.some((w) => w.start <= slot.start && slot.end <= w.end);
 }
+
+/**
+ * Los horarios en que se puede empezar una cita de `minutes`, uniendo los de todos los
+ * doctores: lo que se le ofrece al paciente que reserva solo, que no elige doctor.
+ *
+ * Por doctor se toma lo que le queda libre (tramos menos citas) y se recorre cada hueco
+ * de a una cita desde su comienzo: 08:00, 08:45, 09:30... Asi la lista es corta y una
+ * cita nueva queda pegada a la anterior, sin dejar huecos de 15 minutos que nadie puede
+ * usar. `earliest` corta lo que empieza antes (la anticipacion minima de hoy).
+ */
+export function freeStarts(doctors: { windows: Interval[]; busy: Interval[] }[], minutes: number, earliest = 0): number[] {
+  const starts = new Set<number>();
+  for (const d of doctors) {
+    for (const gap of subtractIntervals(d.windows, d.busy)) {
+      for (let s = gap.start; s + minutes <= gap.end; s += minutes) {
+        if (s >= earliest) starts.add(s);
+      }
+    }
+  }
+  return [...starts].sort((a, b) => a - b);
+}

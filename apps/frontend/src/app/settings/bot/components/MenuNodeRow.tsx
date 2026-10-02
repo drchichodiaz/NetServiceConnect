@@ -1,7 +1,7 @@
 'use client';
 import { CSS } from '@dnd-kit/utilities';
 import { useSortable } from '@dnd-kit/sortable';
-import { GripVertical, ChevronRight, ChevronDown, FolderTree, MessageSquare, PackageSearch, Headphones, Sparkles, MapPin } from 'lucide-react';
+import { GripVertical, ChevronRight, ChevronDown, FolderTree, MessageSquare, PackageSearch, Headphones, Sparkles, MapPin, CalendarPlus } from 'lucide-react';
 import clsx from 'clsx';
 import { FlattenedNode, INDENTATION_WIDTH, MenuNodeType } from '@/lib/sortable-tree';
 
@@ -12,6 +12,7 @@ export const TYPE_ICON: Record<MenuNodeType, typeof FolderTree> = {
   AGENT: Headphones,
   AI_CHAT: Sparkles,
   LOCATION: MapPin,
+  BOOK_APPOINTMENT: CalendarPlus,
 };
 
 export const TYPE_LABEL: Record<MenuNodeType, string> = {
@@ -21,6 +22,7 @@ export const TYPE_LABEL: Record<MenuNodeType, string> = {
   AGENT: 'Hablar con un agente',
   AI_CHAT: 'Modo IA',
   LOCATION: 'Ubicación',
+  BOOK_APPOINTMENT: 'Agendar cita',
 };
 
 // El modo IA usa la paleta morada que ya identifica todo lo de IA en la app
@@ -32,16 +34,26 @@ const TYPE_COLOR: Record<MenuNodeType, { bg: string; fg: string }> = {
   AGENT: { bg: 'var(--green-light)', fg: 'var(--green-dark)' },
   AI_CHAT: { bg: '#F3E8FF', fg: '#9333EA' },
   LOCATION: { bg: 'var(--green-light)', fg: 'var(--green-dark)' },
+  BOOK_APPOINTMENT: { bg: 'var(--green-light)', fg: 'var(--green-dark)' },
 };
 
-export const ADDABLE_TYPES: { type: MenuNodeType; label: string }[] = [
+const ADDABLE_TYPES: { type: MenuNodeType; label: string }[] = [
   { type: 'TEXT', label: 'Texto' },
   { type: 'LOCATION', label: 'Ubicación' },
   { type: 'MENU', label: 'Submenú' },
   { type: 'ORDER_LOOKUP', label: 'Consulta a sistema externo' },
   { type: 'AGENT', label: 'Hablar con un agente' },
   { type: 'AI_CHAT', label: 'Modo IA' },
+  { type: 'BOOK_APPOINTMENT', label: 'Agendar cita' },
 ];
+
+/**
+ * Los tipos que se pueden agregar. "Agendar cita" solo con la agenda activa: la agenda
+ * se vende aparte, y a una empresa sin ella no se le ofrece algo que no puede usar.
+ */
+export function addableTypes(agendaEnabled: boolean) {
+  return ADDABLE_TYPES.filter((t) => t.type !== 'BOOK_APPOINTMENT' || agendaEnabled);
+}
 
 interface Props {
   node: FlattenedNode;

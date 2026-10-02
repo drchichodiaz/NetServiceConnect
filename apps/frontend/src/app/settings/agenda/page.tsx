@@ -7,11 +7,13 @@ import { useClinics } from '@/components/agenda/useClinics';
 import DoctorsTab from '@/components/agenda/DoctorsTab';
 import ExceptionsTab from '@/components/agenda/ExceptionsTab';
 import NoticesTab from '@/components/agenda/NoticesTab';
+import BookingTab from '@/components/agenda/BookingTab';
 
 const TABS = [
   { id: 'doctors', label: 'Doctores' },
   { id: 'exceptions', label: 'Ausencias y cambios' },
   { id: 'notices', label: 'Avisos' },
+  { id: 'booking', label: 'Reserva por WhatsApp' },
 ] as const;
 
 export default function AgendaSettingsPage() {
@@ -43,18 +45,19 @@ export default function AgendaSettingsPage() {
             <p><b className="text-ink">Turnos:</b> lo que se repite cada semana. “Los lunes de 8:00 a 13:00 en Villa Clarita.” Un doctor de planta se carga una vez; uno que rota tiene un turno por clínica.</p>
             <p><b className="text-ink">Ausencias y cambios:</b> lo de un solo día. Una ausencia bloquea ese horario; “va a otra clínica” reemplaza su turno de ese día.</p>
             <p><b className="text-ink">Asignación:</b> al agendar, la recepción elige la hora y el sistema asigna al doctor libre con menos citas ese día. Un doctor nunca queda con dos citas a la vez, aunque sean de clínicas distintas.</p>
+            <p><b className="text-ink">Reserva por WhatsApp:</b> con la opción “Agendar cita” del bot, el paciente elige día y hora entre los horarios libres de la clínica a la que escribe. El doctor se asigna igual que cuando agenda la recepción.</p>
             <p>Los especialistas (cirugías, etc.) no se cargan acá: sus citas se siguen manejando como hasta ahora.</p>
           </div>
         )}
       </div>
 
-      <div className="flex gap-1 border-b border-border mb-5">
+      <div className="flex gap-1 border-b border-border mb-5 overflow-x-auto">
         {TABS.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
             className={clsx(
-              'px-4 py-2 text-sm -mb-px border-b-2 transition-colors',
+              'px-4 py-2 text-sm -mb-px border-b-2 transition-colors whitespace-nowrap',
               tab === t.id ? 'border-green-500 text-ink font-medium' : 'border-transparent text-ink-muted hover:text-ink',
             )}
           >
@@ -70,6 +73,7 @@ export default function AgendaSettingsPage() {
           {tab === 'doctors' && <DoctorsTab clinics={clinics} />}
           {tab === 'exceptions' && <ExceptionsTab clinics={clinics} timezone={settings.timezone} />}
           {tab === 'notices' && <NoticesTab settings={settings} />}
+          {tab === 'booking' && <BookingTab settings={settings} />}
         </>
       )}
     </div>

@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react';
 import { Trash2, Loader2, Plus, X, Play, Plug, AlertCircle, CheckCircle, MapPin, ExternalLink } from 'lucide-react';
 import { MenuNode, MenuNodeType } from '@/lib/sortable-tree';
 import { menuNodesApi, LookupConfig, LookupTestResult, LocationConfig } from '@/lib/api';
-import { TYPE_LABEL, ADDABLE_TYPES } from './MenuNodeRow';
+import { TYPE_LABEL, addableTypes } from './MenuNodeRow';
+import Link from 'next/link';
 import InfoTooltip from '@/components/ui/InfoTooltip';
 
 interface FormState {
@@ -38,6 +39,8 @@ interface Props {
   onClose: () => void;
   /** Lo que le falta al modo IA del bot; vacío = completo. */
   aiMissing?: string[];
+  /** Si la empresa tiene la agenda activa (null = todavia no se sabe): sin ella, "Agendar cita" no funciona. */
+  agendaEnabled?: boolean | null;
 }
 
 // Lo que muestra WhatsApp de cada fila de una lista; el resto lo corta.
@@ -53,7 +56,7 @@ function toForm(node: MenuNode): FormState {
   };
 }
 
-export default function NodeEditPanel({ node, descendantCount, saving, onSave, onDelete, onAddChild, onClose, aiMissing = [] }: Props) {
+export default function NodeEditPanel({ node, descendantCount, saving, onSave, onDelete, onAddChild, onClose, aiMissing = [], agendaEnabled = null }: Props) {
   const [form, setForm] = useState<FormState>(toForm(node));
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [showAddMenu, setShowAddMenu] = useState(false);
@@ -104,7 +107,7 @@ export default function NodeEditPanel({ node, descendantCount, saving, onSave, o
         )}
       </div>
 
-      {(node.type === 'TEXT' || node.type === 'MENU' || node.type === 'LOCATION') && (
+      {(node.type === 'TEXT' || node.type === 'MENU' || node.type === 'LOCATION' || node.type === 'BOOK_APPOINTMENT') && (
         <div className="space-y-1.5">
           <label className="text-xs font-semibold text-ink flex items-center justify-between">
             <span className="flex items-center gap-1.5">
@@ -170,6 +173,47 @@ export default function NodeEditPanel({ node, descendantCount, saving, onSave, o
           </div>
 
           <LocationConfigSection node={node} onSave={onSave} />
+        </>
+      )}
+
+      {node.type === 'BOOK_APPOINTMENT' && agendaEnabled === false && (
+        <div className="flex items-start gap-2 rounded-xl p-3 text-xs" style={{ background: '#FEF2F2', color: '#991B1B' }}>
+          <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+          <span>
+            <strong>Esta opción no funciona.</strong> La agenda no está activa para esta empresa. Mientras tanto, el cliente
+            que la elija recibe un aviso y pasa directo a un agente.
+          </span>
+        </div>
+      )}
+
+      {node.type === 'BOOK_APPOINTMENT' && (
+        <>
+          <p className="text-xs text-ink-muted">
+            El cliente elige día y hora entre los horarios libres de la clínica de la línea a la que escribe, confirma, y la
+            cita queda en la agenda con el doctor que esté libre. Cuántos días se ofrecen y con cuánta anticipación se ajusta
+            en <Link href="/settings/agenda" className="text-green-700 underline">Doctores y turnos</Link>, pestaña
+            “Reserva por WhatsApp”.
+          </p>
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-ink flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <span>Texto de la lista de días</span>
+                <InfoTooltip
+                  text="El mensaje que aparece arriba de la lista de días con lugar. Si lo dejas vacío, el bot pregunta qué día le queda bien para su cita en la clínica."
+                  example="¡Con gusto te agendamos! ¿Qué día te queda bien?"
+                />
+              </span>
+              <span className="text-[10px] font-normal text-ink-subtle">Opcional</span>
+            </label>
+            <textarea
+              value={form.bodyText}
+              onChange={(e) => setForm((f) => ({ ...f, bodyText: e.target.value }))}
+              onBlur={(e) => saveField('bodyText', e.target.value)}
+              rows={2}
+              className="input w-full text-sm"
+              placeholder="Ej: ¿Qué día te queda bien para tu cita?"
+            />
+          </div>
         </>
       )}
 
@@ -280,7 +324,7 @@ export default function NodeEditPanel({ node, descendantCount, saving, onSave, o
             <div className="space-y-1.5">
               <p className="text-xs font-semibold text-ink">Elige el tipo de opción</p>
               <div className="grid grid-cols-2 gap-2">
-                {ADDABLE_TYPES.map((t) => (
+                {addableTypes(agendaEnabled === true).map((t) => (
                   <button
                     key={t.type}
                     onClick={() => { onAddChild(t.type); setShowAddMenu(false); }}

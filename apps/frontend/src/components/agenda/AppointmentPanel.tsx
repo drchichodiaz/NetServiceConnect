@@ -86,6 +86,7 @@ export default function AppointmentPanel({
             {appt.reason && <p className="text-ink-muted text-xs">Motivo: {appt.reason}</p>}
             {appt.notes && <p className="text-ink-muted text-xs whitespace-pre-wrap">{appt.notes}</p>}
             <p className="text-xs pt-1"><StatusChip status={appt.status} /></p>
+            {appt.createdById === null && <p className="text-[11px] text-ink-muted">El paciente la reservó por WhatsApp.</p>}
             {appt.rescheduleRequestedAt && appt.status !== 'CANCELLED' && (
               <p className="text-xs text-amber-700 pt-1">El paciente pidió reprogramar.</p>
             )}

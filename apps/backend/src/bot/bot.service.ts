@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { HttpException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { Prisma } from '@prisma/client';
@@ -10,8 +10,14 @@ import { AiGatewayService } from '../ai-usage/ai-gateway.service';
 import { LookupService, LookupConfig } from '../common/lookup.service';
 import { BotsService } from '../bots/bots.service';
 import { LocationConfig, hasValidCoordinates, mapsLinkFor } from '../common/maps-link';
+import { AgendaSettingsService } from '../agenda/agenda-settings.service';
+import { AvailabilityService } from '../agenda/availability.service';
+import { AppointmentsService } from '../agenda/appointments.service';
+import { addDays, fromLocal, toLocal } from '../agenda/agenda-time';
+import { clinicName, dayText, hourText } from '../agenda/agenda-text';
+import { BookingScreen, NOON, Row, dayRows, needsDayPart, parseScreenId, parseViewId, timeRows, viewId } from './booking';
 
-type MenuNodeType = 'MENU' | 'TEXT' | 'ORDER_LOOKUP' | 'AGENT' | 'AI_CHAT' | 'LOCATION';
+type MenuNodeType = 'MENU' | 'TEXT' | 'ORDER_LOOKUP' | 'AGENT' | 'AI_CHAT' | 'LOCATION' | 'BOOK_APPOINTMENT';
 
 interface MenuNode {
   id: string;
@@ -36,6 +42,11 @@ interface BotContext {
   // historial que se le manda a OpenAI para no incluir ruido de navegación
   // del menú de turnos anteriores en la misma conversación.
   aiSince: string | null;
+  // Reserva de cita: el nodo BOOK_APPOINTMENT (por su texto de bienvenida) y la ultima
+  // pantalla que se le mostro (un id de booking.ts), para reenviarla si responde algo
+  // que no es una opcion. El resto del estado viaja en el id de cada fila.
+  bookingNodeId: string | null;
+  bookingView: string | null;
 }
 
 const DEFAULT_CONFIG_TEXT = 'Todavía no cargamos esta información. Ya te paso con un agente para ayudarte.';
@@ -47,7 +58,9 @@ const ROOT_ROW_CAP = 10;
 const CHILD_ROW_CAP = 9;
 const UP_ID = '__up__';
 const HUMAN_ESCAPE_RE = /\b(agente|humano)\b/i;
-const BACK_TO_MENU_RE = /\b(volver|menu|menú|atras|atrás)\b/i;
+// Sin \b: en JavaScript \b solo conoce letras ASCII, y "menú" o "atrás" (con tilde) no
+// lo cumplian nunca. Se pide que no haya otra letra pegada antes ni despues.
+const BACK_TO_MENU_RE = /(?<!\p{L})(volver|menu|menú|atras|atrás)(?!\p{L})/iu;
 // Cuántas respuestas no reconocidas seguidas tolera el bot en un mismo prompt
 // (listado de opciones, búsqueda, confirmación post-respuesta) antes de derivar
 // a un humano en vez de seguir reenviando lo mismo indefinidamente.
@@ -56,7 +69,7 @@ const MAX_UNKNOWN_RETRIES = 3;
 // (los 4 legacy de Fase D: BRANCH_MENU/AWAITING_BRANCH_QUERY/AWAITING_BRANCH_FOLLOWUP/
 // AWAITING_RESOLUTION_CONFIRMATION) significa que la conversación quedó a mitad de
 // camino en el deploy del árbol configurable — se resetea a la raíz sin crashear.
-const NEW_STATES = new Set(['MENU', 'AWAITING_QUERY', 'AWAITING_ORDER_NUMBER', 'AWAITING_POST_REPLY', 'AWAITING_AI_CHAT']);
+const NEW_STATES = new Set(['MENU', 'AWAITING_QUERY', 'AWAITING_ORDER_NUMBER', 'AWAITING_POST_REPLY', 'AWAITING_AI_CHAT', 'AWAITING_BOOKING']);
 // Cuántos mensajes de la sesión de IA actual (acotada por botContext.aiSince) se
 // mandan como historial — generoso a propósito, el costo no es una preocupación acá,
 // es solo una cota de sanidad para el tamaño del prompt.
@@ -79,6 +92,9 @@ export class BotService {
     private ai: AiGatewayService,
     private lookup: LookupService,
     private bots: BotsService,
+    private agendaSettings: AgendaSettingsService,
+    private availability: AvailabilityService,
+    private appointments: AppointmentsService,
     config: ConfigService,
   ) {
     this.apiVersion = config.get('META_API_VERSION') || 'v19.0';
@@ -105,6 +121,16 @@ export class BotService {
       return this.enterNode(tenantId, conversationId, phone, null, account);
     }
 
+    // Una fila de una lista de reserva vieja (la conversacion ya siguio a otro paso):
+    // se retoma la reserva desde esa pantalla, revalidada. Menos "Sí, reservar": ese
+    // solo vale en el paso de confirmar, y fuera de el se ignora (es el segundo toque
+    // de un doble toque, o un boton de hace horas).
+    const bookingTap = botState !== 'AWAITING_BOOKING' ? parseViewId(this.extractReplyId(msg)) : null;
+    if (bookingTap?.kind === 'book') return;
+    if (bookingTap && bookingTap.kind !== 'menu') {
+      return this.handleBookingReply(tenantId, conversationId, phone, msg, account);
+    }
+
     switch (botState) {
       case 'AWAITING_ORDER_NUMBER':
         return this.handleOrderNumberReply(tenantId, conversationId, phone, msg, account);
@@ -114,6 +140,8 @@ export class BotService {
         return this.handlePostReplyReply(tenantId, conversationId, phone, msg, account);
       case 'AWAITING_AI_CHAT':
         return this.handleAiChatReply(tenantId, conversationId, phone, msg, account);
+      case 'AWAITING_BOOKING':
+        return this.handleBookingReply(tenantId, conversationId, phone, msg, account);
     }
     return this.handleMenuReply(tenantId, conversationId, phone, msg, account);
   }
@@ -259,6 +287,8 @@ export class BotService {
         return this.startAiChat(tenantId, conversationId, phone, node, account);
       case 'LOCATION':
         return this.sendLocation(tenantId, conversationId, phone, account, node);
+      case 'BOOK_APPOINTMENT':
+        return this.startBooking(tenantId, conversationId, phone, account, node);
     }
   }
 
@@ -582,16 +612,16 @@ ${knowledgeBase}
       };
       const payload = { messaging_product: 'whatsapp', recipient_type: 'individual', to: phone, type: 'location', location };
       const summary = `📍 ${[config.name, config.address].filter(Boolean).join(' — ') || node.title}`;
-      sent = await this.sendAndLog(tenantId, conversationId, account, payload, summary, {
+      sent = !!(await this.sendAndLog(tenantId, conversationId, account, payload, summary, {
         type: 'LOCATION',
         rawPayload: { location: { ...location, url: config.mapsUrl || mapsLinkFor(config.latitude, config.longitude) } },
-      });
+      }));
     } else {
       this.logger.warn(`Nodo de ubicacion "${node.title}" (${node.id}) sin coordenadas validas (tenant ${tenantId}).`);
       const fallback = config.mapsUrl
         ? [config.name, config.address, config.mapsUrl].filter(Boolean).join('\n')
         : intro ? null : DEFAULT_CONFIG_TEXT;
-      sent = fallback ? await this.sendText(tenantId, conversationId, phone, account, fallback) : true;
+      sent = fallback ? !!(await this.sendText(tenantId, conversationId, phone, account, fallback)) : true;
     }
     if (!sent) return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
 
@@ -655,6 +685,257 @@ ${knowledgeBase}
     });
 
     this.eventBus.publish({ type: 'conversation_updated', tenantId, payload: { conversationId } });
+  }
+
+  // ─── Reservar una cita (nodo BOOK_APPOINTMENT) ─────────────────────────────
+
+  /**
+   * El paciente reserva solo, eligiendo de listas: dia → (mañana o tarde) → hora →
+   * confirmar. La clinica es la linea a la que escribio y el doctor lo asigna la agenda,
+   * igual que cuando reserva la recepcion. Las pantallas y sus ids estan en booking.ts.
+   */
+  private async startBooking(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, node: MenuNode) {
+    await this.setContext(conversationId, { bookingNodeId: node.id, bookingView: null, retryCount: 0 });
+    return this.showBookingView(tenantId, conversationId, phone, account, { kind: 'days', offset: 0 });
+  }
+
+  private async handleBookingReply(tenantId: string, conversationId: string, phone: string, msg: any, account: WhatsAppAccountCreds) {
+    const { nodeId, bookingView } = await this.getContext(conversationId);
+
+    // Escribir "agente" o "menú" sale del flujo, como en el resto del bot.
+    const text = msg.type === 'text' ? msg.text?.body?.trim() || '' : '';
+    if (text && text.split(/\s+/).length <= SHORT_MESSAGE_MAX_WORDS) {
+      if (HUMAN_ESCAPE_RE.test(text)) return this.handoffToHuman(tenantId, conversationId, 'booking_escape');
+      if (BACK_TO_MENU_RE.test(text)) {
+        await this.resetRetryCount(conversationId);
+        return this.enterNode(tenantId, conversationId, phone, nodeId, account);
+      }
+    }
+
+    // No se interpretan fechas escritas a mano: se vuelve a mostrar la ultima pantalla.
+    const view = parseViewId(this.extractReplyId(msg));
+    if (!view) {
+      const last = parseScreenId(bookingView) ?? { kind: 'days', offset: 0 };
+      return this.trackUnrecognizedReply(tenantId, conversationId, phone, account, msg, () =>
+        this.showBookingView(tenantId, conversationId, phone, account, last, 'No entendí tu respuesta. Elige una opción:'),
+      );
+    }
+
+    await this.resetRetryCount(conversationId);
+    if (view.kind === 'menu') return this.enterNode(tenantId, conversationId, phone, nodeId, account);
+    if (view.kind === 'book') return this.bookSlot(tenantId, conversationId, phone, account, view.date, view.minute);
+    return this.showBookingView(tenantId, conversationId, phone, account, view);
+  }
+
+  /**
+   * Lo que hace falta saber para reservar en esta conversacion, o por que no se puede.
+   * Se arma en cada paso: si la recepcion ocupa un horario o el admin apaga la agenda
+   * mientras el paciente elige, el paso siguiente ya lo sabe.
+   */
+  private async bookingScope(tenantId: string, conversationId: string) {
+    const settings = await this.agendaSettings.get(tenantId);
+    if (!settings.enabled) return { ok: false as const, error: 'agenda_disabled' };
+    const conv = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: {
+        contactId: true,
+        channelAccountId: true,
+        contact: { select: { name: true } },
+        channelAccount: { select: { label: true, displayName: true, businessName: true } },
+      },
+    });
+    if (!conv?.channelAccountId || !conv.channelAccount) return { ok: false as const, error: 'no_line' };
+    const now = new Date();
+    return {
+      ok: true as const,
+      settings,
+      channelAccountId: conv.channelAccountId,
+      contactId: conv.contactId,
+      contactName: conv.contact?.name?.trim() || null,
+      clinic: clinicName(conv.channelAccount),
+      today: toLocal(now, settings.timezone).date,
+      notBefore: new Date(now.getTime() + settings.bookingMinNoticeMinutes * 60000),
+    };
+  }
+
+  /** Los horarios libres de un dia, o ninguno si cae fuera de los dias que se ofrecen. */
+  private async bookableStartsOf(tenantId: string, scope: Extract<Awaited<ReturnType<BotService['bookingScope']>>, { ok: true }>, date: string) {
+    const { settings } = scope;
+    if (date < scope.today || date >= addDays(scope.today, settings.bookingDaysAhead)) return [];
+    const [day] = await this.availability.bookableStarts(tenantId, scope.channelAccountId, date, 1, settings.slotMinutes, scope.notBefore);
+    return day?.starts ?? [];
+  }
+
+  /**
+   * Muestra una pantalla de la reserva. Cada una se valida contra la agenda de ahora:
+   * si lo que el paciente toco ya no esta (dia lleno, horario ocupado), se le dice y se le
+   * muestra lo que queda. `notice` va arriba del texto de la pantalla, en el mismo mensaje.
+   */
+  private async showBookingView(
+    tenantId: string,
+    conversationId: string,
+    phone: string,
+    account: WhatsAppAccountCreds,
+    view: BookingScreen,
+    notice?: string,
+  ): Promise<unknown> {
+    const scope = await this.bookingScope(tenantId, conversationId);
+    if (!scope.ok) return this.bookingUnavailable(tenantId, conversationId, phone, account, scope.error);
+    const withNotice = (body: string) => (notice ? `${notice}\n\n${body}` : body);
+    const fail = () => this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
+
+    try {
+      if (view.kind === 'days') {
+        const days = await this.availability.bookableStarts(
+          tenantId,
+          scope.channelAccountId,
+          scope.today,
+          scope.settings.bookingDaysAhead,
+          scope.settings.slotMinutes,
+          scope.notBefore,
+        );
+        if (days.length === 0) {
+          this.logger.warn(`[booking] tenant ${tenantId}: sin horarios libres en ${scope.clinic} en ${scope.settings.bookingDaysAhead} dias`);
+          await this.sendText(
+            tenantId,
+            conversationId,
+            phone,
+            account,
+            `Por ahora no tenemos horarios libres para reservar por aquí. Ya te paso con alguien de ${scope.clinic} para buscarte un lugar.`,
+          );
+          return this.handoffToHuman(tenantId, conversationId, 'booking_no_slots');
+        }
+        const offset = view.offset < days.length ? view.offset : 0;
+        const { bookingNodeId } = await this.getContext(conversationId);
+        const node = bookingNodeId ? await this.resolveNode(tenantId, bookingNodeId) : null;
+        const body = node?.bodyText?.trim() || `¿Qué día te queda bien para tu cita en ${scope.clinic}?`;
+        const rows = dayRows(days, scope.today, offset);
+        if (!(await this.sendList(tenantId, conversationId, phone, account, withNotice(body), 'Ver días', 'Días con lugar', rows))) return fail();
+        return this.setBookingView(conversationId, { kind: 'days', offset });
+      }
+
+      const starts = await this.bookableStartsOf(tenantId, scope, view.date);
+      if (starts.length === 0) {
+        return this.showBookingView(tenantId, conversationId, phone, account, { kind: 'days', offset: 0 }, `El ${dayText(view.date)} ya no tiene horarios libres.`);
+      }
+
+      if (view.kind === 'day') {
+        if (!needsDayPart(starts)) {
+          return this.showBookingView(tenantId, conversationId, phone, account, { kind: 'times', date: view.date, from: 0, to: 24 * 60 }, notice);
+        }
+        const body = `El ${dayText(view.date)} tenemos ${starts.length} horarios libres. ¿Te queda mejor en la mañana o en la tarde?`;
+        const sent = await this.sendButtons(tenantId, conversationId, phone, account, withNotice(body), [
+          { id: viewId({ kind: 'times', date: view.date, from: 0, to: NOON }), title: 'En la mañana' },
+          { id: viewId({ kind: 'times', date: view.date, from: NOON, to: 24 * 60 }), title: 'En la tarde' },
+          { id: viewId({ kind: 'days', offset: 0 }), title: 'Otro día' },
+        ]);
+        if (!sent) return fail();
+        return this.setBookingView(conversationId, view);
+      }
+
+      if (view.kind === 'times') {
+        if (!starts.some((s) => s >= view.from && s < view.to)) {
+          return this.showBookingView(tenantId, conversationId, phone, account, { kind: 'day', date: view.date }, 'Ya no quedan horarios libres en esa parte del día.');
+        }
+        const part = view.from === 0 && view.to === NOON ? ' en la mañana' : view.from >= NOON ? ' en la tarde' : '';
+        const body = `Horarios libres el ${dayText(view.date)}${part}:`;
+        const rows = timeRows(view.date, starts, view.from, view.to);
+        if (!(await this.sendList(tenantId, conversationId, phone, account, withNotice(body), 'Ver horarios', 'Horarios', rows))) return fail();
+        return this.setBookingView(conversationId, view);
+      }
+
+      if (view.kind === 'ask') {
+        if (!starts.includes(view.minute)) {
+          return this.showBookingView(tenantId, conversationId, phone, account, { kind: 'day', date: view.date }, 'Ese horario ya no está libre. Estos son los que quedan:');
+        }
+        const forWhom = scope.contactName ? `, a nombre de ${scope.contactName}` : '';
+        const body = `Te reservo el ${dayText(view.date)} a las ${hourText(view.minute)} en ${scope.clinic}${forWhom}. ¿Confirmo?`;
+        const sent = await this.sendButtons(tenantId, conversationId, phone, account, withNotice(body), [
+          { id: viewId({ kind: 'book', date: view.date, minute: view.minute }), title: 'Sí, reservar' },
+          { id: viewId({ kind: 'day', date: view.date }), title: 'Otro horario' },
+        ]);
+        if (!sent) return fail();
+        return this.setBookingView(conversationId, view);
+      }
+    } catch (err) {
+      return this.bookingFailed(tenantId, conversationId, phone, account, err);
+    }
+  }
+
+  private async bookSlot(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, date: string, minute: number) {
+    const scope = await this.bookingScope(tenantId, conversationId);
+    if (!scope.ok) return this.bookingUnavailable(tenantId, conversationId, phone, account, scope.error);
+    const taken = 'Ese horario se acaba de ocupar. Estos son los que quedan:';
+
+    // Dos toques seguidos en "Sí, reservar" llegan como dos mensajes casi a la vez, y
+    // serian dos citas. Sigue solo el que saca a la conversacion del paso de confirmar;
+    // el otro no hace nada. Cada salida de aca vuelve a fijar el estado que corresponde.
+    const claimed = await this.prisma.conversation.updateMany({
+      where: { id: conversationId, botState: 'AWAITING_BOOKING' },
+      data: { botState: 'MENU' },
+    });
+    if (claimed.count === 0) return;
+
+    let appointmentId: string;
+    try {
+      // Se revalida contra lo que se ofrece (anticipacion minima, dias hacia adelante),
+      // no solo contra la agenda: el boton puede ser de una conversacion de ayer.
+      const starts = await this.bookableStartsOf(tenantId, scope, date);
+      if (!starts.includes(minute)) return this.showBookingView(tenantId, conversationId, phone, account, { kind: 'day', date }, taken);
+
+      const appt = await this.appointments.createForPatient({
+        tenantId,
+        channelAccountId: scope.channelAccountId,
+        contactId: scope.contactId,
+        startsAt: fromLocal(date, minute, scope.settings.timezone),
+        conversationId,
+      });
+      appointmentId = appt.id;
+    } catch (err) {
+      // 409: otra recepcion o paciente lo tomo entre que se mostro y se confirmo.
+      if (err instanceof HttpException && err.getStatus() === 409) {
+        return this.showBookingView(tenantId, conversationId, phone, account, { kind: 'day', date }, taken);
+      }
+      return this.bookingFailed(tenantId, conversationId, phone, account, err);
+    }
+
+    const reminder = scope.settings.reminderTemplateId ? ' Antes de la cita te enviamos un recordatorio.' : '';
+    const messageId = await this.sendText(
+      tenantId,
+      conversationId,
+      phone,
+      account,
+      `¡Listo! Tu cita quedó para el ${dayText(date)} a las ${hourText(minute)} en ${scope.clinic}.${reminder}`,
+    );
+    if (!messageId) {
+      // La cita ya esta tomada; lo que falta es que el paciente se entere. Sin la marca,
+      // el worker de avisos le manda la confirmacion por plantilla.
+      await this.appointments.releaseConfirmation(tenantId, appointmentId);
+      return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
+    }
+    await this.appointments.markConfirmationMessage(tenantId, appointmentId, messageId);
+    await this.setContext(conversationId, { bookingNodeId: null, bookingView: null });
+
+    const { nodeId } = await this.getContext(conversationId);
+    return this.sendPostReplyPrompt(tenantId, conversationId, phone, account, nodeId);
+  }
+
+  private async setBookingView(conversationId: string, view: BookingScreen) {
+    await this.setContext(conversationId, { bookingView: viewId(view) });
+    await this.prisma.conversation.update({ where: { id: conversationId }, data: { botState: 'AWAITING_BOOKING' } });
+  }
+
+  /** La empresa no tiene la agenda activa, o la conversacion no tiene linea: no hay donde reservar. */
+  private async bookingUnavailable(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, reason: string) {
+    this.logger.warn(`[booking] tenant ${tenantId}: no se puede reservar (${reason})`);
+    await this.sendText(tenantId, conversationId, phone, account, 'En este momento no puedo agendar citas por aquí. Ya te paso con alguien de la clínica para ayudarte.');
+    return this.handoffToHuman(tenantId, conversationId, `booking_${reason}`);
+  }
+
+  private async bookingFailed(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, err: unknown) {
+    this.logger.error(`[booking] tenant ${tenantId}: fallo la reserva`, (err as any)?.stack || err);
+    await this.sendText(tenantId, conversationId, phone, account, 'Perdón, tuve un problema para agendar tu cita. Ya te paso con alguien de la clínica.');
+    return this.handoffToHuman(tenantId, conversationId, 'booking_error');
   }
 
   // ─── Consultar orden (sin cambios respecto al árbol configurable) ──────────
@@ -868,6 +1149,8 @@ ${knowledgeBase}
       lookupNodeId: ctx.lookupNodeId ?? null,
       retryCount: ctx.retryCount ?? 0,
       aiSince: ctx.aiSince ?? null,
+      bookingNodeId: ctx.bookingNodeId ?? null,
+      bookingView: ctx.bookingView ?? null,
     };
   }
 
@@ -926,7 +1209,7 @@ ${knowledgeBase}
     phone: string,
     account: WhatsAppAccountCreds,
     body: string,
-  ): Promise<boolean> {
+  ): Promise<string | null> {
     const payload = {
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
@@ -944,7 +1227,7 @@ ${knowledgeBase}
     account: WhatsAppAccountCreds,
     bodyText: string,
     buttons: { id: string; title: string }[],
-  ): Promise<boolean> {
+  ): Promise<string | null> {
     const payload = {
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
@@ -962,7 +1245,43 @@ ${knowledgeBase}
     return this.sendAndLog(tenantId, conversationId, account, payload, summary);
   }
 
-  /** Devuelve true si el mensaje salió — los llamadores usan esto para derivar a un humano en vez de quedarse callados. */
+  private async sendList(
+    tenantId: string,
+    conversationId: string,
+    phone: string,
+    account: WhatsAppAccountCreds,
+    bodyText: string,
+    button: string,
+    sectionTitle: string,
+    rows: Row[],
+  ): Promise<string | null> {
+    const payload = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: phone,
+      type: 'interactive',
+      interactive: {
+        type: 'list',
+        body: { text: bodyText },
+        action: {
+          button: button.slice(0, 20),
+          sections: [
+            {
+              title: sectionTitle.slice(0, 24),
+              rows: rows.map((r) => ({ id: r.id, title: r.title.slice(0, 24), ...(r.description && { description: r.description.slice(0, 72) }) })),
+            },
+          ],
+        },
+      },
+    };
+    const summary = `[${bodyText}] ${rows.map((r) => r.title).join(' · ')}`;
+    return this.sendAndLog(tenantId, conversationId, account, payload, summary);
+  }
+
+  /**
+   * El id del Message guardado si salió, o null si no — los llamadores usan esto para
+   * derivar a un humano en vez de quedarse callados.
+   */
   private async sendAndLog(
     tenantId: string,
     conversationId: string,
@@ -971,7 +1290,7 @@ ${knowledgeBase}
     bodyForHistory: string,
     /** Para lo que no es texto (hoy, la ubicacion): el tipo y lo que la bandeja necesita para dibujarlo. */
     extra: { type?: 'TEXT' | 'LOCATION'; rawPayload?: Prisma.InputJsonValue } = {},
-  ): Promise<boolean> {
+  ): Promise<string | null> {
     let externalId: string | undefined;
     try {
       const url = `https://graph.facebook.com/${this.apiVersion}/${account.phoneNumberId}/messages`;
@@ -981,7 +1300,7 @@ ${knowledgeBase}
       externalId = data?.messages?.[0]?.id;
     } catch (err) {
       this.logger.error('Failed to send bot message', err?.response?.data || err?.message);
-      return false;
+      return null;
     }
 
     const now = new Date();
@@ -1015,6 +1334,6 @@ ${knowledgeBase}
       },
     });
 
-    return true;
+    return message.id;
   }
 }

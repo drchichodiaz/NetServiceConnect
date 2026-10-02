@@ -440,6 +440,8 @@ enum ConversationBotState {
   AWAITING_POST_REPLY
   // Chat libre con OpenAI (nodo tipo AI_CHAT) hasta que el cliente sale por palabra clave.
   AWAITING_AI_CHAT
+  // Reservando una cita (nodo BOOK_APPOINTMENT): dia, parte del dia, hora y confirmacion.
+  AWAITING_BOOKING
 }
 
 // ─── Message ──────────────────────────────────────────────────────────────────
@@ -782,6 +784,9 @@ enum MenuNodeType {
   // Manda una tarjeta de ubicacion de WhatsApp. Coordenadas en config (ver
   // common/maps-link.ts), sacadas del link de Google Maps que pega el admin.
   LOCATION
+  // El paciente reserva una cita en la agenda de la clinica (la linea) eligiendo dia y
+  // hora de listas. Necesita la agenda activa en la empresa.
+  BOOK_APPOINTMENT
 }
 
 // ─── System Config (global, singleton) ───────────────────────────────────────
@@ -1286,6 +1291,10 @@ model AgendaSettings {
   reminderHoursBefore     Int      @default(24)
   /// Hora local a la que sale el resumen del dia a cada doctor.
   doctorSummaryHour       Int      @default(7)
+  /// Reserva por WhatsApp: cuantos dias hacia adelante se ofrecen y con cuanta
+  /// anticipacion minima (no se ofrece un horario que empieza en menos de eso).
+  bookingDaysAhead        Int      @default(14)
+  bookingMinNoticeMinutes Int      @default(120)
   /// Plantilla de cada aviso. Null = ese aviso no se manda. Se eligen en pantalla y no
   /// por nombre fijo porque cada empresa crea y nombra las suyas, y Meta tiene que
   /// aprobarlas antes: la agenda tiene que funcionar mientras tanto.
@@ -1399,6 +1408,7 @@ model Appointment {
   reason           String?
   notes            String?
   status           AppointmentStatus @default(SCHEDULED)
+  /// Quien la agendo. Null = la reservo el paciente desde el bot de WhatsApp.
   createdById      String?
 
   /// Mensajes de aviso (Message.id). El del recordatorio es el que permite reconocer a

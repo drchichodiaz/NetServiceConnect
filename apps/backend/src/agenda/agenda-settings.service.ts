@@ -15,6 +15,8 @@ const DEFAULTS = {
   slotMinutes: 45,
   reminderHoursBefore: 24,
   doctorSummaryHour: 7,
+  bookingDaysAhead: 14,
+  bookingMinNoticeMinutes: 120,
   confirmationTemplateId: null,
   reminderTemplateId: null,
   doctorSummaryTemplateId: null,
@@ -43,6 +45,8 @@ export class AgendaSettingsService {
       slotMinutes: base.slotMinutes,
       reminderHoursBefore: base.reminderHoursBefore,
       doctorSummaryHour: base.doctorSummaryHour,
+      bookingDaysAhead: base.bookingDaysAhead,
+      bookingMinNoticeMinutes: base.bookingMinNoticeMinutes,
       confirmationTemplateId: base.confirmationTemplateId,
       reminderTemplateId: base.reminderTemplateId,
       doctorSummaryTemplateId: base.doctorSummaryTemplateId,
@@ -66,7 +70,7 @@ export class AgendaSettingsService {
     }
 
     const data: Record<string, unknown> = {};
-    for (const key of ['slotMinutes', 'reminderHoursBefore', 'doctorSummaryHour'] as const) {
+    for (const key of ['slotMinutes', 'reminderHoursBefore', 'doctorSummaryHour', 'bookingDaysAhead', 'bookingMinNoticeMinutes'] as const) {
       if (dto[key] !== undefined) data[key] = dto[key];
     }
     for (const key of TEMPLATE_FIELDS) {

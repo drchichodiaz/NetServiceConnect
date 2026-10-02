@@ -34,6 +34,20 @@ export class UpdateAgendaSettingsDto {
   @Max(23)
   doctorSummaryHour?: number;
 
+  /** Reserva por WhatsApp: cuantos dias hacia adelante se ofrecen. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(60)
+  bookingDaysAhead?: number;
+
+  /** Reserva por WhatsApp: no se ofrece un horario que empieza en menos de esto. */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(2880)
+  bookingMinNoticeMinutes?: number;
+
   /** Cadena vacia = ese aviso no se manda. */
   @IsOptional()
   @IsString()

@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ChannelAccessService } from '../common/services/channel-access.service';
 import { AgendaSettingsService } from './agenda-settings.service';
 import { addDays, dateColumn, fromDateColumn, fromLocal, isValidDate, MINUTES_PER_DAY, toLocal, weekdayOf } from './agenda-time';
-import { doctorDayWindows, fitsInside, Interval, overlaps, WorkWindow } from './availability';
+import { doctorDayWindows, fitsInside, freeStarts, Interval, overlaps, WorkWindow } from './availability';
 
 interface DayAppointment {
   id: string;
@@ -212,6 +212,62 @@ export class AvailabilityService {
         };
       }),
     };
+  }
+
+  /**
+   * Lo que se le ofrece al paciente que reserva por WhatsApp: los dias desde `fromDate`
+   * (inclusive, `days` dias) con los horarios en que algun doctor de la clinica tiene
+   * libre una cita entera de `minutes`. Solo vienen los dias que tienen algun horario.
+   *
+   * Nada que empiece antes de `notBefore` (ahora mas la anticipacion minima). Como en
+   * month(), se carga el rango de una vez y se calcula en memoria; las citas son las de
+   * todas las clinicas, porque un doctor que rota esta ocupado donde sea que atienda.
+   */
+  async bookableStarts(tenantId: string, channelAccountId: string, fromDate: string, days: number, minutes: number, notBefore: Date) {
+    const settings = await this.settings.requireEnabled(tenantId);
+    const tz = settings.timezone;
+    const limit = toLocal(notBefore, tz);
+    const dates: string[] = [];
+    for (let i = 0; i < days; i++) {
+      const date = addDays(fromDate, i);
+      if (date >= limit.date) dates.push(date);
+    }
+    if (dates.length === 0) return [];
+    const first = dates[0];
+    const last = dates[dates.length - 1];
+
+    const [doctors, exceptions, appointments] = await Promise.all([
+      this.prisma.doctor.findMany({ where: { tenantId, isActive: true }, include: { shifts: true } }),
+      this.prisma.doctorException.findMany({ where: { tenantId, date: { gte: dateColumn(first), lte: dateColumn(last) } } }),
+      this.prisma.appointment.findMany({
+        where: {
+          tenantId,
+          status: { not: 'CANCELLED' },
+          startsAt: { lt: fromLocal(last, MINUTES_PER_DAY, tz) },
+          endsAt: { gt: fromLocal(first, 0, tz) },
+        },
+        select: { doctorId: true, startsAt: true, endsAt: true },
+      }),
+    ]);
+
+    const result: { date: string; starts: number[] }[] = [];
+    for (const date of dates) {
+      const weekday = weekdayOf(date);
+      const exOfDay = exceptions.filter((e) => fromDateColumn(e.date) === date);
+      const dayStart = fromLocal(date, 0, tz).getTime();
+      const dayEnd = fromLocal(date, MINUTES_PER_DAY, tz).getTime();
+      const perDoctor = doctors.map((d) => ({
+        windows: doctorDayWindows(weekday, d.shifts, exOfDay.filter((e) => e.doctorId === d.id)).filter(
+          (w) => w.channelAccountId === channelAccountId,
+        ),
+        busy: appointments
+          .filter((a) => a.doctorId === d.id && a.startsAt.getTime() < dayEnd && a.endsAt.getTime() > dayStart)
+          .map((a) => appointmentInterval(a, date, tz)),
+      }));
+      const starts = freeStarts(perDoctor, minutes, date === limit.date ? limit.minute : 0);
+      if (starts.length > 0) result.push({ date, starts });
+    }
+    return result;
   }
 
   /** Todos los doctores con sus tramos del dia, y todas las citas activas del dia. */
