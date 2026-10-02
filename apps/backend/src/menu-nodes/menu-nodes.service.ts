@@ -4,7 +4,7 @@ import { LookupService, LookupConfig } from '../common/lookup.service';
 import { BotsService } from '../bots/bots.service';
 import { LocationConfig, resolveMapsLink } from '../common/maps-link';
 
-const NODE_TYPES = ['MENU', 'TEXT', 'ORDER_LOOKUP', 'AGENT', 'AI_CHAT', 'LOCATION', 'BOOK_APPOINTMENT'] as const;
+const NODE_TYPES = ['MENU', 'TEXT', 'ORDER_LOOKUP', 'AGENT', 'AI_CHAT', 'LOCATION', 'BOOK_APPOINTMENT', 'MY_APPOINTMENTS'] as const;
 type NodeType = (typeof NODE_TYPES)[number];
 
 export interface MenuNodeDto {

@@ -82,10 +82,11 @@ export default function BookingTab({ settings }: { settings: AgendaSettings }) {
 
       <div className="card p-5 space-y-3">
         <div>
-          <p className="text-sm font-semibold text-ink">Cuando el paciente toca “Reprogramar” en el recordatorio</p>
+          <p className="text-sm font-semibold text-ink">Cambios que hace el paciente</p>
           <p className="text-xs text-ink-muted">
-            Sin nada marcado, le escribe alguien de la clínica, como hasta ahora. Lo que se marque acá lo resuelve el
-            bot, y la agenda muestra lo que hizo el paciente.
+            Vale para el botón “Reprogramar” del recordatorio y para la opción “Mis citas” del bot. Sin nada marcado,
+            “Reprogramar” lo atiende alguien de la clínica, como hasta ahora, y “Mis citas” solo le muestra sus citas.
+            Lo que se marque acá lo resuelve el bot, y la agenda muestra lo que hizo el paciente.
           </p>
         </div>
         {[

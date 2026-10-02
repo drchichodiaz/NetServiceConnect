@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { Trash2, Loader2, Plus, X, Play, Plug, AlertCircle, CheckCircle, MapPin, ExternalLink } from 'lucide-react';
 import { MenuNode, MenuNodeType } from '@/lib/sortable-tree';
 import { menuNodesApi, LookupConfig, LookupTestResult, LocationConfig } from '@/lib/api';
-import { TYPE_LABEL, addableTypes } from './MenuNodeRow';
+import { TYPE_LABEL, addableTypes, isAgendaType } from './MenuNodeRow';
 import Link from 'next/link';
 import InfoTooltip from '@/components/ui/InfoTooltip';
 
@@ -107,7 +107,7 @@ export default function NodeEditPanel({ node, descendantCount, saving, onSave, o
         )}
       </div>
 
-      {(node.type === 'TEXT' || node.type === 'MENU' || node.type === 'LOCATION' || node.type === 'BOOK_APPOINTMENT') && (
+      {(node.type === 'TEXT' || node.type === 'MENU' || node.type === 'LOCATION' || isAgendaType(node.type)) && (
         <div className="space-y-1.5">
           <label className="text-xs font-semibold text-ink flex items-center justify-between">
             <span className="flex items-center gap-1.5">
@@ -176,7 +176,7 @@ export default function NodeEditPanel({ node, descendantCount, saving, onSave, o
         </>
       )}
 
-      {node.type === 'BOOK_APPOINTMENT' && agendaEnabled === false && (
+      {isAgendaType(node.type) && agendaEnabled === false && (
         <div className="flex items-start gap-2 rounded-xl p-3 text-xs" style={{ background: '#FEF2F2', color: '#991B1B' }}>
           <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
           <span>
@@ -215,6 +215,15 @@ export default function NodeEditPanel({ node, descendantCount, saving, onSave, o
             />
           </div>
         </>
+      )}
+
+      {node.type === 'MY_APPOINTMENTS' && (
+        <p className="text-xs text-ink-muted">
+          El cliente ve sus próximas citas en la clínica de la línea a la que escribe. Si la clínica lo permite, puede
+          cambiarlas o cancelarlas; si no, solo las ve. Eso se elige en{' '}
+          <Link href="/settings/agenda" className="text-green-700 underline">Doctores y turnos</Link>, pestaña
+          “Reserva por WhatsApp”. Si no tiene citas y el menú tiene “Agendar cita”, se le ofrece reservar.
+        </p>
       )}
 
       {node.type === 'AI_CHAT' && aiMissing.length > 0 && (

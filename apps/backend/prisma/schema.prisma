@@ -787,6 +787,9 @@ enum MenuNodeType {
   // El paciente reserva una cita en la agenda de la clinica (la linea) eligiendo dia y
   // hora de listas. Necesita la agenda activa en la empresa.
   BOOK_APPOINTMENT
+  // El paciente ve sus proximas citas en la clinica y, si la empresa lo permite
+  // (AgendaSettings.patientCanReschedule/patientCanCancel), las cambia o cancela.
+  MY_APPOINTMENTS
 }
 
 // ─── System Config (global, singleton) ───────────────────────────────────────

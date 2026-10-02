@@ -3,8 +3,8 @@ import { addDays, isValidDate, MINUTES_PER_DAY } from '../agenda/agenda-time';
 
 /**
  * Reserva de citas desde el bot (nodo BOOK_APPOINTMENT), y cambio o cancelacion de una
- * cita desde el boton "Reprogramar" del recordatorio: las pantallas y los ids de sus
- * filas y botones, sin base de datos.
+ * cita desde el boton "Reprogramar" del recordatorio o desde "Mis citas" (nodo
+ * MY_APPOINTMENTS): las pantallas y los ids de sus filas y botones, sin base de datos.
  *
  * Cada fila lleva en su id todo lo que hace falta para seguir (`bk:ask:2026-10-03:570`
  * = "confirmar el viernes 3 a las 9:30"), en vez de guardarlo en botContext. Asi tocar
@@ -35,13 +35,23 @@ export type BookingView =
   /** Dejarla como esta. */
   | { kind: 'keep' }
   /** Que lo atienda alguien de la clinica. */
-  | { kind: 'human' };
+  | { kind: 'human' }
+  // ─── "Mis citas" ───
+  /** Las proximas citas del paciente en la clinica. */
+  | { kind: 'mine' }
+  /** Eligio una de sus citas. */
+  | { kind: 'pick'; appointmentId: string }
+  /** No tiene citas y quiere reservar una (con el nodo "Agendar cita" del bot). */
+  | { kind: 'new' };
 
 /** Lo que hace algo en vez de mostrar una pantalla. Solo vale en el paso en que se ofrecio. */
 export type BookingAction = Extract<BookingView, { kind: 'book' | 'cancelOk' | 'keep' | 'human' }>;
 
-/** Lo que es una pantalla (se muestra y se puede volver a mostrar): todo menos las acciones y salir. */
-export type BookingScreen = Exclude<BookingView, BookingAction | { kind: 'menu' }>;
+/**
+ * Lo que es una pantalla (se muestra y se puede volver a mostrar): todo menos las
+ * acciones, salir, y los pasos que cambian de camino (elegir una cita, empezar a reservar).
+ */
+export type BookingScreen = Exclude<BookingView, BookingAction | { kind: 'menu' | 'pick' | 'new' }>;
 
 const ACTIONS = new Set(['book', 'cancelOk', 'keep', 'human']);
 
@@ -87,6 +97,12 @@ export function viewId(v: BookingView): string {
       return 'bk:keep';
     case 'human':
       return 'bk:human';
+    case 'mine':
+      return 'bk:mine';
+    case 'pick':
+      return `bk:pick:${v.appointmentId}`;
+    case 'new':
+      return 'bk:new';
   }
 }
 
@@ -106,6 +122,9 @@ export function parseViewId(id: string | undefined): BookingView | null {
   if (kind === 'cancelok') return { kind: 'cancelOk' };
   if (kind === 'keep') return { kind: 'keep' };
   if (kind === 'human') return { kind: 'human' };
+  if (kind === 'mine') return { kind: 'mine' };
+  if (kind === 'new') return { kind: 'new' };
+  if (kind === 'pick') return a && /^[a-z0-9]{10,40}$/.test(a) ? { kind: 'pick', appointmentId: a } : null;
   if (kind === 'days') {
     const offset = minuteOf(a, 1000);
     return offset === null ? null : { kind: 'days', offset };
@@ -179,5 +198,12 @@ export function needsDayPart(starts: number[]) {
 /** La ultima pantalla guardada en botContext, para volver a mostrarla. */
 export function parseScreenId(id: string | null): BookingScreen | null {
   const view = parseViewId(id ?? undefined);
-  return view && !isAction(view) && view.kind !== 'menu' ? view : null;
+  if (!view || isAction(view) || view.kind === 'menu' || view.kind === 'pick' || view.kind === 'new') return null;
+  return view;
+}
+
+/** "Vie 3 oct, 9:30 a.m.": una cita como fila de lista (hasta 22 caracteres). */
+export function appointmentTitle(date: string, minute: number) {
+  const short = shortDayText(date);
+  return `${short.charAt(0).toUpperCase() + short.slice(1)}, ${hourText(minute)}`;
 }

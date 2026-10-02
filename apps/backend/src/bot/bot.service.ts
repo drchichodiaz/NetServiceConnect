@@ -15,9 +15,9 @@ import { AvailabilityService } from '../agenda/availability.service';
 import { AppointmentsService } from '../agenda/appointments.service';
 import { addDays, fromLocal, toLocal } from '../agenda/agenda-time';
 import { clinicName, dayText, hourText } from '../agenda/agenda-text';
-import { BookingScreen, NOON, Row, dayRows, isAction, needsDayPart, parseScreenId, parseViewId, timeRows, viewId } from './booking';
+import { BookingScreen, NOON, Row, appointmentTitle, dayRows, isAction, needsDayPart, parseScreenId, parseViewId, timeRows, viewId } from './booking';
 
-type MenuNodeType = 'MENU' | 'TEXT' | 'ORDER_LOOKUP' | 'AGENT' | 'AI_CHAT' | 'LOCATION' | 'BOOK_APPOINTMENT';
+type MenuNodeType = 'MENU' | 'TEXT' | 'ORDER_LOOKUP' | 'AGENT' | 'AI_CHAT' | 'LOCATION' | 'BOOK_APPOINTMENT' | 'MY_APPOINTMENTS';
 
 interface MenuNode {
   id: string;
@@ -298,6 +298,8 @@ export class BotService {
         return this.sendLocation(tenantId, conversationId, phone, account, node);
       case 'BOOK_APPOINTMENT':
         return this.startBooking(tenantId, conversationId, phone, account, node);
+      case 'MY_APPOINTMENTS':
+        return this.showBookingView(tenantId, conversationId, phone, account, { kind: 'mine' });
     }
   }
 
@@ -704,8 +706,8 @@ ${knowledgeBase}
    *   clinica es la linea a la que escribio y el doctor lo asigna la agenda, igual que
    *   cuando reserva la recepcion.
    * - Cambiar o cancelar una cita que ya existe, desde el boton "Reprogramar" del
-   *   recordatorio, si la empresa lo permite (startPatientReschedule). La cita viaja en
-   *   botContext.bookingAppointmentId.
+   *   recordatorio (startPatientReschedule) o desde "Mis citas" (nodo MY_APPOINTMENTS),
+   *   si la empresa lo permite. La cita viaja en botContext.bookingAppointmentId.
    */
   private async startBooking(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, node: MenuNode) {
     await this.setContext(conversationId, { bookingNodeId: node.id, bookingAppointmentId: null, bookingView: null, retryCount: 0 });
@@ -715,8 +717,8 @@ ${knowledgeBase}
   /**
    * El paciente toco "Reprogramar" en el recordatorio y la empresa lo deja cambiar o
    * cancelar solo (lo decide el webhook con AgendaRepliesService.selfServiceAllowed).
-   * Arranca en "¿Qué quieres hacer?", que pasa directo a los dias si solo puede cambiar
-   * el horario.
+   * Arranca en "¿Qué quieres hacer?", o directo en los dias si solo puede cambiar el
+   * horario: toco "Reprogramar", ya dijo lo que quiere.
    */
   async startPatientReschedule(tenantId: string, conversationId: string, phone: string, appointmentId: string) {
     const account = await this.accounts.getForConversation(conversationId);
@@ -728,7 +730,9 @@ ${knowledgeBase}
       bookingView: null,
       retryCount: 0,
     });
-    return this.showBookingView(tenantId, conversationId, phone, account, { kind: 'manage' });
+    const settings = await this.agendaSettings.get(tenantId);
+    const first: BookingScreen = settings.patientCanCancel ? { kind: 'manage' } : { kind: 'days', offset: 0 };
+    return this.showBookingView(tenantId, conversationId, phone, account, first);
   }
 
   private async handleBookingReply(tenantId: string, conversationId: string, phone: string, msg: any, account: WhatsAppAccountCreds) {
@@ -766,6 +770,10 @@ ${knowledgeBase}
       case 'human':
         await this.sendText(tenantId, conversationId, phone, account, BY_CLINIC_TEXT);
         return this.handoffToHuman(tenantId, conversationId, 'reschedule_by_clinic');
+      case 'pick':
+        return this.openAppointment(tenantId, conversationId, phone, account, view.appointmentId);
+      case 'new':
+        return this.startBookingFromMine(tenantId, conversationId, phone, account);
       default:
         return this.showBookingView(tenantId, conversationId, phone, account, view);
     }
@@ -864,6 +872,7 @@ ${knowledgeBase}
     view: BookingScreen,
     notice?: string,
   ): Promise<unknown> {
+    if (view.kind === 'mine') return this.showMyAppointments(tenantId, conversationId, phone, account, notice);
     const scope = await this.bookingScope(tenantId, conversationId);
     if (!scope.ok) return this.bookingUnavailable(tenantId, conversationId, phone, account, scope.error);
     const { change } = scope;
@@ -875,17 +884,20 @@ ${knowledgeBase}
       // ─── Cambiar o cancelar una cita que ya existe ───
       if (view.kind === 'manage' || view.kind === 'cancel') {
         if (!change) return show({ kind: 'days', offset: 0 });
-        if (!change.canCancel) return view.kind === 'manage' ? show({ kind: 'days', offset: 0 }) : show({ kind: 'manage' });
+        if (view.kind === 'cancel' && !change.canCancel) return show({ kind: 'manage' });
         const when = `${dayText(change.date)} a las ${hourText(change.minute)} en ${scope.clinic}`;
+        // Los botones salen de lo que la empresa permite: cambiar (o, si no, hablar con
+        // alguien de la clinica), cancelar si se puede, y siempre dejarla como esta.
+        const options = [
+          change.canReschedule
+            ? { id: viewId({ kind: 'days', offset: 0 }), title: 'Cambiar horario' }
+            : { id: viewId({ kind: 'human' }), title: 'Hablar con alguien' },
+          ...(change.canCancel ? [{ id: viewId({ kind: 'cancel' }), title: 'Cancelar cita' }] : []),
+          { id: viewId({ kind: 'keep' }), title: 'Dejarla así' },
+        ];
         const sent =
           view.kind === 'manage'
-            ? await this.sendButtons(tenantId, conversationId, phone, account, withNotice(`Tu cita es el ${when}. ¿Qué quieres hacer?`), [
-                change.canReschedule
-                  ? { id: viewId({ kind: 'days', offset: 0 }), title: 'Cambiar horario' }
-                  : { id: viewId({ kind: 'human' }), title: 'Hablar con alguien' },
-                { id: viewId({ kind: 'cancel' }), title: 'Cancelar cita' },
-                { id: viewId({ kind: 'keep' }), title: 'Dejarla así' },
-              ])
+            ? await this.sendButtons(tenantId, conversationId, phone, account, withNotice(`Tu cita es el ${when}. ¿Qué quieres hacer?`), options)
             : await this.sendButtons(tenantId, conversationId, phone, account, withNotice(`¿Seguro que quieres cancelar tu cita del ${when}?`), [
                 { id: viewId({ kind: 'cancelOk' }), title: 'Sí, cancelarla' },
                 { id: viewId({ kind: 'keep' }), title: 'No, mantenerla' },
@@ -912,7 +924,7 @@ ${knowledgeBase}
         let exit: Row | undefined;
         if (change) {
           body = `Tu cita es el ${dayText(change.date)} a las ${hourText(change.minute)}. ¿Qué día te queda mejor?`;
-          exit = change.canCancel ? { id: viewId({ kind: 'manage' }), title: '‹ Volver' } : { id: viewId({ kind: 'keep' }), title: 'Dejarla así' };
+          exit = { id: viewId({ kind: 'manage' }), title: '‹ Volver' };
         } else {
           const { bookingNodeId } = await this.getContext(conversationId);
           const node = bookingNodeId ? await this.resolveNode(tenantId, bookingNodeId) : null;
@@ -968,6 +980,107 @@ ${knowledgeBase}
     } catch (err) {
       return this.bookingFailed(tenantId, conversationId, phone, account, err);
     }
+  }
+
+  /**
+   * "Mis citas": las proximas citas del paciente en la clinica de la linea.
+   * - Ninguna: se le dice, y se le ofrece reservar si el bot tiene "Agendar cita".
+   * - Una: se abre directo (openAppointment).
+   * - Varias: elige cual de una lista.
+   */
+  private async showMyAppointments(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, notice?: string) {
+    await this.setContext(conversationId, { bookingAppointmentId: null, bookingNodeId: null });
+    const settings = await this.agendaSettings.get(tenantId);
+    if (!settings.enabled) return this.bookingUnavailable(tenantId, conversationId, phone, account, 'agenda_disabled');
+    const conv = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { contactId: true, channelAccountId: true, botId: true, channelAccount: { select: { label: true, displayName: true, businessName: true } } },
+    });
+    if (!conv?.channelAccountId || !conv.channelAccount) return this.bookingUnavailable(tenantId, conversationId, phone, account, 'no_line');
+    const clinic = clinicName(conv.channelAccount);
+    const withNotice = (body: string) => (notice ? `${notice}\n\n${body}` : body);
+
+    const appointments = await this.prisma.appointment.findMany({
+      where: {
+        tenantId,
+        contactId: conv.contactId,
+        channelAccountId: conv.channelAccountId,
+        status: { in: ['SCHEDULED', 'CONFIRMED'] },
+        startsAt: { gt: new Date() },
+      },
+      orderBy: { startsAt: 'asc' },
+      take: 9,
+      select: { id: true, startsAt: true },
+    });
+
+    if (appointments.length === 0) {
+      const bookingNode = conv.botId
+        ? await this.prisma.tenantMenuNode.findFirst({ where: { tenantId, botId: conv.botId, type: 'BOOK_APPOINTMENT', active: true }, select: { id: true } })
+        : null;
+      const text = `No tienes citas agendadas en ${clinic}.`;
+      if (!bookingNode) {
+        if (!(await this.sendText(tenantId, conversationId, phone, account, withNotice(text)))) return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
+        const { nodeId } = await this.getContext(conversationId);
+        return this.sendPostReplyPrompt(tenantId, conversationId, phone, account, nodeId);
+      }
+      const sent = await this.sendButtons(tenantId, conversationId, phone, account, withNotice(`${text} ¿Quieres agendar una?`), [
+        { id: viewId({ kind: 'new' }), title: 'Agendar cita' },
+        { id: viewId({ kind: 'menu' }), title: 'Volver al menú' },
+      ]);
+      if (!sent) return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
+      return this.setBookingView(conversationId, { kind: 'mine' });
+    }
+
+    if (appointments.length === 1 && !notice) return this.openAppointment(tenantId, conversationId, phone, account, appointments[0].id);
+
+    const rows: Row[] = appointments.map((a) => {
+      const start = toLocal(a.startsAt, settings.timezone);
+      return { id: viewId({ kind: 'pick', appointmentId: a.id }), title: appointmentTitle(start.date, start.minute) };
+    });
+    rows.push({ id: viewId({ kind: 'menu' }), title: '‹ Volver' });
+    const body = appointments.length === 1 ? `Tienes una cita en ${clinic}:` : `Tienes ${appointments.length} citas en ${clinic}. ¿Cuál quieres ver?`;
+    if (!(await this.sendList(tenantId, conversationId, phone, account, withNotice(body), 'Ver citas', 'Mis citas', rows))) {
+      return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
+    }
+    return this.setBookingView(conversationId, { kind: 'mine' });
+  }
+
+  /**
+   * Una cita elegida en "Mis citas". Si la empresa deja cambiarla o cancelarla y falta mas
+   * que el limite, "¿Qué quieres hacer?". Si no, solo se le muestra: ver sus citas es
+   * util aunque no pueda tocarlas, y "¿Necesitas algo más?" le deja hablar con alguien.
+   */
+  private async openAppointment(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, appointmentId: string) {
+    const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId }, select: { contactId: true } });
+    const appt = await this.appointments.findOpenForPatient(tenantId, appointmentId);
+    if (!appt || appt.contactId !== conv?.contactId) {
+      return this.showBookingView(tenantId, conversationId, phone, account, { kind: 'mine' }, 'Esa cita ya no está vigente.');
+    }
+    const settings = await this.agendaSettings.get(tenantId);
+    const selfService = settings.patientCanReschedule || settings.patientCanCancel;
+    const tooLate = appt.startsAt.getTime() - Date.now() < settings.selfServiceCutoffHours * 3600_000;
+    if (settings.enabled && selfService && !tooLate) {
+      await this.setContext(conversationId, { bookingAppointmentId: appt.id });
+      return this.showBookingView(tenantId, conversationId, phone, account, { kind: 'manage' });
+    }
+
+    const start = toLocal(appt.startsAt, settings.timezone);
+    const late = selfService && tooLate ? ' Como falta poco, si necesitas cambiarla te comunico con alguien de la clínica.' : '';
+    const text = `Tu cita es el ${dayText(start.date)} a las ${hourText(start.minute)} en ${clinicName(appt.channelAccount)}.${late}`;
+    if (!(await this.sendText(tenantId, conversationId, phone, account, text))) return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
+    const { nodeId } = await this.getContext(conversationId);
+    return this.sendPostReplyPrompt(tenantId, conversationId, phone, account, nodeId);
+  }
+
+  /** "Agendar cita" desde "Mis citas" sin citas: la reserva con el nodo de reserva del bot. */
+  private async startBookingFromMine(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds) {
+    const botId = await this.getBotId(tenantId, conversationId);
+    const node = await this.prisma.tenantMenuNode.findFirst({ where: { tenantId, botId, type: 'BOOK_APPOINTMENT', active: true } });
+    if (!node) {
+      const { nodeId } = await this.getContext(conversationId);
+      return this.enterNode(tenantId, conversationId, phone, nodeId, account);
+    }
+    return this.startBooking(tenantId, conversationId, phone, account, node);
   }
 
   /**

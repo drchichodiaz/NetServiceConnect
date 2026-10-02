@@ -1,4 +1,4 @@
-export type MenuNodeType = 'MENU' | 'TEXT' | 'ORDER_LOOKUP' | 'AGENT' | 'AI_CHAT' | 'LOCATION' | 'BOOK_APPOINTMENT';
+export type MenuNodeType = 'MENU' | 'TEXT' | 'ORDER_LOOKUP' | 'AGENT' | 'AI_CHAT' | 'LOCATION' | 'BOOK_APPOINTMENT' | 'MY_APPOINTMENTS';
 
 export interface MenuNode {
   id: string;

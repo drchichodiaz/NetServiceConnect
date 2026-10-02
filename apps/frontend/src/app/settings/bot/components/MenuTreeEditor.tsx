@@ -16,7 +16,7 @@ import { Plus, FolderTree } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { menuNodesApi } from '@/lib/api';
 import { MenuNode, MenuNodeType, flattenTree, getProjection, countDescendants, arrayMove, INDENTATION_WIDTH, Projection } from '@/lib/sortable-tree';
-import MenuNodeRow, { TYPE_LABEL, TYPE_ICON, addableTypes } from './MenuNodeRow';
+import MenuNodeRow, { TYPE_LABEL, TYPE_ICON, addableTypes, isAgendaType } from './MenuNodeRow';
 import { useAgendaSettings } from '@/hooks/useAgendaSettings';
 import NodeEditPanel, { hasCoordinates } from './NodeEditPanel';
 
@@ -29,6 +29,7 @@ const DEFAULT_TITLE: Record<MenuNodeType, string> = {
   AI_CHAT: 'Pregúntame lo que sea',
   LOCATION: 'Ubicación',
   BOOK_APPOINTMENT: 'Agendar cita',
+  MY_APPOINTMENTS: 'Mis citas',
 };
 
 export default function MenuTreeEditor({
@@ -263,7 +264,7 @@ export default function MenuTreeEditor({
                       incomplete={
                         (node.type === 'AI_CHAT' && aiMissing.length > 0) ||
                         (node.type === 'LOCATION' && !hasCoordinates(node.config)) ||
-                        (node.type === 'BOOK_APPOINTMENT' && agenda !== null && !agenda.enabled)
+                        (isAgendaType(node.type) && agenda !== null && !agenda.enabled)
                       }
                       onSelect={() => setSelectedId(node.id)}
                       onToggleCollapse={() => toggleCollapse(node.id)}

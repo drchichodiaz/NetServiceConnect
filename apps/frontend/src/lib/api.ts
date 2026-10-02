@@ -264,7 +264,7 @@ export interface MenuNodeInput {
   /** Obligatorio para una opción de la raíz; con parentId se hereda del padre. */
   botId?: string;
   parentId?: string | null;
-  type?: 'MENU' | 'TEXT' | 'ORDER_LOOKUP' | 'AGENT' | 'AI_CHAT' | 'LOCATION' | 'BOOK_APPOINTMENT';
+  type?: 'MENU' | 'TEXT' | 'ORDER_LOOKUP' | 'AGENT' | 'AI_CHAT' | 'LOCATION' | 'BOOK_APPOINTMENT' | 'MY_APPOINTMENTS';
   title: string;
   subtitle?: string;
   bodyText?: string;
