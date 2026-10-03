@@ -152,6 +152,53 @@ export class AgendaNotifierService {
   }
 
   /**
+   * El enlace para que el doctor agregue sus citas a su calendario: el boton abre
+   * /calendario/<clave>. Variables: {{1}} doctor, y el {{1}} del boton de enlace = la
+   * clave del calendario. No sale solo: lo dispara la clinica desde la ficha del doctor.
+   *
+   * Sale por la linea de la clinica donde el doctor tiene su primer turno de la semana;
+   * si no tiene turnos o esa linea esta caida, por la linea principal de la empresa.
+   * Devuelve el Message.id, o null si no hay plantilla elegida.
+   */
+  async sendDoctorCalendarLink(doctorId: string, calendarToken: string): Promise<string | null> {
+    const doctor = await this.prisma.doctor.findUniqueOrThrow({
+      where: { id: doctorId },
+      include: {
+        tenant: { select: { agendaSettings: true } },
+        shifts: { orderBy: [{ weekday: 'asc' }, { startMinute: 'asc' }], take: 1 },
+      },
+    });
+    const templateId = doctor.tenant.agendaSettings?.doctorCalendarTemplateId;
+    if (!templateId) return null;
+    if (!doctor.phone) throw new BadRequestException('El doctor no tiene WhatsApp cargado');
+
+    const shiftLine = doctor.shifts[0]?.channelAccountId;
+    const account =
+      (shiftLine && (await this.accounts.findActiveCredsOrThrow(doctor.tenantId, shiftLine).catch(() => null))) ||
+      (await this.accounts.getDefault(doctor.tenantId));
+    if (!account) throw new BadRequestException('No hay una línea de WhatsApp activa para enviarlo');
+
+    const template = await this.templateForLine(doctor.tenantId, templateId, account.wabaId);
+    const buttonIndex = ((template.buttons as any[]) ?? []).findIndex((b) => b?.type === 'URL');
+    if (buttonIndex < 0) throw new BadRequestException(`La plantilla "${template.name}" no tiene el botón de enlace`);
+
+    const contact = await this.identities.resolve(doctor.tenantId, 'WHATSAPP', doctor.phone, { name: `${doctor.code} ${doctor.name}` });
+
+    const { message } = await this.whatsapp.sendTemplateToContact({
+      tenantId: doctor.tenantId,
+      account,
+      template,
+      contact,
+      recipient: doctor.phone,
+      variables: { body: fitToTemplate(template.bodyText, [doctor.name]), buttons: [{ index: buttonIndex, value: calendarToken }] },
+      senderId: null,
+      assignTo: null,
+      newConversationStatus: 'CLOSED',
+    });
+    return message.id;
+  }
+
+  /**
    * La plantilla elegida, pero la del WABA de esta linea. Meta guarda las plantillas por
    * WABA: la clinica elige una en pantalla, y si sus lineas estan en WABAs distintos,
    * la "misma" plantilla es otra fila en cada uno (mismo nombre e idioma).

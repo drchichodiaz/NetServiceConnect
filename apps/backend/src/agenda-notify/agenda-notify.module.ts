@@ -5,7 +5,9 @@ import { WhatsAppAccountsModule } from '../whatsapp/accounts.module';
 import { ContactIdentityModule } from '../contacts/contact-identity.module';
 import { AgendaNotifierService } from './agenda-notifier.service';
 import { AgendaNotifyWorkerService } from './agenda-notify-worker.service';
-import { AgendaNotifyController } from './agenda-notify.controller';
+import { AgendaDoctorNotifyController, AgendaNotifyController, AgendaTemplatesController } from './agenda-notify.controller';
+import { AgendaTemplatesService } from './agenda-templates.service';
+import { TemplatesModule } from '../templates/templates.module';
 
 /**
  * Los avisos de la agenda por WhatsApp. Modulo aparte de AgendaModule a proposito:
@@ -14,8 +16,8 @@ import { AgendaNotifyController } from './agenda-notify.controller';
  * mutuamente. Este modulo depende de los dos y nadie depende de el.
  */
 @Module({
-  imports: [AgendaModule, WhatsAppModule, WhatsAppAccountsModule, ContactIdentityModule],
-  controllers: [AgendaNotifyController],
-  providers: [AgendaNotifierService, AgendaNotifyWorkerService],
+  imports: [AgendaModule, WhatsAppModule, WhatsAppAccountsModule, ContactIdentityModule, TemplatesModule],
+  controllers: [AgendaNotifyController, AgendaDoctorNotifyController, AgendaTemplatesController],
+  providers: [AgendaNotifierService, AgendaNotifyWorkerService, AgendaTemplatesService],
 })
 export class AgendaNotifyModule {}

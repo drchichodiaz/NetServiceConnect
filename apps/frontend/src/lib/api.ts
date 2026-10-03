@@ -826,6 +826,13 @@ export const agendaApi = {
   updateSettings: (data: Partial<Omit<AgendaSettings, 'enabled' | 'timezone'>>): Promise<AgendaSettings> =>
     api.patch('/agenda/settings', data).then((r) => r.data),
 
+  createDefaultTemplates: (): Promise<{
+    created: string[];
+    existing: string[];
+    failed: { name: string; error: string }[];
+    settings: AgendaSettings;
+  }> => api.post('/agenda/templates/defaults').then((r) => r.data),
+
   doctors: (): Promise<Doctor[]> => api.get('/agenda/doctors').then((r) => r.data),
   createDoctor: (data: { code: string; name: string; phone?: string }): Promise<Doctor> =>
     api.post('/agenda/doctors', data).then((r) => r.data),
@@ -833,6 +840,10 @@ export const agendaApi = {
     api.patch(`/agenda/doctors/${id}`, data).then((r) => r.data),
   setShifts: (id: string, shifts: Shift[]): Promise<Shift[]> =>
     api.put(`/agenda/doctors/${id}/shifts`, { shifts }).then((r) => r.data),
+  calendarLink: (id: string, reset = false): Promise<{ token: string }> =>
+    api.post(`/agenda/doctors/${id}/calendar-link${reset ? '/reset' : ''}`).then((r) => r.data),
+  sendCalendarLink: (id: string): Promise<{ ok: true }> =>
+    api.post(`/agenda/doctors/${id}/calendar-link/send`).then((r) => r.data),
 
   exceptions: (params?: { from?: string; to?: string; doctorId?: string }): Promise<DoctorException[]> =>
     api.get('/agenda/exceptions', { params }).then((r) => r.data),

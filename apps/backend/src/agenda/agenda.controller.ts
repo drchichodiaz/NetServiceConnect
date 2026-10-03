@@ -58,6 +58,18 @@ export class AgendaController {
     return this.doctors.setShifts(user.tenantId, id, dto);
   }
 
+  /** La clave del calendario del doctor; se genera si todavia no tiene. */
+  @Post('doctors/:id/calendar-link')
+  calendarLink(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.doctors.calendarToken(user.tenantId, id);
+  }
+
+  /** Cambia la clave: el enlace anterior deja de funcionar. */
+  @Post('doctors/:id/calendar-link/reset')
+  resetCalendarLink(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.doctors.calendarToken(user.tenantId, id, true);
+  }
+
   @Roles('ADMIN' as any, 'SUPERVISOR' as any, 'AGENT' as any)
   @Get('exceptions')
   listExceptions(

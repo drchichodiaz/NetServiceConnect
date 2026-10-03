@@ -13,6 +13,6 @@ import { ContactIdentityModule } from '../contacts/contact-identity.module';
   imports: [ContactIdentityModule],
   controllers: [AgendaController, PublicAgendaController],
   providers: [AgendaSettingsService, DoctorsService, AvailabilityService, AppointmentsService, AgendaRepliesService, DoctorLinkService],
-  exports: [AgendaSettingsService, AvailabilityService, AppointmentsService, AgendaRepliesService, DoctorLinkService],
+  exports: [AgendaSettingsService, DoctorsService, AvailabilityService, AppointmentsService, AgendaRepliesService, DoctorLinkService],
 })
 export class AgendaModule {}

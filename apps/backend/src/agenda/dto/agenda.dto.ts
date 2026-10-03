@@ -81,6 +81,10 @@ export class UpdateAgendaSettingsDto {
   @IsOptional()
   @IsString()
   delayTemplateId?: string;
+
+  @IsOptional()
+  @IsString()
+  doctorCalendarTemplateId?: string;
 }
 
 export class CreateDoctorDto {

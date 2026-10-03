@@ -1312,6 +1312,9 @@ model AgendaSettings {
   reminderTemplateId      String?
   doctorSummaryTemplateId String?
   delayTemplateId         String?
+  /// El mensaje con el que se le manda al doctor el enlace para agregar sus citas a su
+  /// calendario. No sale solo: lo dispara la clinica desde la ficha del doctor.
+  doctorCalendarTemplateId String?
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 
@@ -1330,6 +1333,10 @@ model Doctor {
   /// WhatsApp del doctor, solo digitos con codigo de pais (igual que ContactIdentity).
   /// Null = no recibe el resumen del dia.
   phone     String?
+  /// Clave del calendario al que el doctor se suscribe desde su telefono (.ics). Es un
+  /// secreto: quien tiene el enlace ve sus citas. Null = nunca se le genero. Cambiarla
+  /// deja sin efecto el enlace anterior. No sale en ningun listado.
+  calendarToken String? @unique
   /// Un doctor que se va se desactiva, no se borra: sus citas pasadas lo nombran.
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())

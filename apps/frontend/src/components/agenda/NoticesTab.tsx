@@ -1,12 +1,17 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Sparkles } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { agendaApi, templatesApi, MessageTemplate } from '@/lib/api';
 import { AgendaSettings, hhmm } from '@/lib/agenda';
 import { setAgendaSettingsCache } from '@/hooks/useAgendaSettings';
 
-type TemplateKey = 'confirmationTemplateId' | 'reminderTemplateId' | 'doctorSummaryTemplateId' | 'delayTemplateId';
+type TemplateKey =
+  | 'confirmationTemplateId'
+  | 'reminderTemplateId'
+  | 'doctorSummaryTemplateId'
+  | 'delayTemplateId'
+  | 'doctorCalendarTemplateId';
 
 /** Que plantilla va en cada aviso y que variables espera, en el orden en que se llenan. */
 const NOTICES: { key: TemplateKey; title: string; when: string; variables: string }[] = [
@@ -34,12 +39,19 @@ const NOTICES: { key: TemplateKey; title: string; when: string; variables: strin
     when: 'Al paciente que sigue, cuando una consulta se alarga.',
     variables: '{{1}} clínica',
   },
+  {
+    key: 'doctorCalendarTemplateId',
+    title: 'Calendario del doctor',
+    when: 'Al doctor, cuando se le envía desde su ficha. Con un botón de enlace para agregar sus citas a su calendario.',
+    variables: '{{1}} doctor',
+  },
 ];
 
 export default function NoticesTab({ settings }: { settings: AgendaSettings }) {
   const [form, setForm] = useState(settings);
   const [templates, setTemplates] = useState<MessageTemplate[] | null>(null);
   const [saving, setSaving] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     templatesApi.list().then(setTemplates).catch(() => setTemplates([]));
@@ -56,6 +68,7 @@ export default function NoticesTab({ settings }: { settings: AgendaSettings }) {
         reminderTemplateId: form.reminderTemplateId ?? '',
         doctorSummaryTemplateId: form.doctorSummaryTemplateId ?? '',
         delayTemplateId: form.delayTemplateId ?? '',
+        doctorCalendarTemplateId: form.doctorCalendarTemplateId ?? '',
       } as any);
       setForm(saved);
       setAgendaSettingsCache(saved);
@@ -64,6 +77,35 @@ export default function NoticesTab({ settings }: { settings: AgendaSettings }) {
       toast.error(err?.response?.data?.message || 'No se pudo guardar');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function createDefaults() {
+    setCreating(true);
+    try {
+      const result = await agendaApi.createDefaultTemplates();
+      // Solo las plantillas: lo demas del formulario puede tener cambios sin guardar.
+      setForm((f) => ({
+        ...f,
+        confirmationTemplateId: result.settings.confirmationTemplateId,
+        reminderTemplateId: result.settings.reminderTemplateId,
+        doctorSummaryTemplateId: result.settings.doctorSummaryTemplateId,
+        delayTemplateId: result.settings.delayTemplateId,
+        doctorCalendarTemplateId: result.settings.doctorCalendarTemplateId,
+      }));
+      setAgendaSettingsCache(result.settings);
+      setTemplates(await templatesApi.list().catch(() => templates ?? []));
+
+      if (result.created.length > 0) {
+        toast.success(`Enviadas a Meta para aprobar: ${result.created.join(', ')}`);
+      } else if (result.failed.length === 0) {
+        toast.success('Ya estaban todas creadas');
+      }
+      for (const f of result.failed) toast.error(`${f.name}: ${f.error}`, { duration: 8000 });
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'No se pudieron crear las plantillas');
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -96,6 +138,18 @@ export default function NoticesTab({ settings }: { settings: AgendaSettings }) {
             {[5, 6, 7, 8, 9].map((h) => <option key={h} value={h}>{hhmm(h * 60)}</option>)}
           </select>
         </div>
+      </div>
+
+      <div className="card p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-ink">Plantillas de la agenda</p>
+          <p className="text-xs text-ink-muted">
+            Crea las plantillas de estos avisos con el texto recomendado, las envía a Meta para aprobar y las deja elegidas. Las que ya existen no se vuelven a crear.
+          </p>
+        </div>
+        <button onClick={createDefaults} disabled={creating} className="btn-secondary shrink-0">
+          {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />} Crear las que faltan
+        </button>
       </div>
 
       <div className="card divide-y divide-border">

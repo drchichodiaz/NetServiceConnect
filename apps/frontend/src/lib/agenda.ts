@@ -27,6 +27,7 @@ export interface AgendaSettings {
   reminderTemplateId: string | null;
   doctorSummaryTemplateId: string | null;
   delayTemplateId: string | null;
+  doctorCalendarTemplateId: string | null;
   timezone: string;
 }
 

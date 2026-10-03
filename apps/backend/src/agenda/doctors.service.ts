@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { normalizePhone } from '../contacts/contacts-import.util';
 import { AgendaSettingsService } from './agenda-settings.service';
@@ -17,6 +18,12 @@ function hhmm(minute: number) {
   return `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
 }
 
+/** La lista de doctores la lee tambien la recepcion: la clave del calendario no viaja ahi. */
+function withoutCalendarToken<T extends { calendarToken: string | null }>(doctor: T): Omit<T, 'calendarToken'> {
+  const { calendarToken: _secret, ...rest } = doctor;
+  return rest;
+}
+
 /**
  * Doctores, su turno semanal y las excepciones de un dia. Lo administra la
  * coordinacion; la recepcion solo lo lee a traves de la disponibilidad.
@@ -30,7 +37,7 @@ export class DoctorsService {
 
   async list(tenantId: string) {
     await this.settings.requireEnabled(tenantId);
-    return this.prisma.doctor.findMany({
+    const doctors = await this.prisma.doctor.findMany({
       where: { tenantId },
       orderBy: [{ isActive: 'desc' }, { code: 'asc' }],
       include: {
@@ -40,15 +47,31 @@ export class DoctorsService {
         },
       },
     });
+    return doctors.map(withoutCalendarToken);
   }
 
   async create(tenantId: string, dto: CreateDoctorDto) {
     await this.settings.requireEnabled(tenantId);
     const code = dto.code.trim();
     await this.assertCodeFree(tenantId, code);
-    return this.prisma.doctor.create({
+    const doctor = await this.prisma.doctor.create({
       data: { tenantId, code, name: dto.name.trim(), phone: this.cleanPhone(dto.phone) },
     });
+    return withoutCalendarToken(doctor);
+  }
+
+  /**
+   * La clave del calendario del doctor (ver PublicAgendaController.calendar). Se genera
+   * la primera vez que la clinica pide el enlace. Con `reset` se cambia por una nueva:
+   * el enlace anterior deja de funcionar y el doctor tiene que suscribirse de nuevo.
+   */
+  async calendarToken(tenantId: string, id: string, reset = false) {
+    await this.settings.requireEnabled(tenantId);
+    const doctor = await this.findOrThrow(tenantId, id);
+    if (doctor.calendarToken && !reset) return { token: doctor.calendarToken };
+    const token = randomBytes(24).toString('base64url');
+    await this.prisma.doctor.update({ where: { id }, data: { calendarToken: token } });
+    return { token };
   }
 
   async update(tenantId: string, id: string, dto: UpdateDoctorDto) {
@@ -66,7 +89,7 @@ export class DoctorsService {
     // clinica decide que hacer con ellas. Lo que deja de pasar es que le asignen nuevas.
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
 
-    return this.prisma.doctor.update({ where: { id }, data });
+    return withoutCalendarToken(await this.prisma.doctor.update({ where: { id }, data }));
   }
 
   /**

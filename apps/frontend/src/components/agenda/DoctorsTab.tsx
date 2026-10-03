@@ -1,9 +1,10 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Plus, Pencil, Loader2, X, Trash2, CalendarClock, Copy } from 'lucide-react';
+import { Plus, Pencil, Loader2, X, Trash2, CalendarClock, CalendarPlus, Copy, Send } from 'lucide-react';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
 import { agendaApi } from '@/lib/api';
+import { useAgendaSettings } from '@/hooks/useAgendaSettings';
 import { Doctor, Shift, WEEKDAYS, WEEK_ORDER, hhmm, quarterOptions } from '@/lib/agenda';
 import ModalPortal from '@/components/ui/ModalPortal';
 import { Clinic, clinicName } from './useClinics';
@@ -14,6 +15,7 @@ export default function DoctorsTab({ clinics }: { clinics: Clinic[] }) {
   const [doctors, setDoctors] = useState<Doctor[] | null>(null);
   const [editing, setEditing] = useState<Doctor | 'new' | null>(null);
   const [shiftsFor, setShiftsFor] = useState<Doctor | null>(null);
+  const [calendarFor, setCalendarFor] = useState<Doctor | null>(null);
 
   async function load() {
     try {
@@ -60,6 +62,11 @@ export default function DoctorsTab({ clinics }: { clinics: Clinic[] }) {
               <button onClick={() => setShiftsFor(d)} className="btn-secondary !px-3 !py-1.5 text-xs">
                 <CalendarClock className="w-3.5 h-3.5" /> Turnos
               </button>
+              {d.isActive && (
+                <button onClick={() => setCalendarFor(d)} className="btn-ghost w-8 h-8 p-0" title="Calendario del doctor">
+                  <CalendarPlus className="w-3.5 h-3.5" />
+                </button>
+              )}
               <button onClick={() => setEditing(d)} className="btn-ghost w-8 h-8 p-0" title="Editar">
                 <Pencil className="w-3.5 h-3.5" />
               </button>
@@ -96,7 +103,128 @@ export default function DoctorsTab({ clinics }: { clinics: Clinic[] }) {
           onSaved={() => { setShiftsFor(null); load(); }}
         />
       )}
+      {calendarFor && <CalendarLinkModal doctor={calendarFor} onClose={() => setCalendarFor(null)} />}
     </div>
+  );
+}
+
+/**
+ * El enlace para que el doctor vea sus citas en su propio calendario (Google, iPhone,
+ * Outlook). Lleva a /calendario/<clave>, donde el doctor toca el boton de su calendario
+ * y acepta: se suscribe una vez y se actualiza solo. Se le manda por la linea de la
+ * clinica, con la plantilla elegida en Avisos; sin plantilla, queda copiar el enlace.
+ */
+function CalendarLinkModal({ doctor, onClose }: { doctor: Doctor; onClose: () => void }) {
+  const settings = useAgendaSettings();
+  const [url, setUrl] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [sending, setSending] = useState(false);
+
+  async function send() {
+    setSending(true);
+    try {
+      await agendaApi.sendCalendarLink(doctor.id);
+      toast.success(`Enviado al WhatsApp de ${doctor.name}`);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'No se pudo enviar');
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function fetchLink(reset: boolean) {
+    setBusy(true);
+    try {
+      const { token } = await agendaApi.calendarLink(doctor.id, reset);
+      setUrl(`${window.location.origin}/calendario/${token}`);
+      if (reset) toast.success('Enlace nuevo generado. El anterior ya no funciona.');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'No se pudo obtener el enlace');
+      if (!reset) onClose();
+    } finally {
+      setBusy(false);
+    }
+  }
+  useEffect(() => { fetchLink(false); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function copy() {
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success('Enlace copiado');
+    } catch {
+      toast.error('No se pudo copiar. Selecciónelo y cópielo a mano.');
+    }
+  }
+
+  function reset() {
+    if (!confirm('¿Generar un enlace nuevo? El anterior deja de funcionar y el doctor tiene que suscribirse otra vez.')) return;
+    fetchLink(true);
+  }
+
+  const cannotSend = !doctor.phone
+    ? 'Este doctor no tiene WhatsApp cargado. Copie el enlace y páselo por donde prefiera.'
+    : settings && !settings.doctorCalendarTemplateId
+      ? 'Para enviarlo por WhatsApp, elija la plantilla “Calendario del doctor” en la pestaña Avisos. Mientras tanto puede copiar el enlace.'
+      : null;
+
+  return (
+    <ModalPortal>
+      <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 sm:p-6">
+        <div className="card w-full max-w-md p-6 my-4 space-y-3">
+          <div className="flex items-start justify-between">
+            <div>
+              <h2 className="text-base font-bold text-ink">Calendario de {doctor.code} · {doctor.name}</h2>
+              <p className="text-xs text-ink-muted mt-0.5">
+                Envíele este enlace al doctor: lo abre, elige su calendario (iPhone, Google u Outlook) y acepta. Lo hace una sola vez; las citas nuevas, movidas o canceladas se actualizan solas.
+              </p>
+            </div>
+            <button onClick={onClose} className="btn-ghost w-8 h-8 p-0 shrink-0"><X className="w-4 h-4" /></button>
+          </div>
+
+          {!url ? (
+            <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-ink-subtle" /></div>
+          ) : (
+            <>
+              {cannotSend ? (
+                <p className="text-xs text-ink-muted rounded-lg bg-surface-muted p-3">{cannotSend}</p>
+              ) : (
+                <button onClick={send} disabled={sending || busy} className="btn-primary w-full">
+                  {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Enviar al doctor por WhatsApp
+                </button>
+              )}
+              <div className="flex gap-2">
+                <input readOnly value={url} onFocus={(e) => e.target.select()} className="input font-mono text-xs" />
+                <button onClick={copy} className="btn-secondary shrink-0"><Copy className="w-3.5 h-3.5" /> Copiar</button>
+              </div>
+              <p className="text-[11px] text-ink-subtle">
+                Quien tenga el enlace ve el nombre de los pacientes y el motivo de cada cita. Páselo solo al doctor.
+              </p>
+
+              <details className="rounded-lg bg-surface-muted p-3 text-xs text-ink">
+                <summary className="cursor-pointer font-medium">¿Cómo funciona?</summary>
+                <div className="mt-2 space-y-2 text-ink-muted">
+                  <p>El mensaje le llega al doctor desde el WhatsApp de la clínica, con un botón que abre el enlace.</p>
+                  <p>
+                    Google Calendar a veces no deja agregarlo desde el teléfono: en ese caso el doctor abre el mismo enlace desde una computadora y después lo ve también en el teléfono.
+                  </p>
+                  <p>
+                    Google puede tardar varias horas en mostrar un cambio. Para las citas del mismo día, el doctor sigue teniendo el enlace que le llega cada mañana por WhatsApp.
+                  </p>
+                </div>
+              </details>
+
+              <div className="flex justify-between items-center pt-2">
+                <button onClick={reset} disabled={busy} className="btn-ghost text-xs">
+                  {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Generar enlace nuevo
+                </button>
+                <button onClick={onClose} className="btn-secondary">Cerrar</button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </ModalPortal>
   );
 }
 

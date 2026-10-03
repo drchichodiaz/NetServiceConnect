@@ -7,6 +7,7 @@ const TEMPLATE_FIELDS = [
   'reminderTemplateId',
   'doctorSummaryTemplateId',
   'delayTemplateId',
+  'doctorCalendarTemplateId',
 ] as const;
 
 /** Lo que vale mientras la empresa no tiene fila: los mismos defaults que la tabla. */
@@ -24,6 +25,7 @@ const DEFAULTS = {
   reminderTemplateId: null,
   doctorSummaryTemplateId: null,
   delayTemplateId: null,
+  doctorCalendarTemplateId: null,
 };
 
 /**
@@ -57,6 +59,7 @@ export class AgendaSettingsService {
       reminderTemplateId: base.reminderTemplateId,
       doctorSummaryTemplateId: base.doctorSummaryTemplateId,
       delayTemplateId: base.delayTemplateId,
+      doctorCalendarTemplateId: base.doctorCalendarTemplateId,
       timezone: tenant.timezone,
     };
   }
