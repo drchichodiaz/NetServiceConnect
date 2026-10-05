@@ -53,7 +53,7 @@ export default function AgendaSettingsPage() {
         )}
       </div>
 
-      <div className="flex gap-1 border-b border-border mb-5 overflow-x-auto">
+      <div className="flex gap-1 border-b border-border mb-5 pb-px overflow-x-auto overflow-y-hidden">
         {/* Google Calendar solo donde el entorno tiene la credencial cargada. */}
         {TABS.filter((t) => t.id !== 'google' || settings.googleCalendar).map((t) => (
           <button
