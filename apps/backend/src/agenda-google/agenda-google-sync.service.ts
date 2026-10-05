@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { createHash } from 'crypto';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { clinicName } from '../agenda/agenda-text';
 import { GoogleCalendarClient, googleMessage, googleStatus } from './google-calendar.client';
@@ -13,6 +14,40 @@ const RETRY_MS = 5 * 60_000;
 const CLAIM_STALE_MS = 2 * 60_000;
 /** Los colores de evento de Google van del "1" al "11". */
 const GOOGLE_COLORS = 11;
+/** Cuantos calendarios se borran a la vez al borrar los de una empresa. */
+const PURGE_PARALLEL = 8;
+
+/**
+ * Que citas tienen algo por escribir en Google. Una de dos cosas:
+ *  - ya esta escrita en algun calendario y cambio desde entonces (la que sea: movida,
+ *    cancelada, pasada a otro doctor);
+ *  - esta vigente y le falta estar en un calendario que hoy le toca: cita nueva, o
+ *    calendario recien creado para su doctor o su clinica. Al crear un calendario no
+ *    se vuelca el historial, y una cancelada que nunca estuvo no se manda.
+ * Lo usan el worker y el indicador de la pantalla, para que digan lo mismo.
+ */
+const PENDING = Prisma.sql`
+  FROM "Appointment" a
+  JOIN "Doctor" d ON d.id = a."doctorId"
+  LEFT JOIN "ClinicGoogleCalendar" c ON c."channelAccountId" = a."channelAccountId"
+  WHERE (
+    (
+      (a."googleCalendarId" IS NOT NULL OR a."googleClinicCalendarId" IS NOT NULL)
+      AND (a."googleSyncedAt" IS NULL OR a."googleSyncedAt" < a."updatedAt")
+    )
+    OR (
+      a.status::text <> 'CANCELLED'
+      AND a."endsAt" > now() - interval '1 day'
+      AND (
+        (d."googleCalendarId" IS NOT NULL AND d."googleCalendarId" NOT LIKE 'creating:%'
+          AND a."googleCalendarId" IS DISTINCT FROM d."googleCalendarId")
+        OR (c."calendarId" IS NOT NULL AND c."calendarId" NOT LIKE 'creating:%'
+          AND a."googleClinicCalendarId" IS DISTINCT FROM c."calendarId")
+      )
+    )
+  )`;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const isReady = (calendarId: string | null): calendarId is string => !!calendarId && !calendarId.startsWith('creating:');
 
@@ -34,7 +69,9 @@ function eventIdFor(appointmentId: string) {
  * ni fallar si Google falla.
  *
  *  1. Calendarios: crea y comparte el de cada doctor con Gmail y el de cada clinica con
- *     correos cargados; los borra cuando se les quitan.
+ *     correos cargados. Si se les quitan, el calendario se deja de compartir pero NO se
+ *     borra y se sigue escribiendo: asi al volver a cargar un correo conserva el
+ *     historial, y nadie lo pierde por vaciar un campo sin querer.
  *  2. Citas: escribe en esos calendarios toda cita creada, movida o cancelada.
  *
  * Como sabe que una cita cambio: guarda en `googleSyncedAt` el `updatedAt` que tenia al
@@ -49,6 +86,10 @@ export class AgendaGoogleSyncService implements OnModuleInit, OnModuleDestroy {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
   private readonly retryAfter = new Map<string, number>();
+  /** Cuando termino la ultima vuelta, y el ultimo fallo de esa vuelta (null = salio limpia). */
+  private lastTickAt: Date | null = null;
+  private lastFailure: string | null = null;
+  private tickFailure: string | null = null;
 
   constructor(
     private prisma: PrismaService,
@@ -70,15 +111,104 @@ export class AgendaGoogleSyncService implements OnModuleInit, OnModuleDestroy {
   async tick() {
     if (this.running || !this.google.enabled) return;
     this.running = true;
+    this.tickFailure = null;
     try {
       await this.doctorCalendars();
       await this.clinicCalendars();
       await this.appointments();
     } catch (err) {
+      this.tickFailure = googleMessage(err);
       this.logger.error('Fallo la vuelta de Google Calendar', err as any);
+    } finally {
+      this.lastTickAt = new Date();
+      this.lastFailure = this.tickFailure;
+      this.running = false;
+    }
+  }
+
+  /**
+   * Para el indicador de la pantalla: cuando fue la ultima vuelta, si fallo algo, y
+   * cuantas citas de la empresa siguen esperando a escribirse (y desde cuando la mas
+   * vieja). Una cita pendiente hace segundos es normal; hace minutos, no.
+   *
+   * La hora de la ultima vuelta es de ESTE proceso: con varios backends, cada uno
+   * informa la suya. Las pendientes salen de la base y valen para todos.
+   */
+  async status(tenantId: string) {
+    const [row] = await this.prisma.$queryRaw<{ pending: bigint; oldest: Date | null }[]>`
+      SELECT count(*) AS pending, min(a."updatedAt") AS oldest ${PENDING} AND a."tenantId" = ${tenantId}`;
+    return {
+      enabled: this.google.enabled,
+      lastTickAt: this.lastTickAt,
+      lastFailure: this.lastFailure,
+      pending: Number(row?.pending ?? 0),
+      // Sale de una columna timestamp sin zona: el driver la entrega ya como instante UTC.
+      oldestPendingAt: row?.oldest ?? null,
+    };
+  }
+
+  /**
+   * Borra de Google todos los calendarios de una empresa (los de sus doctores y los de
+   * sus clinicas) y le saca los Gmail, para que no se vuelvan a crear. Es para la
+   * empresa que deja el servicio: sus calendarios tienen nombres de pacientes y, si no,
+   * quedarian en la cuenta de Google de Connect para siempre.
+   *
+   * Un calendario que Google no deja borrar se conserva tal cual en la base, con su
+   * Gmail, para poder reintentar: lo que se informa como borrado, se borro de verdad.
+   */
+  async purgeTenant(tenantId: string) {
+    // Espera a que termine la vuelta en curso y ocupa su lugar: asi el worker no escribe
+    // ni recrea nada mientras se borra.
+    while (this.running) await sleep(200);
+    this.running = true;
+    let deleted = 0;
+    const failed: string[] = [];
+    try {
+      const doctors = await this.prisma.doctor.findMany({
+        where: { tenantId, OR: [{ googleEmail: { not: null } }, { googleCalendarId: { not: null } }] },
+        select: { id: true, code: true, googleCalendarId: true },
+      });
+      const clinics = await this.prisma.clinicGoogleCalendar.findMany({ where: { tenantId }, include: { channelAccount: true } });
+
+      const jobs: (() => Promise<void>)[] = [
+        ...doctors.map((doctor) => async () => {
+          try {
+            if (isReady(doctor.googleCalendarId)) {
+              await this.google.deleteCalendar(doctor.googleCalendarId);
+              await this.forgetCalendar(doctor.googleCalendarId);
+              deleted++;
+            }
+            await this.prisma.doctor.update({
+              where: { id: doctor.id },
+              data: { googleEmail: null, googleCalendarId: null, googleSharedEmail: null, googleError: null, googleLinkSentAt: null },
+            });
+          } catch (err) {
+            failed.push(`${doctor.code}: ${googleMessage(err)}`);
+          }
+        }),
+        ...clinics.map((clinic) => async () => {
+          try {
+            if (isReady(clinic.calendarId)) {
+              await this.google.deleteCalendar(clinic.calendarId);
+              await this.forgetCalendar(clinic.calendarId);
+              deleted++;
+            }
+            await this.prisma.clinicGoogleCalendar.delete({ where: { id: clinic.id } });
+          } catch (err) {
+            failed.push(`${clinicName(clinic.channelAccount)}: ${googleMessage(err)}`);
+          }
+        }),
+      ];
+      // De a varios: confirmar cada borrado lleva unos segundos, y una empresa con muchos
+      // doctores tardaria minutos de a uno, mas de lo que espera la pantalla.
+      for (let k = 0; k < jobs.length; k += PURGE_PARALLEL) {
+        await Promise.all(jobs.slice(k, k + PURGE_PARALLEL).map((job) => job()));
+      }
     } finally {
       this.running = false;
     }
+    this.logger.log(`Calendarios de Google de la empresa ${tenantId}: ${deleted} borrados, ${failed.length} con error`);
+    return { deleted, failed };
   }
 
   private shouldWait(key: string) {
@@ -106,12 +236,13 @@ export class AgendaGoogleSyncService implements OnModuleInit, OnModuleDestroy {
       const upToDate = isReady(doctor.googleCalendarId) && doctor.googleSharedEmail === doctor.googleEmail;
       if (upToDate || this.shouldWait(`doctor:${doctor.id}`)) continue;
       try {
-        if (!doctor.googleEmail) await this.removeDoctorCalendar(doctor.id, doctor.googleCalendarId);
+        if (!doctor.googleEmail) await this.unshareDoctor(doctor.id, doctor.googleCalendarId, doctor.googleSharedEmail);
         else if (isReady(doctor.googleCalendarId)) await this.reshareDoctor(doctor.id, doctor.googleCalendarId, doctor.googleSharedEmail, doctor.googleEmail);
         else await this.createDoctorCalendar(doctor);
       } catch (err) {
         this.retryAfter.set(`doctor:${doctor.id}`, Date.now() + RETRY_MS);
         const message = googleMessage(err);
+        this.tickFailure = message;
         this.logger.warn(`Calendario de ${doctor.code} (${doctor.id}): ${message}`);
         await this.prisma.doctor.update({ where: { id: doctor.id }, data: { googleError: message.slice(0, 300) } });
       }
@@ -161,15 +292,18 @@ export class AgendaGoogleSyncService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  /** Le sacaron el Gmail: el calendario se borra, y con el sus eventos. */
-  private async removeDoctorCalendar(doctorId: string, calendarId: string | null) {
-    if (isReady(calendarId)) {
-      await this.google.deleteCalendar(calendarId);
-      await this.forgetCalendar(calendarId);
-    }
+  /** Le sacaron el Gmail: el calendario queda (ver el comentario de la clase), sin compartir. */
+  private async unshareDoctor(doctorId: string, calendarId: string | null, shared: string | null) {
+    if (isReady(calendarId) && shared) await this.google.unshare(calendarId, shared);
     await this.prisma.doctor.update({
       where: { id: doctorId },
-      data: { googleCalendarId: null, googleSharedEmail: null, googleError: null, googleLinkSentAt: null },
+      data: {
+        // Un "creating:" sin Gmail quedo de un alta que no termino: no hay calendario.
+        googleCalendarId: isReady(calendarId) ? calendarId : null,
+        googleSharedEmail: null,
+        googleError: null,
+        googleLinkSentAt: null,
+      },
     });
   }
 
@@ -183,20 +317,16 @@ export class AgendaGoogleSyncService implements OnModuleInit, OnModuleDestroy {
     for (const row of rows) {
       const wanted = [...new Set(row.emails)].sort();
       const shared = [...row.sharedEmails].sort();
-      const upToDate = wanted.length > 0 && isReady(row.calendarId) && wanted.join() === shared.join();
+      // Sin correos y sin nadie con acceso no hay nada que hacer, exista o no el calendario.
+      const upToDate = wanted.length === 0 ? shared.length === 0 : isReady(row.calendarId) && wanted.join() === shared.join();
       if (upToDate || this.shouldWait(`clinic:${row.id}`)) continue;
       try {
-        if (wanted.length === 0) {
-          // Sin correos no hay con quien compartirlo: se borra el calendario y la fila.
-          if (isReady(row.calendarId)) {
-            await this.google.deleteCalendar(row.calendarId);
-            await this.forgetCalendar(row.calendarId);
-          }
-          await this.prisma.clinicGoogleCalendar.delete({ where: { id: row.id } });
+        let calendarId = row.calendarId;
+        if (wanted.length === 0 && !isReady(calendarId)) {
+          // Figuraba compartido pero no hay calendario: solo queda corregir la fila.
+          await this.prisma.clinicGoogleCalendar.update({ where: { id: row.id }, data: { calendarId: null, sharedEmails: [], error: null } });
           continue;
         }
-
-        let calendarId = row.calendarId;
         if (!isReady(calendarId)) {
           if (this.claimedByOther(calendarId)) continue;
           const claim = `creating:${Date.now()}`;
@@ -231,6 +361,7 @@ export class AgendaGoogleSyncService implements OnModuleInit, OnModuleDestroy {
       } catch (err) {
         this.retryAfter.set(`clinic:${row.id}`, Date.now() + RETRY_MS);
         const message = googleMessage(err);
+        this.tickFailure = message;
         this.logger.warn(`Calendario de la clinica ${row.channelAccountId}: ${message}`);
         await this.prisma.clinicGoogleCalendar.updateMany({ where: { id: row.id }, data: { error: message.slice(0, 300) } });
       }
@@ -246,33 +377,8 @@ export class AgendaGoogleSyncService implements OnModuleInit, OnModuleDestroy {
   // ─── Citas ──────────────────────────────────────────────────────────────────
 
   private async appointments() {
-    // Pendiente es una de dos cosas:
-    //  - ya esta escrita en algun calendario y cambio desde entonces (la que sea: movida,
-    //    cancelada, pasada a otro doctor);
-    //  - esta vigente y le falta estar en un calendario que hoy le toca: cita nueva, o
-    //    calendario recien creado para su doctor o su clinica. Al crear un calendario no
-    //    se vuelca el historial, y una cancelada que nunca estuvo no se manda.
     const pending = await this.prisma.$queryRaw<{ id: string }[]>`
-      SELECT a.id
-      FROM "Appointment" a
-      JOIN "Doctor" d ON d.id = a."doctorId"
-      LEFT JOIN "ClinicGoogleCalendar" c ON c."channelAccountId" = a."channelAccountId"
-      WHERE (
-          (a."googleCalendarId" IS NOT NULL OR a."googleClinicCalendarId" IS NOT NULL)
-          AND (a."googleSyncedAt" IS NULL OR a."googleSyncedAt" < a."updatedAt")
-        )
-        OR (
-          a.status::text <> 'CANCELLED'
-          AND a."endsAt" > now() - interval '1 day'
-          AND (
-            (d."googleCalendarId" IS NOT NULL AND d."googleCalendarId" NOT LIKE 'creating:%'
-              AND a."googleCalendarId" IS DISTINCT FROM d."googleCalendarId")
-            OR (c."calendarId" IS NOT NULL AND c."calendarId" NOT LIKE 'creating:%'
-              AND a."googleClinicCalendarId" IS DISTINCT FROM c."calendarId")
-          )
-        )
-      ORDER BY a."updatedAt" ASC
-      LIMIT ${BATCH}`;
+      SELECT a.id ${PENDING} ORDER BY a."updatedAt" ASC LIMIT ${BATCH}`;
     if (pending.length === 0) return;
 
     const colors = await this.doctorColors();
@@ -282,6 +388,7 @@ export class AgendaGoogleSyncService implements OnModuleInit, OnModuleDestroy {
         await this.syncAppointment(id, colors);
       } catch (err) {
         this.retryAfter.set(`appointment:${id}`, Date.now() + RETRY_MS);
+        this.tickFailure = googleMessage(err);
         this.logger.warn(`Cita ${id}: ${googleMessage(err)}`);
       }
     }

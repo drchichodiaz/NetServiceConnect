@@ -53,7 +53,7 @@ export class ClinicCalendarsService {
     if (invalid) throw new BadRequestException(`"${invalid}" no es una dirección de correo válida`);
     if (emails.length > MAX_EMAILS) throw new BadRequestException(`Se puede compartir con hasta ${MAX_EMAILS} personas`);
 
-    // Vaciar la lista no borra la fila aca: el worker tiene que borrar antes el calendario.
+    // Con la lista vacia el calendario no se borra: se deja de compartir y conserva el historial.
     await this.prisma.clinicGoogleCalendar.upsert({
       where: { channelAccountId },
       create: { tenantId, channelAccountId, emails },

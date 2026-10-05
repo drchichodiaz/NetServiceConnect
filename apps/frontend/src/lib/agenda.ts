@@ -66,6 +66,18 @@ export interface ClinicCalendar {
   error: string | null;
 }
 
+/** Como viene la escritura de citas en Google Calendar para esta empresa. */
+export interface GoogleSyncStatus {
+  enabled: boolean;
+  /** Ultima vez que Connect reviso si habia algo por escribir. Null = todavia no reviso. */
+  lastTickAt: string | null;
+  /** Lo ultimo que fallo en esa revision. Null = salio bien. */
+  lastFailure: string | null;
+  /** Citas de la empresa que esperan a escribirse, y desde cuando la mas vieja. */
+  pending: number;
+  oldestPendingAt: string | null;
+}
+
 export interface DoctorException {
   id: string;
   doctorId: string;

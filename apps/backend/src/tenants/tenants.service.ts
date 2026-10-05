@@ -6,6 +6,8 @@ import { PartnersService } from '../partners/partners.service';
 import { AiWalletService } from '../ai-usage/ai-wallet.service';
 import * as bcrypt from 'bcryptjs';
 import { isValidTimeZone } from '../agenda/agenda-time';
+import { AgendaGoogleSyncService } from '../agenda-google/agenda-google-sync.service';
+import { GoogleCalendarClient } from '../agenda-google/google-calendar.client';
 
 @Injectable()
 export class TenantsService {
@@ -15,6 +17,8 @@ export class TenantsService {
     private prisma: PrismaService,
     private partners: PartnersService,
     private aiWallet: AiWalletService,
+    private googleCalendars: AgendaGoogleSyncService,
+    private google: GoogleCalendarClient,
   ) {}
 
   // Crea la empresa junto con su primer usuario (ADMIN) en una sola transaccion —
@@ -166,6 +170,14 @@ export class TenantsService {
 
   async remove(id: string) {
     await this.findOne(id);
+    // Antes que la empresa, sus calendarios de Google: al borrarla se pierde en la base
+    // cuales eran, y quedarian en Google con los nombres de sus pacientes, sin dueño.
+    if (this.google.enabled) {
+      const { failed } = await this.googleCalendars.purgeTenant(id);
+      if (failed.length > 0) {
+        throw new BadRequestException(`No se pudieron borrar sus calendarios de Google (${failed.join('; ')}). La empresa no se borró: vuelva a intentar.`);
+      }
+    }
     return this.prisma.tenant.delete({ where: { id } });
   }
 }

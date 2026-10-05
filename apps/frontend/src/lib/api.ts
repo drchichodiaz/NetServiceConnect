@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { WhatsAppAccount, Contact, ContactTag } from '@/types';
-import type { AgendaSettings, Doctor, Shift, DoctorException, AgendaDay, FreeDoctor, Appointment, AppointmentStatus, MonthSummary, ClinicCalendar } from './agenda';
+import type { AgendaSettings, Doctor, Shift, DoctorException, AgendaDay, FreeDoctor, Appointment, AppointmentStatus, MonthSummary, ClinicCalendar, GoogleSyncStatus } from './agenda';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
@@ -379,6 +379,9 @@ export interface Partner {
 }
 
 export const tenantsApi = {
+  /** Borra de Google todos los calendarios de la empresa (doctores y clinicas). */
+  purgeGoogleCalendars: (id: string): Promise<{ deleted: number; failed: string[] }> =>
+    api.delete(`/agenda/google-calendars/tenant/${id}`).then((r) => r.data),
   list: () => api.get('/tenants').then((r) => r.data),
   get: (id: string) => api.get(`/tenants/${id}`).then((r) => r.data),
   create: (data: {
@@ -833,6 +836,7 @@ export const agendaApi = {
     settings: AgendaSettings;
   }> => api.post('/agenda/templates/defaults').then((r) => r.data),
 
+  googleSyncStatus: (): Promise<GoogleSyncStatus> => api.get('/agenda/google-calendars/status').then((r) => r.data),
   clinicCalendars: (): Promise<ClinicCalendar[]> => api.get('/agenda/google-calendars').then((r) => r.data),
   setClinicCalendar: (channelAccountId: string, emails: string[]): Promise<ClinicCalendar> =>
     api.put(`/agenda/google-calendars/${channelAccountId}`, { emails }).then((r) => r.data),

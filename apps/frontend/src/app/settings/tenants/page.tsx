@@ -373,6 +373,22 @@ function EditTenantModal({
   const [timezone, setTimezone] = useState(tenant.timezone ?? 'America/Panama');
   const [agendaEnabled, setAgendaEnabled] = useState(!!tenant.agendaSettings?.enabled);
   const [saving, setSaving] = useState(false);
+  const [purging, setPurging] = useState(false);
+
+  async function purgeGoogleCalendars() {
+    if (!confirm(`¿Borrar de Google todos los calendarios de ${tenant.name}? Sus doctores y clínicas dejan de verlos y no se puede deshacer. Las citas siguen en Connect.`)) return;
+    setPurging(true);
+    try {
+      const { deleted, failed } = await tenantsApi.purgeGoogleCalendars(tenant.id);
+      if (failed.length > 0) toast.error(`Se borraron ${deleted}, pero ${failed.length} no se pudieron: ${failed.join('; ')}`, { duration: 10000 });
+      else toast.success(deleted > 0 ? `Calendarios borrados: ${deleted}` : 'Esta empresa no tenía calendarios en Google');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'No se pudieron borrar');
+    } finally {
+      setPurging(false);
+    }
+  }
+
   const timezones = TIMEZONES.some((z) => z.value === timezone)
     ? TIMEZONES
     : [{ value: timezone, label: timezone }, ...TIMEZONES];
@@ -490,6 +506,20 @@ function EditTenantModal({
                 </span>
               </span>
             </label>
+
+            {/* Para la empresa que deja el servicio: sus calendarios tienen nombres de pacientes. */}
+            <div className="rounded-lg p-3 flex items-start justify-between gap-3" style={{ background: 'var(--surface-muted)' }}>
+              <span className="text-xs text-ink">
+                Calendarios de Google
+                <span className="block text-[11px] text-ink-subtle">
+                  Borra de Google los calendarios de sus doctores y clínicas y les quita los correos. No se puede
+                  deshacer. Al borrar la empresa se hace solo.
+                </span>
+              </span>
+              <button type="button" onClick={purgeGoogleCalendars} disabled={purging} className="btn-ghost text-xs text-red-600 shrink-0">
+                {purging && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Borrar
+              </button>
+            </div>
           </div>
 
           <div className="flex gap-2 mt-5">

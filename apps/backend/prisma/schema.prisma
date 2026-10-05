@@ -1503,7 +1503,8 @@ enum AppointmentStatus {
 
 /// El calendario de Google de una clinica: todas sus citas, de cualquier doctor, para
 /// la recepcion y la coordinacion. Se comparte en solo lectura con los Gmail de `emails`.
-/// Una fila por linea de WhatsApp; sin correos, el calendario se borra.
+/// Una fila por linea de WhatsApp. Sin correos se deja de compartir, pero el calendario
+/// queda y se sigue escribiendo, para no perder el historial.
 model ClinicGoogleCalendar {
   id               String   @id @default(cuid())
   tenantId         String

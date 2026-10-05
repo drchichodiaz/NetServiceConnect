@@ -103,8 +103,43 @@ export class GoogleCalendarClient {
     return calendar.id;
   }
 
+  /**
+   * Borra el calendario con sus eventos, y no vuelve hasta que Google lo confirma.
+   *
+   * Google borra despues de contestar, y de dos formas distintas (medido):
+   *  - si el calendario esta compartido, contesta que lo borro pero lo deja vivo varios
+   *    minutos, vacio y aceptando eventos nuevos;
+   *  - sin accesos lo elimina en pocos segundos, durante los cuales a veces todavia
+   *    contesta que existe.
+   * Por eso primero se le quitan los accesos (quien lo veia deja de verlo en el acto),
+   * despues se borra, y se espera a que conteste dos veces seguidas que ya no existe: es
+   * la unica forma de poder decir "se borro" cuando una empresa se va.
+   */
   async deleteCalendar(calendarId: string) {
-    await this.ignoreMissing(this.call('DELETE', `/calendars/${encodeURIComponent(calendarId)}`));
+    const base = `/calendars/${encodeURIComponent(calendarId)}`;
+    const isGone = (err: unknown) => googleStatus(err) === 404 || googleStatus(err) === 410;
+    try {
+      const acl = await this.call<{ items?: { id: string; role: string }[] }>('GET', `${base}/acl`);
+      for (const rule of acl.items ?? []) {
+        if (rule.role !== 'owner') await this.call('DELETE', `${base}/acl/${encodeURIComponent(rule.id)}`);
+      }
+      await this.call('DELETE', base);
+    } catch (err) {
+      if (!isGone(err)) throw err;
+    }
+
+    let gone = 0;
+    for (let attempt = 0; attempt < 10 && gone < 2; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      try {
+        await this.call('GET', base);
+        gone = 0;
+      } catch (err) {
+        if (!isGone(err)) throw err;
+        gone++;
+      }
+    }
+    if (gone < 2) throw new Error('Google todavía no eliminó el calendario');
   }
 
   /** Lo comparte para ver, y Google le manda al doctor el correo con el enlace para agregarlo. */

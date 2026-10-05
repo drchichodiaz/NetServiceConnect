@@ -1,10 +1,83 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
-import { ChevronDown, HelpCircle, Loader2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronDown, Clock, HelpCircle, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
 import { agendaApi } from '@/lib/api';
-import { ClinicCalendar } from '@/lib/agenda';
+import { ClinicCalendar, GoogleSyncStatus } from '@/lib/agenda';
+
+/** Cada cuanto se vuelve a pedir el estado: el mismo paso con que Connect escribe en Google. */
+const STATUS_MS = 15_000;
+/** Connect revisa cada 15 segundos: sin revisar hace mas que esto, algo lo detuvo. */
+const STALLED_MS = 2 * 60_000;
+/** Una cita espera segundos; si espera mas que esto, no esta saliendo. */
+const LATE_MS = 2 * 60_000;
+
+function ago(iso: string) {
+  const seconds = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (seconds < 60) return `hace ${seconds} s`;
+  if (seconds < 3600) return `hace ${Math.round(seconds / 60)} min`;
+  if (seconds < 86400) return `hace ${Math.round(seconds / 3600)} h`;
+  return `hace ${Math.round(seconds / 86400)} días`;
+}
+
+/**
+ * "Ultima sincronizacion": si las citas estan llegando a Google. Importa porque un
+ * calendario que dejo de actualizarse se ve igual que uno al dia, y el doctor confia en el.
+ */
+function SyncStatus() {
+  const [status, setStatus] = useState<GoogleSyncStatus | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const load = () => agendaApi.googleSyncStatus().then((s) => alive && setStatus(s)).catch(() => {});
+    load();
+    const timer = setInterval(load, STATUS_MS);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, []);
+
+  if (!status) return null;
+
+  const stalled = !status.lastTickAt || Date.now() - new Date(status.lastTickAt).getTime() > STALLED_MS;
+  const late = !!status.oldestPendingAt && Date.now() - new Date(status.oldestPendingAt).getTime() > LATE_MS;
+  const waiting = `${status.pending} ${status.pending === 1 ? 'cita espera' : 'citas esperan'} a escribirse en Google`;
+
+  const view = stalled
+    ? {
+        Icon: AlertTriangle,
+        className: 'text-red-600',
+        title: 'Google Calendar no se está actualizando',
+        detail: status.lastTickAt ? `La última revisión fue ${ago(status.lastTickAt)}.` : 'Todavía no se hizo ninguna revisión desde que arrancó el servidor.',
+      }
+    : late || (status.lastFailure && status.pending > 0)
+      ? {
+          Icon: AlertTriangle,
+          className: 'text-amber-600',
+          title: `${waiting}${status.oldestPendingAt ? ` (la más vieja, ${ago(status.oldestPendingAt)})` : ''}`,
+          detail: status.lastFailure ? `Google respondió: ${status.lastFailure}` : 'Se sigue reintentando.',
+        }
+      : status.pending > 0
+        ? { Icon: Clock, className: 'text-ink-muted', title: waiting, detail: 'Salen en unos segundos.' }
+        : {
+            Icon: CheckCircle2,
+            className: 'text-green-700',
+            title: 'Google Calendar al día',
+            detail: `Última revisión ${ago(status.lastTickAt!)}.${status.lastFailure ? ` Aviso de Google: ${status.lastFailure}` : ''}`,
+          };
+
+  return (
+    <div className="card p-4 flex items-start gap-3">
+      <view.Icon className={clsx('w-4 h-4 mt-0.5 shrink-0', view.className)} />
+      <div className="min-w-0">
+        <p className={clsx('text-sm font-semibold', view.className)}>{view.title}</p>
+        <p className="text-xs text-ink-muted">{view.detail}</p>
+      </div>
+    </div>
+  );
+}
 
 const sameList = (a: string[], b: string[]) => [...a].sort().join() === [...b].sort().join();
 const parse = (text: string) => text.split(/[\s,;]+/).map((e) => e.trim().toLowerCase()).filter(Boolean);
@@ -43,6 +116,8 @@ export default function GoogleCalendarTab() {
 
   return (
     <div className="space-y-3">
+      <SyncStatus />
+
       <div className="card">
         <button onClick={() => setHelp(!help)} className="w-full flex items-center justify-between p-4 text-sm font-medium text-ink">
           <span className="flex items-center gap-2"><HelpCircle className="w-4 h-4 text-ink-subtle" /> ¿Cómo funciona el calendario de la clínica?</span>
@@ -53,7 +128,7 @@ export default function GoogleCalendarTab() {
             <p>Cada clínica tiene un calendario de Google con todas sus citas. Cada cita aparece como “Dr.02 · Paciente”, con un color por doctor.</p>
             <p>Se comparte con las cuentas de Google que cargue acá. A cada una le llega un correo de Google para agregarlo; lo acepta una vez.</p>
             <p>Es solo para ver: las citas se crean, se mueven y se cancelan en Connect, y el calendario se actualiza solo en unos segundos.</p>
-            <p>Quien tenga el calendario ve el nombre de todos los pacientes de esa clínica. Si quita una cuenta de la lista, deja de verlo.</p>
+            <p>Quien tenga el calendario ve el nombre de todos los pacientes de esa clínica. Si quita una cuenta de la lista, deja de verlo. Si las quita todas, el calendario se conserva con su historial y vuelve a compartirse cuando cargue una cuenta.</p>
             <p>El calendario de cada doctor, con solo sus citas, se activa cargando su Gmail en la pestaña Doctores.</p>
           </div>
         )}
@@ -87,7 +162,7 @@ function ClinicCard({ calendar, onSaved }: { calendar: ClinicCalendar; onSaved: 
   const status = calendar.error
     ? { text: `No se pudo aplicar: ${calendar.error}`, className: 'text-red-600' }
     : calendar.emails.length === 0
-      ? { text: calendar.sharedEmails.length ? 'Quitando el calendario…' : 'Sin calendario: no se comparte con nadie.', className: 'text-ink-subtle' }
+      ? { text: calendar.sharedEmails.length ? 'Dejando de compartir…' : 'No se comparte con nadie.', className: 'text-ink-subtle' }
       : sameList(calendar.emails, calendar.sharedEmails)
         ? { text: `Compartido con ${calendar.sharedEmails.length} ${calendar.sharedEmails.length === 1 ? 'cuenta' : 'cuentas'}.`, className: 'text-green-700' }
         : { text: 'Aplicando los cambios…', className: 'text-ink-subtle' };
