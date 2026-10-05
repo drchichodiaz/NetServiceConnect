@@ -57,7 +57,7 @@ const DEFAULTS: DefaultTemplate[] = [
   {
     setting: 'doctorCalendarTemplateId',
     name: 'agenda_doctor_calendario',
-    bodyText: 'Hola, {{1}}. Ya puede ver sus citas en el calendario de su teléfono. Toque el botón de abajo, elija su calendario y acepte. Se hace una sola vez.',
+    bodyText: 'Hola, {{1}}. Ya puede ver sus citas en su Google Calendar. Toque el botón de abajo y acepte. Se hace una sola vez.',
     exampleValues: ['Dra. Pérez'],
     buttons: (base) => [{ type: 'URL', text: 'Agregar a mi calendario', url: `${base}/calendario/{{1}}`, urlExample: 'ejemplo123' }],
   },

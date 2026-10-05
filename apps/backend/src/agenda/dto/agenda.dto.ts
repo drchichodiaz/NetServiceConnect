@@ -11,6 +11,8 @@ import {
   MinLength,
   MaxLength,
   ArrayMaxSize,
+  IsEmail,
+  ValidateIf,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -103,6 +105,13 @@ export class CreateDoctorDto {
   @IsString()
   @MaxLength(30)
   phone?: string;
+
+  /** Gmail del doctor, para escribirle las citas en Google Calendar. Cadena vacia = no usa. */
+  @IsOptional()
+  @ValidateIf((o) => o.googleEmail !== '')
+  @IsEmail({}, { message: 'El Gmail del doctor no es una dirección válida' })
+  @MaxLength(120)
+  googleEmail?: string;
 }
 
 export class UpdateDoctorDto {
@@ -122,6 +131,12 @@ export class UpdateDoctorDto {
   @IsString()
   @MaxLength(30)
   phone?: string;
+
+  @IsOptional()
+  @ValidateIf((o) => o.googleEmail !== '')
+  @IsEmail({}, { message: 'El Gmail del doctor no es una dirección válida' })
+  @MaxLength(120)
+  googleEmail?: string;
 
   @IsOptional()
   @IsBoolean()

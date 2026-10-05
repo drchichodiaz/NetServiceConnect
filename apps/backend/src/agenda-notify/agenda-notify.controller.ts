@@ -1,5 +1,6 @@
 import { BadRequestException, Controller, Headers, Param, Post, UseGuards } from '@nestjs/common';
 import { AgendaTemplatesService } from './agenda-templates.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -52,17 +53,19 @@ export class AgendaTemplatesController {
 @Controller('agenda/doctors')
 export class AgendaDoctorNotifyController {
   constructor(
+    private prisma: PrismaService,
     private doctors: DoctorsService,
     private notifier: AgendaNotifierService,
   ) {}
 
-  /** Le manda al doctor, por la linea de la clinica, el enlace para agregar sus citas a su calendario. */
+  /** Le manda de nuevo al doctor, por la linea de la clinica, el enlace para agregar su calendario de Google. */
   @Post(':id/calendar-link/send')
   async sendCalendarLink(@CurrentUser() user: any, @Param('id') id: string) {
     // Valida que la agenda este activa y que el doctor sea de esta empresa.
     const { token } = await this.doctors.calendarToken(user.tenantId, id);
     const messageId = await this.notifier.sendDoctorCalendarLink(id, token);
     if (!messageId) throw new BadRequestException('No hay plantilla elegida para el enlace del calendario (Doctores y turnos › Avisos)');
+    await this.prisma.doctor.update({ where: { id }, data: { googleLinkSentAt: new Date(), googleError: null } });
     return { ok: true };
   }
 }

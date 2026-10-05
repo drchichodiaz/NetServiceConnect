@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AgendaNotifierService, NoticeKind } from './agenda-notifier.service';
+import { DoctorsService } from '../agenda/doctors.service';
 import { addDays, dateColumn, fromLocal, MINUTES_PER_DAY, toLocal } from '../agenda/agenda-time';
 
 const TICK_MS = 60_000;
@@ -35,6 +36,7 @@ export class AgendaNotifyWorkerService implements OnModuleInit, OnModuleDestroy 
   constructor(
     private prisma: PrismaService,
     private notifier: AgendaNotifierService,
+    private doctors: DoctorsService,
   ) {}
 
   onModuleInit() {
@@ -60,6 +62,7 @@ export class AgendaNotifyWorkerService implements OnModuleInit, OnModuleDestroy 
         if (s.confirmationTemplateId) await this.confirmations(s.tenantId);
         if (s.reminderTemplateId) await this.reminders(s.tenantId, s.reminderHoursBefore, s.reminderTemplateId, s.tenant.timezone);
         if (s.doctorSummaryTemplateId) await this.doctorSummaries(s.tenantId, s.doctorSummaryHour, s.tenant.timezone);
+        if (s.doctorCalendarTemplateId) await this.calendarLinks(s.tenantId, s.doctorCalendarTemplateId);
       }
     } catch (err) {
       this.logger.error('Fallo la vuelta de avisos de la agenda', err as any);
@@ -161,6 +164,47 @@ export class AgendaNotifyWorkerService implements OnModuleInit, OnModuleDestroy 
         const reason = err?.response?.message || err?.message || 'Error desconocido';
         this.logger.warn(`[agenda] no salio el resumen del doctor ${d.id}: ${reason}`);
         await this.prisma.doctorDailySummary.update({ where: { id: summaryId }, data: { error: String(reason).slice(0, 300) } });
+      }
+    }
+  }
+
+  /**
+   * El enlace para agregar su calendario de Google, a cada doctor al que se le acaba de
+   * compartir (AgendaGoogleSyncService deja googleLinkSentAt en null). Una sola vez: se
+   * marca antes de mandar, como los demas avisos.
+   *
+   * Mientras Meta no apruebe la plantilla no se toma a nadie: asi el enlace sale solo el
+   * dia que la aprueban, en vez de perderse por haberlo intentado antes de tiempo.
+   */
+  private async calendarLinks(tenantId: string, templateId: string) {
+    const due = await this.prisma.doctor.findMany({
+      where: { tenantId, isActive: true, phone: { not: null }, googleSharedEmail: { not: null }, googleLinkSentAt: null },
+      take: BATCH,
+      select: { id: true, googleCalendarId: true },
+    });
+    if (due.length === 0) return;
+
+    const chosen = await this.prisma.messageTemplate.findFirst({ where: { id: templateId, tenantId }, select: { name: true, language: true } });
+    if (!chosen) return;
+    const approved = await this.prisma.messageTemplate.count({
+      where: { tenantId, name: chosen.name, language: chosen.language, status: 'APPROVED' },
+    });
+    if (approved === 0) return;
+
+    for (const d of due) {
+      if (!d.googleCalendarId || d.googleCalendarId.startsWith('creating:')) continue;
+      const taken = await this.prisma.doctor.updateMany({ where: { id: d.id, googleLinkSentAt: null }, data: { googleLinkSentAt: new Date() } });
+      if (taken.count === 0) continue;
+      try {
+        const { token } = await this.doctors.calendarToken(tenantId, d.id);
+        await this.notifier.sendDoctorCalendarLink(d.id, token);
+      } catch (err: any) {
+        const reason = err?.response?.message || err?.message || 'Error desconocido';
+        this.logger.warn(`[agenda] no salio el enlace del calendario del doctor ${d.id}: ${reason}`);
+        await this.prisma.doctor.update({
+          where: { id: d.id },
+          data: { googleError: `No se le pudo enviar el enlace por WhatsApp: ${String(reason).slice(0, 220)}` },
+        });
       }
     }
   }

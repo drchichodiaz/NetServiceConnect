@@ -2,19 +2,21 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { CalendarPlus, CalendarX, ChevronRight, Loader2 } from 'lucide-react';
-import toast from 'react-hot-toast';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
 interface CalendarInfo {
   doctor: { code: string; name: string };
   company: string;
+  /** Null los dos mientras el calendario no este creado y compartido. */
+  googleEmail: string | null;
+  googleCalendarId: string | null;
 }
 
 /**
- * Donde el doctor agrega sus citas a su propio calendario, desde el enlace que le pasa
- * la clinica. Sin usuario ni menu: un boton por calendario, y cada uno abre ese
- * calendario con la suscripcion ya cargada, para que solo tenga que aceptar.
+ * Donde el doctor agrega su calendario de Google, desde el boton del WhatsApp que le
+ * manda la clinica. Sin usuario ni menu, y sin citas: solo lleva a Google Calendar, que
+ * es quien las muestra y quien exige la cuenta con la que se compartio.
  */
 export default function CalendarioPage() {
   const { token } = useParams<{ token: string }>();
@@ -52,40 +54,6 @@ export default function CalendarioPage() {
     return <Shell><div className="flex justify-center py-24"><Loader2 className="w-6 h-6 animate-spin text-ink-subtle" /></div></Shell>;
   }
 
-  // NEXT_PUBLIC_API_URL puede ser relativa ("/api"): se resuelve contra esta pagina.
-  const feed = new URL(`${API.replace(/\/$/, '')}/public/agenda/calendar/${token}.ics`, window.location.origin).toString();
-  // webcal:// es lo que los calendarios entienden como "suscribirse", no "descargar".
-  const webcal = feed.replace(/^https?:/, 'webcal:');
-  const name = `${info.company} · ${info.doctor.name}`;
-
-  const options = [
-    { label: 'iPhone, iPad o Mac', hint: 'Calendario de Apple', href: webcal },
-    {
-      label: 'Google Calendar',
-      hint: 'Si no se abre desde el teléfono, pruebe desde una computadora',
-      href: `https://calendar.google.com/calendar/r?cid=${encodeURIComponent(webcal)}`,
-    },
-    {
-      label: 'Outlook',
-      hint: 'Cuenta personal (Outlook.com, Hotmail)',
-      href: `https://outlook.live.com/calendar/0/addfromweb?url=${encodeURIComponent(feed)}&name=${encodeURIComponent(name)}`,
-    },
-    {
-      label: 'Outlook del trabajo',
-      hint: 'Cuenta de Microsoft 365',
-      href: `https://outlook.office.com/calendar/0/addfromweb?url=${encodeURIComponent(feed)}&name=${encodeURIComponent(name)}`,
-    },
-  ];
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(feed);
-      toast.success('Enlace copiado');
-    } catch {
-      toast.error('No se pudo copiar');
-    }
-  }
-
   return (
     <Shell>
       <header className="px-5 pt-6 pb-4 bg-white border-b border-border">
@@ -94,37 +62,35 @@ export default function CalendarioPage() {
           <span className="font-mono">{info.doctor.code}</span> · {info.doctor.name}
         </h1>
         <p className="text-sm text-ink-muted mt-2">
-          Agregue sus citas a su calendario. Se hace una sola vez: las citas nuevas, movidas o canceladas se actualizan solas.
+          Agregue sus citas a su Google Calendar. Se hace una sola vez: las citas nuevas, movidas o canceladas aparecen solas.
         </p>
       </header>
 
-      <div className="px-4 py-4 space-y-2">
-        <p className="text-xs text-ink-subtle px-1">¿Qué calendario usa?</p>
-        {options.map((o) => (
-          <a
-            key={o.label}
-            href={o.href}
-            target={o.href.startsWith('webcal:') ? undefined : '_blank'}
-            rel="noopener noreferrer"
-            className="flex items-center gap-3 rounded-2xl border border-border bg-white px-4 py-3"
-          >
-            <CalendarPlus className="w-5 h-5 text-green-600 shrink-0" />
-            <span className="flex-1 min-w-0">
-              <span className="block text-base text-ink">{o.label}</span>
-              <span className="block text-xs text-ink-muted">{o.hint}</span>
-            </span>
-            <ChevronRight className="w-4 h-4 text-ink-subtle shrink-0" />
-          </a>
-        ))}
-
-        <p className="text-xs text-ink-muted px-1 pt-3">
-          ¿Usa otro calendario?{' '}
-          <button onClick={copy} className="text-green-600 underline">Copie el enlace</button>{' '}
-          y péguelo donde su calendario pide “suscribirse desde una dirección”.
-        </p>
-        <p className="text-xs text-ink-subtle px-1 pt-1">
-          Este enlace es personal: quien lo tenga ve sus citas. No lo reenvíe.
-        </p>
+      <div className="px-4 py-4 space-y-3">
+        {info.googleCalendarId ? (
+          <>
+            <a
+              href={`https://calendar.google.com/calendar/r?cid=${encodeURIComponent(info.googleCalendarId)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-3 rounded-2xl border border-green-400 bg-white px-4 py-4 shadow-card-md"
+            >
+              <CalendarPlus className="w-5 h-5 text-green-600 shrink-0" />
+              <span className="flex-1 min-w-0 text-base font-semibold text-ink">Agregar a Google Calendar</span>
+              <ChevronRight className="w-4 h-4 text-ink-subtle shrink-0" />
+            </a>
+            <p className="text-xs text-ink-muted px-1">
+              El calendario está compartido con <b className="text-ink font-medium">{info.googleEmail}</b>. Tiene que abrirlo con esa cuenta de Google; si le pide elegir una, elija esa.
+            </p>
+            <p className="text-xs text-ink-subtle px-1">
+              Si esa no es su cuenta, avísele a la clínica para que la corrija.
+            </p>
+          </>
+        ) : (
+          <p className="text-sm text-ink-muted px-1 py-8 text-center">
+            Su calendario todavía no está listo. Vuelva a abrir este enlace en unos minutos.
+          </p>
+        )}
       </div>
     </Shell>
   );

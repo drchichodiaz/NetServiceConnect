@@ -29,6 +29,8 @@ export interface AgendaSettings {
   delayTemplateId: string | null;
   doctorCalendarTemplateId: string | null;
   timezone: string;
+  /** Este entorno puede escribir las citas en el Google Calendar de cada doctor. */
+  googleCalendar: boolean;
 }
 
 export interface Shift {
@@ -44,8 +46,24 @@ export interface Doctor {
   code: string;
   name: string;
   phone: string | null;
+  /** Gmail donde ve sus citas en Google Calendar; `googleSharedEmail` es con cual ya quedo compartido. */
+  googleEmail: string | null;
+  googleSharedEmail: string | null;
+  googleError: string | null;
+  /** Cuando se le mando por WhatsApp el enlace para agregar su calendario. */
+  googleLinkSentAt: string | null;
   isActive: boolean;
   shifts: Shift[];
+}
+
+/** El calendario de Google de una clinica y con quien se comparte. */
+export interface ClinicCalendar {
+  channelAccountId: string;
+  clinic: string;
+  emails: string[];
+  /** Con quienes ya quedo compartido: lo que difiere de `emails` se esta aplicando. */
+  sharedEmails: string[];
+  error: string | null;
 }
 
 export interface DoctorException {

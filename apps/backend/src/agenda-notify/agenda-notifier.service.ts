@@ -152,9 +152,10 @@ export class AgendaNotifierService {
   }
 
   /**
-   * El enlace para que el doctor agregue sus citas a su calendario: el boton abre
+   * El enlace para que el doctor agregue su calendario de Google: el boton abre
    * /calendario/<clave>. Variables: {{1}} doctor, y el {{1}} del boton de enlace = la
-   * clave del calendario. No sale solo: lo dispara la clinica desde la ficha del doctor.
+   * clave. Sale solo cuando el calendario queda compartido (worker de avisos) y a pedido
+   * desde la ficha del doctor.
    *
    * Sale por la linea de la clinica donde el doctor tiene su primer turno de la semana;
    * si no tiene turnos o esa linea esta caida, por la linea principal de la empresa.
@@ -171,6 +172,7 @@ export class AgendaNotifierService {
     const templateId = doctor.tenant.agendaSettings?.doctorCalendarTemplateId;
     if (!templateId) return null;
     if (!doctor.phone) throw new BadRequestException('El doctor no tiene WhatsApp cargado');
+    if (!doctor.googleSharedEmail) throw new BadRequestException('El calendario de Google de este doctor todavía no está listo');
 
     const shiftLine = doctor.shifts[0]?.channelAccountId;
     const account =

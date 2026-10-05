@@ -55,20 +55,20 @@ export class DoctorsService {
     const code = dto.code.trim();
     await this.assertCodeFree(tenantId, code);
     const doctor = await this.prisma.doctor.create({
-      data: { tenantId, code, name: dto.name.trim(), phone: this.cleanPhone(dto.phone) },
+      data: { tenantId, code, name: dto.name.trim(), phone: this.cleanPhone(dto.phone), googleEmail: this.cleanEmail(dto.googleEmail) },
     });
     return withoutCalendarToken(doctor);
   }
 
   /**
-   * La clave del calendario del doctor (ver PublicAgendaController.calendar). Se genera
-   * la primera vez que la clinica pide el enlace. Con `reset` se cambia por una nueva:
-   * el enlace anterior deja de funcionar y el doctor tiene que suscribirse de nuevo.
+   * La clave de la pagina /calendario/<clave>, donde el doctor agrega su calendario de
+   * Google. Se genera la primera vez que hace falta. La pagina no muestra citas: solo
+   * lleva a Google, que es quien exige la cuenta con la que se compartio.
    */
-  async calendarToken(tenantId: string, id: string, reset = false) {
+  async calendarToken(tenantId: string, id: string) {
     await this.settings.requireEnabled(tenantId);
     const doctor = await this.findOrThrow(tenantId, id);
-    if (doctor.calendarToken && !reset) return { token: doctor.calendarToken };
+    if (doctor.calendarToken) return { token: doctor.calendarToken };
     const token = randomBytes(24).toString('base64url');
     await this.prisma.doctor.update({ where: { id }, data: { calendarToken: token } });
     return { token };
@@ -85,6 +85,8 @@ export class DoctorsService {
     }
     if (dto.name !== undefined) data.name = dto.name.trim();
     if (dto.phone !== undefined) data.phone = this.cleanPhone(dto.phone);
+    // Solo se guarda: el calendario de Google lo crea y lo comparte AgendaGoogleSyncService.
+    if (dto.googleEmail !== undefined) data.googleEmail = this.cleanEmail(dto.googleEmail);
     // Desactivar no toca sus citas: las que ya tiene se siguen viendo en la agenda y la
     // clinica decide que hacer con ellas. Lo que deja de pasar es que le asignen nuevas.
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
@@ -255,6 +257,10 @@ export class DoctorsService {
     if (s.startMinute >= s.endMinute) throw new BadRequestException('La hora de fin tiene que ser posterior a la de inicio');
     assertGrid(s.startMinute, 'La hora de inicio');
     assertGrid(s.endMinute, 'La hora de fin');
+  }
+
+  private cleanEmail(raw?: string): string | null {
+    return raw?.trim().toLowerCase() || null;
   }
 
   private cleanPhone(raw?: string): string | null {

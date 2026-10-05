@@ -8,12 +8,14 @@ import DoctorsTab from '@/components/agenda/DoctorsTab';
 import ExceptionsTab from '@/components/agenda/ExceptionsTab';
 import NoticesTab from '@/components/agenda/NoticesTab';
 import BookingTab from '@/components/agenda/BookingTab';
+import GoogleCalendarTab from '@/components/agenda/GoogleCalendarTab';
 
 const TABS = [
   { id: 'doctors', label: 'Doctores' },
   { id: 'exceptions', label: 'Ausencias y cambios' },
   { id: 'notices', label: 'Avisos' },
   { id: 'booking', label: 'Reserva por WhatsApp' },
+  { id: 'google', label: 'Google Calendar' },
 ] as const;
 
 export default function AgendaSettingsPage() {
@@ -52,7 +54,8 @@ export default function AgendaSettingsPage() {
       </div>
 
       <div className="flex gap-1 border-b border-border mb-5 overflow-x-auto">
-        {TABS.map((t) => (
+        {/* Google Calendar solo donde el entorno tiene la credencial cargada. */}
+        {TABS.filter((t) => t.id !== 'google' || settings.googleCalendar).map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
@@ -74,6 +77,7 @@ export default function AgendaSettingsPage() {
           {tab === 'exceptions' && <ExceptionsTab clinics={clinics} timezone={settings.timezone} />}
           {tab === 'notices' && <NoticesTab settings={settings} />}
           {tab === 'booking' && <BookingTab settings={settings} />}
+          {tab === 'google' && <GoogleCalendarTab />}
         </>
       )}
     </div>

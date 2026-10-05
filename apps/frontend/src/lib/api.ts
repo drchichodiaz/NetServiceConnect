@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { WhatsAppAccount, Contact, ContactTag } from '@/types';
-import type { AgendaSettings, Doctor, Shift, DoctorException, AgendaDay, FreeDoctor, Appointment, AppointmentStatus, MonthSummary } from './agenda';
+import type { AgendaSettings, Doctor, Shift, DoctorException, AgendaDay, FreeDoctor, Appointment, AppointmentStatus, MonthSummary, ClinicCalendar } from './agenda';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
@@ -823,7 +823,7 @@ export const supportApi = {
 
 export const agendaApi = {
   settings: (): Promise<AgendaSettings> => api.get('/agenda/settings').then((r) => r.data),
-  updateSettings: (data: Partial<Omit<AgendaSettings, 'enabled' | 'timezone'>>): Promise<AgendaSettings> =>
+  updateSettings: (data: Partial<Omit<AgendaSettings, 'enabled' | 'timezone' | 'googleCalendar'>>): Promise<AgendaSettings> =>
     api.patch('/agenda/settings', data).then((r) => r.data),
 
   createDefaultTemplates: (): Promise<{
@@ -833,15 +833,17 @@ export const agendaApi = {
     settings: AgendaSettings;
   }> => api.post('/agenda/templates/defaults').then((r) => r.data),
 
+  clinicCalendars: (): Promise<ClinicCalendar[]> => api.get('/agenda/google-calendars').then((r) => r.data),
+  setClinicCalendar: (channelAccountId: string, emails: string[]): Promise<ClinicCalendar> =>
+    api.put(`/agenda/google-calendars/${channelAccountId}`, { emails }).then((r) => r.data),
+
   doctors: (): Promise<Doctor[]> => api.get('/agenda/doctors').then((r) => r.data),
-  createDoctor: (data: { code: string; name: string; phone?: string }): Promise<Doctor> =>
+  createDoctor: (data: { code: string; name: string; phone?: string; googleEmail?: string }): Promise<Doctor> =>
     api.post('/agenda/doctors', data).then((r) => r.data),
-  updateDoctor: (id: string, data: { code?: string; name?: string; phone?: string; isActive?: boolean }): Promise<Doctor> =>
+  updateDoctor: (id: string, data: { code?: string; name?: string; phone?: string; googleEmail?: string; isActive?: boolean }): Promise<Doctor> =>
     api.patch(`/agenda/doctors/${id}`, data).then((r) => r.data),
   setShifts: (id: string, shifts: Shift[]): Promise<Shift[]> =>
     api.put(`/agenda/doctors/${id}/shifts`, { shifts }).then((r) => r.data),
-  calendarLink: (id: string, reset = false): Promise<{ token: string }> =>
-    api.post(`/agenda/doctors/${id}/calendar-link${reset ? '/reset' : ''}`).then((r) => r.data),
   sendCalendarLink: (id: string): Promise<{ ok: true }> =>
     api.post(`/agenda/doctors/${id}/calendar-link/send`).then((r) => r.data),
 

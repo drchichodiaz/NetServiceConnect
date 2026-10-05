@@ -42,7 +42,7 @@ const NOTICES: { key: TemplateKey; title: string; when: string; variables: strin
   {
     key: 'doctorCalendarTemplateId',
     title: 'Calendario del doctor',
-    when: 'Al doctor, cuando se le envía desde su ficha. Con un botón de enlace para agregar sus citas a su calendario.',
+    when: 'Al doctor, cuando su calendario de Google queda listo. Con un botón de enlace para agregarlo.',
     variables: '{{1}} doctor',
   },
 ];

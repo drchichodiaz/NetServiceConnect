@@ -79,6 +79,7 @@ model Tenant {
   doctorExceptions DoctorException[]
   appointments     Appointment[]
   doctorSummaries  DoctorDailySummary[]
+  clinicGoogleCalendars ClinicGoogleCalendar[]
   partner          Partner?             @relation(fields: [partnerId], references: [id], onDelete: SetNull)
 
   @@index([partnerId])
@@ -247,6 +248,7 @@ model ChannelAccount {
   doctorShifts     DoctorShift[]
   doctorExceptions DoctorException[]
   appointments     Appointment[]
+  googleCalendar   ClinicGoogleCalendar?
 
   // Los dos unique conviven porque en Postgres los NULL no colisionan entre si: una
   // cuenta de Instagram tiene phoneNumberId NULL y no pelea con las lineas de WhatsApp,
@@ -1333,10 +1335,23 @@ model Doctor {
   /// WhatsApp del doctor, solo digitos con codigo de pais (igual que ContactIdentity).
   /// Null = no recibe el resumen del dia.
   phone     String?
-  /// Clave del calendario al que el doctor se suscribe desde su telefono (.ics). Es un
-  /// secreto: quien tiene el enlace ve sus citas. Null = nunca se le genero. Cambiarla
-  /// deja sin efecto el enlace anterior. No sale en ningun listado.
+  /// Clave de la pagina /calendario/<clave>, la del boton del WhatsApp con el que el
+  /// doctor agrega su calendario de Google. Null = nunca se le genero. No sale en
+  /// ningun listado.
   calendarToken String? @unique
+  /// Gmail del doctor. Con esto Connect le crea un calendario en Google, se lo comparte
+  /// y le escribe cada cita al instante (ver AgendaGoogleSyncService). Null = no usa.
+  googleEmail       String?
+  /// El calendario de Google de este doctor. Mientras se esta creando vale
+  /// "creating:<ms>", para que dos procesos no creen dos.
+  googleCalendarId  String?
+  /// Con que Gmail esta compartido hoy: si no coincide con googleEmail, falta compartirlo.
+  googleSharedEmail String?
+  /// Por que no se pudo crear o compartir la ultima vez. Se muestra en la ficha.
+  googleError       String?
+  /// Cuando se le mando por WhatsApp el enlace para agregar el calendario. Se marca
+  /// ANTES de mandar (no se manda dos veces) y vuelve a null si cambia de Gmail.
+  googleLinkSentAt  DateTime?
   /// Un doctor que se va se desactiva, no se borra: sus citas pasadas lo nombran.
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
@@ -1444,6 +1459,14 @@ model Appointment {
   /// Se marca ANTES de mandar, al tomar la cita: es lo que impide mandar dos veces el
   /// recordatorio si hay dos procesos o el worker se reinicia.
   reminderSentAt        DateTime?
+  /// En que calendario de Google esta escrita hoy esta cita (el del doctor). Null = en
+  /// ninguno. Hace falta para sacarla de ahi si la cita cambia de doctor.
+  googleCalendarId      String?
+  /// Lo mismo para el calendario de la clinica (ClinicGoogleCalendar).
+  googleClinicCalendarId String?
+  /// El updatedAt que tenia la cita cuando se escribio en Google. Si es anterior al
+  /// updatedAt actual, la cita cambio y hay que volver a escribirla.
+  googleSyncedAt        DateTime?
   confirmedAt           DateTime?
   rescheduleRequestedAt DateTime?
   /// El paciente la cambio de horario por WhatsApp (la ultima vez).
@@ -1476,6 +1499,28 @@ enum AppointmentStatus {
   DONE
   NO_SHOW
   CANCELLED
+}
+
+/// El calendario de Google de una clinica: todas sus citas, de cualquier doctor, para
+/// la recepcion y la coordinacion. Se comparte en solo lectura con los Gmail de `emails`.
+/// Una fila por linea de WhatsApp; sin correos, el calendario se borra.
+model ClinicGoogleCalendar {
+  id               String   @id @default(cuid())
+  tenantId         String
+  channelAccountId String   @unique
+  emails           String[]
+  /// Mientras se esta creando vale "creating:<ms>", igual que en Doctor.
+  calendarId       String?
+  /// Con quienes esta compartido hoy: lo que difiere de `emails` falta aplicarlo.
+  sharedEmails     String[]
+  error            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  channelAccount ChannelAccount @relation(fields: [channelAccountId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
 }
 
 /// Registro del resumen de la mañana que se le manda a cada doctor. El unique por

@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateAgendaSettingsDto } from './dto/agenda.dto';
 
@@ -37,7 +38,10 @@ const DEFAULTS = {
  */
 @Injectable()
 export class AgendaSettingsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private config: ConfigService,
+  ) {}
 
   async get(tenantId: string) {
     const [row, tenant] = await Promise.all([
@@ -61,6 +65,9 @@ export class AgendaSettingsService {
       delayTemplateId: base.delayTemplateId,
       doctorCalendarTemplateId: base.doctorCalendarTemplateId,
       timezone: tenant.timezone,
+      // Si este entorno puede escribir en Google Calendar (ver GoogleCalendarClient). La
+      // pantalla lo usa para ofrecer o no el Gmail del doctor.
+      googleCalendar: !!this.config.get<string>('GOOGLE_CALENDAR_CREDENTIALS')?.trim(),
     };
   }
 
