@@ -256,6 +256,10 @@ export default function NodeEditPanel({ node, descendantCount, saving, onSave, o
             className="input w-full text-sm"
             placeholder="Ej: Cuéntame en qué te puedo ayudar."
           />
+          <p className="text-xs text-ink-muted pt-1">
+            Si este menú tiene “Agendar cita” o “Mis citas”, la IA las abre cuando el cliente pide una cita o pregunta
+            por la suya, con los mismos botones del menú. Al terminar, sigue la conversación con la IA.
+          </p>
         </div>
       )}
 

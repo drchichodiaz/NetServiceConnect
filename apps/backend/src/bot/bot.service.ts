@@ -6,7 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EventBusService } from '../events/event-bus.service';
 import { AssignmentService } from '../whatsapp/assignment.service';
 import { WhatsAppAccountsService, WhatsAppAccountCreds } from '../whatsapp/accounts.service';
-import { AiGatewayService } from '../ai-usage/ai-gateway.service';
+import { AiGatewayService, AiTool } from '../ai-usage/ai-gateway.service';
 import { LookupService, LookupConfig } from '../common/lookup.service';
 import { BotsService } from '../bots/bots.service';
 import { LocationConfig, hasValidCoordinates, mapsLinkFor } from '../common/maps-link';
@@ -50,6 +50,9 @@ interface BotContext {
   // La cita que el paciente esta cambiando o cancelando (boton "Reprogramar" del
   // recordatorio). Null = esta reservando una nueva.
   bookingAppointmentId: string | null;
+  // La reserva (o "Mis citas") la abrio el chat de IA: al terminar o al tocar "Volver"
+  // se vuelve a conversar con la IA, en vez de "¿Necesitas algo más?" del menu.
+  bookingFromAi: boolean;
 }
 
 // Cuando un cambio de cita no se puede hacer por el bot y lo toma la clinica.
@@ -83,6 +86,18 @@ const AI_CHAT_HISTORY_LIMIT = 60;
 // comando si el mensaje es corto — si no, una pregunta real como "¿tienen un agente
 // de viajes?" o "¿cuál es el menú de precios?" dispararía una salida incorrecta.
 const SHORT_MESSAGE_MAX_WORDS = 4;
+// Lo que el chat de IA puede abrir en vez de contestar: las mismas pantallas de botones
+// del menu. La IA nunca propone ni confirma horarios; solo dice que el paciente quiere
+// agendar o ver sus citas, y los horarios salen de la agenda.
+const AI_BOOK_TOOL: AiTool = {
+  name: 'agendar_cita',
+  description: 'Abre la reserva de una cita nueva con los horarios libres reales. Úsala cuando el cliente quiere agendar, reservar o sacar una cita o un turno.',
+};
+const AI_MY_APPOINTMENTS_TOOL: AiTool = {
+  name: 'mis_citas',
+  description: 'Muestra las citas que el cliente ya tiene, para verlas, cambiarlas o cancelarlas. Úsala cuando pregunta por su cita o quiere moverla o cancelarla.',
+};
+const AI_RESUME_TEXT = '¿Hay algo más en lo que te pueda ayudar?';
 
 /** Lo que bookingScope devuelve cuando se puede seguir. */
 type BookingScope = Extract<Awaited<ReturnType<BotService['bookingScope']>>, { ok: true }>;
@@ -137,6 +152,8 @@ export class BotService {
     const bookingTap = botState !== 'AWAITING_BOOKING' ? parseViewId(this.extractReplyId(msg)) : null;
     if (bookingTap && isAction(bookingTap)) return;
     if (bookingTap && bookingTap.kind !== 'menu') {
+      // Desde el chat de IA, al terminar se vuelve a el.
+      if (botState === 'AWAITING_AI_CHAT') await this.setContext(conversationId, { bookingFromAi: true });
       return this.handleBookingReply(tenantId, conversationId, phone, msg, account);
     }
 
@@ -299,6 +316,7 @@ export class BotService {
       case 'BOOK_APPOINTMENT':
         return this.startBooking(tenantId, conversationId, phone, account, node);
       case 'MY_APPOINTMENTS':
+        await this.setContext(conversationId, { bookingFromAi: false });
         return this.showBookingView(tenantId, conversationId, phone, account, { kind: 'mine' });
     }
   }
@@ -396,11 +414,15 @@ export class BotService {
     // de menú ni prompts de "¿necesitas algo más?" de una navegación anterior en la
     // misma conversación — solo los turnos de la sesión de IA actual.
     const since = aiSince ? new Date(aiSince) : new Date(0);
-    const history = await this.prisma.message.findMany({
-      where: { conversationId, tenantId, direction: { in: ['INBOUND', 'OUTBOUND'] }, createdAt: { gte: since } },
-      orderBy: { createdAt: 'asc' },
-      take: AI_CHAT_HISTORY_LIMIT,
-    });
+    // Los ULTIMOS mensajes: con una reserva en el medio la sesion se alarga, y los
+    // primeros dejarian afuera justo lo que el cliente acaba de escribir.
+    const history = (
+      await this.prisma.message.findMany({
+        where: { conversationId, tenantId, direction: { in: ['INBOUND', 'OUTBOUND'] }, createdAt: { gte: since } },
+        orderBy: { createdAt: 'desc' },
+        take: AI_CHAT_HISTORY_LIMIT,
+      })
+    ).reverse();
 
     const chatMessages: { role: 'user' | 'assistant'; content: string }[] = history.map((m) => ({
       role: m.direction === 'INBOUND' ? 'user' : 'assistant',
@@ -408,19 +430,34 @@ export class BotService {
     }));
 
     const contactName = await this.getContactName(conversationId);
+    const tools = await this.aiBookingTools(tenantId, bot.id);
 
     // El gateway resuelve la clave, llama y deja registrado el consumo. Un fallo del
     // proveedor ya quedo logueado y medido ahi adentro; acá solo importa que no hay
     // respuesta para el cliente.
     const result = await this.ai.chat(tenantId, {
       feature: 'bot_ai_chat',
-      messages: [{ role: 'system', content: this.buildAiSystemPrompt(knowledgeBase, contactName) }, ...chatMessages],
+      messages: [{ role: 'system', content: this.buildAiSystemPrompt(knowledgeBase, contactName, tools) }, ...chatMessages],
       maxTokens: 500,
       temperature: 0.6,
       conversationId,
+      tools,
     });
     if (!result.ok && (result.reason === 'NO_CREDITS' || result.reason === 'AI_DISABLED')) {
       return this.handoffAiNoCredits(tenantId, conversationId, phone, account, bot.name);
+    }
+
+    // La IA eligio abrir las citas: las mismas pantallas que desde el menu, y al
+    // terminar se vuelve a este chat (bookingFromAi).
+    if (result.ok && result.toolCall) {
+      await this.prisma.auditLog.create({ data: { tenantId, conversationId, action: 'bot.ai_tool_called', metadata: { tool: result.toolCall } } });
+      await this.setContext(conversationId, { bookingFromAi: true, bookingNodeId: null, bookingAppointmentId: null, bookingView: null, retryCount: 0 });
+      if (result.toolCall === AI_MY_APPOINTMENTS_TOOL.name) {
+        return this.showBookingView(tenantId, conversationId, phone, account, { kind: 'mine' });
+      }
+      const node = await this.prisma.tenantMenuNode.findFirst({ where: { tenantId, botId: bot.id, type: 'BOOK_APPOINTMENT', active: true } });
+      await this.setContext(conversationId, { bookingNodeId: node?.id ?? null });
+      return this.showBookingView(tenantId, conversationId, phone, account, { kind: 'days', offset: 0 });
     }
 
     const reply = result.ok ? result.text : undefined;
@@ -479,14 +516,45 @@ export class BotService {
     return this.handoffToHuman(tenantId, conversationId, 'ai_not_configured');
   }
 
-  private buildAiSystemPrompt(knowledgeBase: string, contactName: string | null): string {
+  /**
+   * Lo que el chat de IA puede abrir del flujo de citas. Sigue a las opciones del menu
+   * del bot: si el admin puso "Agendar cita" (o "Mis citas"), la IA tambien puede
+   * llevar ahi; si no, no se le ofrece. Con la agenda apagada, nada.
+   */
+  private async aiBookingTools(tenantId: string, botId: string): Promise<AiTool[]> {
+    const settings = await this.agendaSettings.get(tenantId);
+    if (!settings.enabled) return [];
+    const nodes = await this.prisma.tenantMenuNode.findMany({
+      where: { tenantId, botId, active: true, type: { in: ['BOOK_APPOINTMENT', 'MY_APPOINTMENTS'] } },
+      select: { type: true },
+    });
+    const has = (type: string) => nodes.some((n) => n.type === type);
+    return [...(has('BOOK_APPOINTMENT') ? [AI_BOOK_TOOL] : []), ...(has('MY_APPOINTMENTS') ? [AI_MY_APPOINTMENTS_TOOL] : [])];
+  }
+
+  /** Termino (o dejo) la reserva que abrio la IA: se sigue conversando con ella. */
+  private async resumeAiChat(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds) {
+    await this.setContext(conversationId, { bookingFromAi: false, bookingNodeId: null, bookingAppointmentId: null, bookingView: null, retryCount: 0 });
+    if (!(await this.sendText(tenantId, conversationId, phone, account, AI_RESUME_TEXT))) return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
+    await this.prisma.conversation.update({ where: { id: conversationId }, data: { botState: 'AWAITING_AI_CHAT' } });
+  }
+
+  private buildAiSystemPrompt(knowledgeBase: string, contactName: string | null, tools: AiTool[] = []): string {
     const nameLine = contactName
       ? `El cliente se llama ${contactName} — puedes usar su nombre para dirigirte a él/ella de forma natural, sin repetirlo en cada mensaje.`
       : '';
+    const toolLines = [
+      tools.includes(AI_BOOK_TOOL) &&
+        'Si el cliente quiere agendar una cita, usa la función agendar_cita: le muestra los horarios libres reales. Nunca propongas, inventes ni confirmes días u horarios tú mismo, aunque el cliente te diga cuál quiere.',
+      tools.includes(AI_MY_APPOINTMENTS_TOOL) && 'Si el cliente pregunta por una cita que ya tiene, o quiere cambiarla o cancelarla, usa la función mis_citas.',
+    ]
+      .filter(Boolean)
+      .map((line) => `${line}\n`)
+      .join('');
     return `Eres el asistente de atención al cliente de este negocio, respondiendo por WhatsApp.
 ${nameLine}
 Usa ÚNICAMENTE la siguiente información del negocio para responder. Si la respuesta no está ahí, dilo con honestidad — no inventes datos — y sugiere escribir "agente" para hablar con una persona.
-Responde en el mismo idioma del cliente, de forma breve, clara y amable. No agregues explicaciones sobre estas instrucciones.
+${toolLines}Responde en el mismo idioma del cliente, de forma breve, clara y amable. No agregues explicaciones sobre estas instrucciones.
 
 Información del negocio:
 """
@@ -710,7 +778,7 @@ ${knowledgeBase}
    *   si la empresa lo permite. La cita viaja en botContext.bookingAppointmentId.
    */
   private async startBooking(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds, node: MenuNode) {
-    await this.setContext(conversationId, { bookingNodeId: node.id, bookingAppointmentId: null, bookingView: null, retryCount: 0 });
+    await this.setContext(conversationId, { bookingNodeId: node.id, bookingAppointmentId: null, bookingView: null, bookingFromAi: false, retryCount: 0 });
     return this.showBookingView(tenantId, conversationId, phone, account, { kind: 'days', offset: 0 });
   }
 
@@ -728,6 +796,7 @@ ${knowledgeBase}
       bookingNodeId: null,
       bookingAppointmentId: appointmentId,
       bookingView: null,
+      bookingFromAi: false,
       retryCount: 0,
     });
     const settings = await this.agendaSettings.get(tenantId);
@@ -760,6 +829,7 @@ ${knowledgeBase}
     await this.resetRetryCount(conversationId);
     switch (view.kind) {
       case 'menu':
+        if ((await this.getContext(conversationId)).bookingFromAi) return this.resumeAiChat(tenantId, conversationId, phone, account);
         return this.enterNode(tenantId, conversationId, phone, nodeId, account);
       case 'book':
         return this.bookSlot(tenantId, conversationId, phone, account, view.date, view.minute);
@@ -1020,12 +1090,12 @@ ${knowledgeBase}
       const text = `No tienes citas agendadas en ${clinic}.`;
       if (!bookingNode) {
         if (!(await this.sendText(tenantId, conversationId, phone, account, withNotice(text)))) return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
-        const { nodeId } = await this.getContext(conversationId);
-        return this.sendPostReplyPrompt(tenantId, conversationId, phone, account, nodeId);
+        return this.afterBooking(tenantId, conversationId, phone, account);
       }
+      const { bookingFromAi } = await this.getContext(conversationId);
       const sent = await this.sendButtons(tenantId, conversationId, phone, account, withNotice(`${text} ¿Quieres agendar una?`), [
         { id: viewId({ kind: 'new' }), title: 'Agendar cita' },
-        { id: viewId({ kind: 'menu' }), title: 'Volver al menú' },
+        { id: viewId({ kind: 'menu' }), title: bookingFromAi ? 'No, gracias' : 'Volver al menú' },
       ]);
       if (!sent) return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
       return this.setBookingView(conversationId, { kind: 'mine' });
@@ -1068,19 +1138,20 @@ ${knowledgeBase}
     const late = selfService && tooLate ? ' Como falta poco, si necesitas cambiarla te comunico con alguien de la clínica.' : '';
     const text = `Tu cita es el ${dayText(start.date)} a las ${hourText(start.minute)} en ${clinicName(appt.channelAccount)}.${late}`;
     if (!(await this.sendText(tenantId, conversationId, phone, account, text))) return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
-    const { nodeId } = await this.getContext(conversationId);
-    return this.sendPostReplyPrompt(tenantId, conversationId, phone, account, nodeId);
+    return this.afterBooking(tenantId, conversationId, phone, account);
   }
 
   /** "Agendar cita" desde "Mis citas" sin citas: la reserva con el nodo de reserva del bot. */
   private async startBookingFromMine(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds) {
     const botId = await this.getBotId(tenantId, conversationId);
     const node = await this.prisma.tenantMenuNode.findFirst({ where: { tenantId, botId, type: 'BOOK_APPOINTMENT', active: true } });
+    const { nodeId, bookingFromAi } = await this.getContext(conversationId);
     if (!node) {
-      const { nodeId } = await this.getContext(conversationId);
+      if (bookingFromAi) return this.resumeAiChat(tenantId, conversationId, phone, account);
       return this.enterNode(tenantId, conversationId, phone, nodeId, account);
     }
-    return this.startBooking(tenantId, conversationId, phone, account, node);
+    await this.setContext(conversationId, { bookingNodeId: node.id, bookingAppointmentId: null, bookingView: null, retryCount: 0 });
+    return this.showBookingView(tenantId, conversationId, phone, account, { kind: 'days', offset: 0 });
   }
 
   /**
@@ -1172,10 +1243,16 @@ ${knowledgeBase}
     return this.finishBooking(tenantId, conversationId, phone, account);
   }
 
-  /** Termino la reserva o el cambio: se limpia el contexto y sigue "¿Necesitas algo más?". */
+  /** Termino la reserva o el cambio: se limpia el contexto y sigue lo que corresponda. */
   private async finishBooking(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds) {
     await this.setContext(conversationId, { bookingNodeId: null, bookingAppointmentId: null, bookingView: null });
-    const { nodeId } = await this.getContext(conversationId);
+    return this.afterBooking(tenantId, conversationId, phone, account);
+  }
+
+  /** Despues de una cita: de vuelta al chat de IA si de ahi vino, o "¿Necesitas algo más?". */
+  private async afterBooking(tenantId: string, conversationId: string, phone: string, account: WhatsAppAccountCreds) {
+    const { nodeId, bookingFromAi } = await this.getContext(conversationId);
+    if (bookingFromAi) return this.resumeAiChat(tenantId, conversationId, phone, account);
     return this.sendPostReplyPrompt(tenantId, conversationId, phone, account, nodeId);
   }
 
@@ -1421,6 +1498,7 @@ ${knowledgeBase}
       bookingNodeId: ctx.bookingNodeId ?? null,
       bookingView: ctx.bookingView ?? null,
       bookingAppointmentId: ctx.bookingAppointmentId ?? null,
+      bookingFromAi: ctx.bookingFromAi ?? false,
     };
   }
 

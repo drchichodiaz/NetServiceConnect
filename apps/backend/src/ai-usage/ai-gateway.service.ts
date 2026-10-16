@@ -13,11 +13,23 @@ export interface AiChatMessage {
   content: string;
 }
 
+/**
+ * Una accion que la IA puede elegir en lugar de contestar con texto (function calling
+ * de OpenAI). Sin parametros: quien llama decide que hacer con ella, la IA solo dice
+ * cual corresponde.
+ */
+export interface AiTool {
+  name: string;
+  description: string;
+}
+
 export interface AiChatRequest {
   feature: AiFeature;
   messages: AiChatMessage[];
   maxTokens: number;
   temperature?: number;
+  /** Acciones que puede elegir. La respuesta trae texto o una de estas, no las dos. */
+  tools?: AiTool[];
   /** Quien lo origino. Uno de los dos, segun la funcionalidad. */
   conversationId?: string | null;
   userId?: string | null;
@@ -43,7 +55,8 @@ export interface AiReadiness {
 }
 
 export type AiChatResult =
-  | { ok: true; text: string; credits: number }
+  | { ok: true; text: string; credits: number; toolCall: null }
+  | { ok: true; text: null; credits: number; toolCall: string }
   | { ok: false; reason: AiUnavailableReason };
 
 /**
@@ -144,6 +157,7 @@ export class AiGatewayService {
         messages: req.messages,
         max_tokens: req.maxTokens,
         ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
+        ...(req.tools?.length ? { tools: toOpenAiTools(req.tools), tool_choice: 'auto' as const } : {}),
       });
     } catch (err) {
       const message = (err as any)?.response?.data?.error?.message || (err as any)?.message || 'error desconocido';
@@ -154,12 +168,16 @@ export class AiGatewayService {
       return { ok: false, reason: 'PROVIDER_ERROR' };
     }
 
-    const text = completion?.choices?.[0]?.message?.content?.trim();
+    const message = completion?.choices?.[0]?.message;
+    const text = message?.content?.trim();
+    // Solo cuenta una accion de las ofrecidas: un nombre inventado es una respuesta vacia.
+    const called = message?.tool_calls?.find((c: any) => req.tools?.some((t) => t.name === c?.function?.name));
+    const toolCall: string | null = called?.function?.name ?? null;
     // Una respuesta vacia es una falla, no un servicio. Desde donde esta parado el
     // cliente no se distingue de un error del proveedor, y ese ya no se cobra: cobrar
     // una y la otra no seria una diferencia que pueda entender. Los tokens igual se
     // gastaron, asi que el costo queda registrado y la perdida se ve en el margen.
-    const failed = !text;
+    const failed = !text && !toolCall;
 
     const { credits, usageId } = await this.record(
       tenantId,
@@ -179,7 +197,9 @@ export class AiGatewayService {
     }
 
     if (failed) return { ok: false, reason: 'EMPTY_RESPONSE' };
-    return { ok: true, text: text as string, credits };
+    // Si eligio una accion, manda la accion aunque haya escrito algo al lado.
+    if (toolCall) return { ok: true, text: null, credits, toolCall };
+    return { ok: true, text: text as string, credits, toolCall: null };
   }
 
   /**
@@ -192,7 +212,8 @@ export class AiGatewayService {
    * veces y el saldo negativo dejaria de ser un caso borde.
    */
   private async estimateCredits(model: string, req: AiChatRequest): Promise<number> {
-    const chars = req.messages.reduce((total, m) => total + m.content.length, 0);
+    const toolChars = req.tools?.length ? JSON.stringify(toOpenAiTools(req.tools)).length : 0;
+    const chars = req.messages.reduce((total, m) => total + m.content.length, toolChars);
     const inputTokens = Math.ceil((chars / 4) * 1.2);
     const priced = await this.pricing.price('openai', model, {
       inputTokens,
@@ -263,4 +284,11 @@ export class AiGatewayService {
       return { credits: 0, usageId: null };
     }
   }
+}
+
+function toOpenAiTools(tools: AiTool[]) {
+  return tools.map((t) => ({
+    type: 'function' as const,
+    function: { name: t.name, description: t.description, parameters: { type: 'object', properties: {} } },
+  }));
 }
