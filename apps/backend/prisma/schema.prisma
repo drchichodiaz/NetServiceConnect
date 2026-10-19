@@ -1352,6 +1352,12 @@ model Doctor {
   /// Cuando se le mando por WhatsApp el enlace para agregar el calendario. Se marca
   /// ANTES de mandar (no se manda dos veces) y vuelve a null si cambia de Gmail.
   googleLinkSentAt  DateTime?
+  /// Especialista (ortodoncia, cirugia...): se lo llama cuando hace falta. Nunca se le
+  /// asigna una cita solo (ni el bot ni el "automatico" de la recepcion): se lo elige a
+  /// mano, y se le puede dar fuera de turno. Los turnos son opcionales.
+  isSpecialist Boolean @default(false)
+  /// "Ortodoncia", "Cirugía". Lo usa el chat de IA para saber que pedido es de especialista.
+  specialty    String?
   /// Un doctor que se va se desactiva, no se borra: sus citas pasadas lo nombran.
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())

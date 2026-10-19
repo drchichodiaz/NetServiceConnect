@@ -71,7 +71,7 @@ export class AvailabilityService {
     // Citas de doctores inactivos que siguen en la agenda.
     const missing = [...withAppointmentsHere].filter((id) => !doctors.some((d) => d.id === id));
     const extra = missing.length
-      ? await this.prisma.doctor.findMany({ where: { id: { in: missing } }, select: { id: true, code: true, name: true } })
+      ? await this.prisma.doctor.findMany({ where: { id: { in: missing } }, select: { id: true, code: true, name: true, isSpecialist: true, specialty: true } })
       : [];
 
     return {
@@ -84,6 +84,8 @@ export class AvailabilityService {
           id: d.id,
           code: d.code,
           name: d.name,
+          isSpecialist: d.isSpecialist,
+          specialty: d.specialty,
           windows: d.clinicWindows.map(({ start, end }) => ({ start, end })),
           busyElsewhere: plan.appointments
             .filter((a) => a.doctorId === d.id && a.channelAccountId !== channelAccountId)
@@ -105,6 +107,11 @@ export class AvailabilityService {
    *
    * `excludeAppointmentId` es para mover o alargar una cita: su propio horario no la
    * ocupa a si misma.
+   *
+   * Los especialistas solo vienen con `includeSpecialists`, al final y nunca primeros:
+   * no se les asigna nada solo. Para ellos el turno no es requisito (se los llama cuando
+   * hace falta); alcanza con que no tengan otra cita a esa hora en ninguna clinica ni una
+   * ausencia cargada. `inShift` dice si ademas cae en su turno de esta clinica.
    */
   async freeDoctors(
     tenantId: string,
@@ -112,6 +119,7 @@ export class AvailabilityService {
     startsAt: Date,
     minutes: number,
     excludeAppointmentId?: string,
+    includeSpecialists = false,
   ) {
     const settings = await this.settings.requireEnabled(tenantId);
     const tz = settings.timezone;
@@ -124,25 +132,32 @@ export class AvailabilityService {
     const slot: Interval = { start: start.minute, end: end.date === start.date ? end.minute : MINUTES_PER_DAY };
     const plan = await this.loadDay(tenantId, start.date, tz);
 
-    const free = plan.doctors
-      .filter((d) => d.isActive)
-      .filter((d) => fitsInside(d.windows.filter((w) => w.channelAccountId === channelAccountId), slot))
-      .filter((d) =>
-        plan.appointments.every(
-          (a) =>
-            a.doctorId !== d.id ||
-            a.id === excludeAppointmentId ||
-            !overlaps(appointmentInterval(a, start.date, tz), slot),
-        ),
-      )
-      .map((d) => ({
-        id: d.id,
-        code: d.code,
-        name: d.name,
-        appointmentsToday: plan.appointments.filter((a) => a.doctorId === d.id && a.id !== excludeAppointmentId).length,
-      }));
+    const notBusy = (d: { id: string }) =>
+      plan.appointments.every(
+        (a) => a.doctorId !== d.id || a.id === excludeAppointmentId || !overlaps(appointmentInterval(a, start.date, tz), slot),
+      );
+    const inShift = (d: { windows: WorkWindow[] }) => fitsInside(d.windows.filter((w) => w.channelAccountId === channelAccountId), slot);
+    const row = (d: (typeof plan.doctors)[number]) => ({
+      id: d.id,
+      code: d.code,
+      name: d.name,
+      isSpecialist: d.isSpecialist,
+      specialty: d.specialty,
+      inShift: inShift(d),
+      appointmentsToday: plan.appointments.filter((a) => a.doctorId === d.id && a.id !== excludeAppointmentId).length,
+    });
 
-    return free.sort((a, b) => a.appointmentsToday - b.appointmentsToday || a.code.localeCompare(b.code));
+    const general = plan.doctors
+      .filter((d) => d.isActive && !d.isSpecialist && inShift(d) && notBusy(d))
+      .map(row)
+      .sort((a, b) => a.appointmentsToday - b.appointmentsToday || a.code.localeCompare(b.code));
+    if (!includeSpecialists) return general;
+
+    const specialists = plan.doctors
+      .filter((d) => d.isActive && d.isSpecialist && notBusy(d) && !d.absences.some((i) => overlaps(i, slot)))
+      .map(row)
+      .sort((a, b) => a.code.localeCompare(b.code));
+    return [...general, ...specialists];
   }
 
   /**
@@ -166,8 +181,11 @@ export class AvailabilityService {
     for (let d = first; d.startsWith(month); d = addDays(d, 1)) dates.push(d);
     const last = dates[dates.length - 1];
 
+    // La ocupacion es la de los doctores generales: los especialistas vienen cuando se
+    // los llama, no tienen horas "disponibles" contra las que medirlos. Sus citas si se
+    // cuentan en la cantidad del dia.
     const [doctors, exceptions, appointments] = await Promise.all([
-      this.prisma.doctor.findMany({ where: { tenantId, isActive: true }, include: { shifts: true } }),
+      this.prisma.doctor.findMany({ where: { tenantId, isActive: true, isSpecialist: false }, include: { shifts: true } }),
       this.prisma.doctorException.findMany({ where: { tenantId, date: { gte: dateColumn(first), lte: dateColumn(last) } } }),
       this.prisma.appointment.findMany({
         where: {
@@ -177,7 +195,7 @@ export class AvailabilityService {
           startsAt: { lt: fromLocal(last, MINUTES_PER_DAY, tz) },
           endsAt: { gt: fromLocal(first, 0, tz) },
         },
-        select: { startsAt: true, endsAt: true },
+        select: { startsAt: true, endsAt: true, doctor: { select: { isSpecialist: true } } },
       }),
     ]);
 
@@ -187,7 +205,7 @@ export class AvailabilityService {
       const i = appointmentInterval(a, date, tz);
       const row = byDate.get(date) ?? { count: 0, booked: 0 };
       row.count++;
-      row.booked += i.end - i.start;
+      if (!a.doctor.isSpecialist) row.booked += i.end - i.start;
       byDate.set(date, row);
     }
 
@@ -246,8 +264,9 @@ export class AvailabilityService {
     const first = dates[0];
     const last = dates[dates.length - 1];
 
+    // Solo doctores generales: con un especialista se agenda a mano.
     const [doctors, exceptions, appointments] = await Promise.all([
-      this.prisma.doctor.findMany({ where: { tenantId, isActive: true }, include: { shifts: true } }),
+      this.prisma.doctor.findMany({ where: { tenantId, isActive: true, isSpecialist: false }, include: { shifts: true } }),
       this.prisma.doctorException.findMany({ where: { tenantId, date: { gte: dateColumn(first), lte: dateColumn(last) } } }),
       this.prisma.appointment.findMany({
         where: {
@@ -302,6 +321,12 @@ export class AvailabilityService {
         code: d.code,
         name: d.name,
         isActive: d.isActive,
+        isSpecialist: d.isSpecialist,
+        specialty: d.specialty,
+        // Para el especialista, que no necesita turno: las ausencias igual lo bloquean.
+        absences: exceptions
+          .filter((e) => e.doctorId === d.id && e.kind === 'ABSENT')
+          .map((e): Interval => (e.startMinute === null ? { start: 0, end: MINUTES_PER_DAY } : { start: e.startMinute, end: e.endMinute! })),
         // Un doctor inactivo no atiende: sin tramos, no aparece libre ni en la grilla
         // (salvo que tenga citas viejas, que day() agrega aparte).
         windows: d.isActive

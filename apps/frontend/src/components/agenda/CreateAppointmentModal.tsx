@@ -4,7 +4,7 @@ import { Loader2, X, Search, UserPlus, Stethoscope, AlertTriangle } from 'lucide
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
 import { agendaApi, contactsApi } from '@/lib/api';
-import { Appointment, FreeDoctor, clock, fromLocal, hhmm, longDate, nextBookable, patientLabel, quarterOptions, todayIn } from '@/lib/agenda';
+import { Appointment, FreeDoctor, clock, doctorOption, fromLocal, hhmm, longDate, nextBookable, patientLabel, quarterOptions, todayIn } from '@/lib/agenda';
 import ModalPortal from '@/components/ui/ModalPortal';
 import { Clinic } from './useClinics';
 
@@ -16,8 +16,9 @@ const TIME_OPTIONS = quarterOptions(6 * 60, 21 * 60);
  * Crear una cita. Se abre desde un horario libre de la grilla o desde una conversacion
  * (con el paciente ya cargado, que es lo que evita que falte el telefono).
  *
- * La recepcion elige clinica, dia y hora; el doctor lo propone el sistema (el libre con
- * menos citas ese dia) y se puede cambiar por otro de los libres.
+ * La recepcion elige clinica, dia y hora; el doctor lo propone el sistema (el general libre
+ * con menos citas ese dia) y se puede cambiar por otro de los libres, o por un
+ * especialista, que nunca se propone solo y puede venir fuera de turno.
  */
 export default function CreateAppointmentModal({
   clinics,
@@ -68,7 +69,9 @@ export default function CreateAppointmentModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clinicId, date, minute, minutes, timezone, recheck]);
 
-  const assigned = doctorId ? free?.find((d) => d.id === doctorId) : free?.[0];
+  const general = free?.filter((d) => !d.isSpecialist) ?? [];
+  const specialists = free?.filter((d) => d.isSpecialist) ?? [];
+  const assigned = doctorId ? free?.find((d) => d.id === doctorId) : general[0];
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -181,19 +184,40 @@ export default function CreateAppointmentModal({
                 <AlertTriangle className="w-3.5 h-3.5" /> No hay doctores libres en esta clínica a esa hora. Pruebe otro horario.
               </p>
             ) : (
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-xs text-ink flex items-start gap-2 min-w-0">
-                  <Stethoscope className="w-3.5 h-3.5 text-green-600 shrink-0 mt-0.5" />
-                  <div className="min-w-0">
-                    <p className="truncate">Doctor: <b className="font-mono">{assigned?.code}</b> {assigned?.name}</p>
-                    {!doctorId && <p className="text-ink-subtle">El libre con menos citas ese día</p>}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-xs text-ink flex items-start gap-2 min-w-0">
+                    <Stethoscope className="w-3.5 h-3.5 text-green-600 shrink-0 mt-0.5" />
+                    <div className="min-w-0">
+                      {assigned ? (
+                        <p className="truncate">Doctor: <b className="font-mono">{assigned.code}</b> {assigned.name}</p>
+                      ) : (
+                        <p>No hay doctores generales libres a esa hora.</p>
+                      )}
+                      {!doctorId && assigned && <p className="text-ink-subtle">El libre con menos citas ese día</p>}
+                      {!assigned && <p className="text-ink-subtle">Puede elegir un especialista.</p>}
+                    </div>
                   </div>
+                  {(free.length > 1 || !assigned) && (
+                    <select value={doctorId} onChange={(e) => setDoctorId(e.target.value)} className="input !w-auto !py-1 !px-2 text-xs">
+                      <option value="">{general.length > 0 ? 'Automático' : 'Elegir…'}</option>
+                      {general.length > 0 && (
+                        <optgroup label="Generales">
+                          {general.map((d) => <option key={d.id} value={d.id}>{doctorOption(d)}</option>)}
+                        </optgroup>
+                      )}
+                      {specialists.length > 0 && (
+                        <optgroup label="Especialistas">
+                          {specialists.map((d) => <option key={d.id} value={d.id}>{doctorOption(d)}</option>)}
+                        </optgroup>
+                      )}
+                    </select>
+                  )}
                 </div>
-                {free.length > 1 && (
-                  <select value={doctorId} onChange={(e) => setDoctorId(e.target.value)} className="input !w-auto !py-1 !px-2 text-xs">
-                    <option value="">Automático</option>
-                    {free.map((d) => <option key={d.id} value={d.id}>{d.code} · {d.appointmentsToday} citas</option>)}
-                  </select>
+                {assigned?.isSpecialist && !assigned.inShift && (
+                  <p className="text-[11px] text-amber-700 flex items-start gap-1.5">
+                    <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" /> Fuera de su turno en esta clínica: confirme con el doctor que viene.
+                  </p>
                 )}
               </div>
             )}
@@ -206,7 +230,7 @@ export default function CreateAppointmentModal({
 
           <div className="flex gap-2">
             <button type="button" onClick={onClose} className="btn-secondary flex-1">Cancelar</button>
-            <button type="submit" disabled={saving || !free || free.length === 0} className="btn-primary flex-1">
+            <button type="submit" disabled={saving || !assigned} className="btn-primary flex-1">
               {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Agendar
             </button>
           </div>

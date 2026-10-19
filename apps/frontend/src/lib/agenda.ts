@@ -53,6 +53,9 @@ export interface Doctor {
   /** Cuando se le mando por WhatsApp el enlace para agregar su calendario. */
   googleLinkSentAt: string | null;
   isActive: boolean;
+  /** Se lo llama cuando hace falta: nunca se le asignan citas solo, y puede atender fuera de turno. */
+  isSpecialist: boolean;
+  specialty: string | null;
   shifts: Shift[];
 }
 
@@ -113,7 +116,7 @@ export interface Appointment {
   /** Por que no se le pudo avisar al paciente la ultima vez. */
   notifyError?: string | null;
   contact: { id: string; name: string | null; phone: string | null };
-  doctor?: { id: string; code: string; name: string };
+  doctor?: { id: string; code: string; name: string; isSpecialist?: boolean; specialty?: string | null };
   /** Solo en el dia de una clinica. */
   startMinute?: number;
   endMinute?: number;
@@ -161,6 +164,17 @@ export interface FreeDoctor {
   code: string;
   name: string;
   appointmentsToday: number;
+  /** Los especialistas vienen al final y nunca se asignan solos. */
+  isSpecialist: boolean;
+  specialty: string | null;
+  /** Si el horario cae en su turno de esa clinica. Un especialista puede estar libre sin turno. */
+  inShift: boolean;
+}
+
+/** Como se nombra a un doctor en un selector: el especialista con su especialidad y si viene fuera de turno. */
+export function doctorOption(d: FreeDoctor): string {
+  if (!d.isSpecialist) return `${d.code} · ${d.appointmentsToday} citas`;
+  return `${d.code} · ${d.specialty || 'Especialista'}${d.inShift ? '' : ' · fuera de turno'}`;
 }
 
 export const STATUS_LABEL: Record<AppointmentStatus, string> = {

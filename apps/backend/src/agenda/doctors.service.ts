@@ -55,7 +55,15 @@ export class DoctorsService {
     const code = dto.code.trim();
     await this.assertCodeFree(tenantId, code);
     const doctor = await this.prisma.doctor.create({
-      data: { tenantId, code, name: dto.name.trim(), phone: this.cleanPhone(dto.phone), googleEmail: this.cleanEmail(dto.googleEmail) },
+      data: {
+        tenantId,
+        code,
+        name: dto.name.trim(),
+        phone: this.cleanPhone(dto.phone),
+        googleEmail: this.cleanEmail(dto.googleEmail),
+        isSpecialist: dto.isSpecialist ?? false,
+        specialty: dto.specialty?.trim() || null,
+      },
     });
     return withoutCalendarToken(doctor);
   }
@@ -90,6 +98,9 @@ export class DoctorsService {
     // Desactivar no toca sus citas: las que ya tiene se siguen viendo en la agenda y la
     // clinica decide que hacer con ellas. Lo que deja de pasar es que le asignen nuevas.
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
+    // Pasar a especialista no mueve sus citas: las que ya tiene quedan con el.
+    if (dto.isSpecialist !== undefined) data.isSpecialist = dto.isSpecialist;
+    if (dto.specialty !== undefined) data.specialty = dto.specialty.trim() || null;
 
     return withoutCalendarToken(await this.prisma.doctor.update({ where: { id }, data }));
   }

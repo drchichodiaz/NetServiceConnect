@@ -18,7 +18,7 @@ const ACTIVE: AppointmentStatus[] = ['SCHEDULED', 'CONFIRMED', 'ARRIVED', 'DONE'
 /** Lo que se devuelve de una cita: con el paciente y el doctor, que es lo que se pinta. */
 const INCLUDE = {
   contact: { select: { id: true, name: true, phone: true } },
-  doctor: { select: { id: true, code: true, name: true } },
+  doctor: { select: { id: true, code: true, name: true, isSpecialist: true, specialty: true } },
 } as const;
 
 /**
@@ -178,6 +178,8 @@ export class AppointmentsService {
     const settings = await this.settings.requireEnabled(input.tenantId);
     const current = await this.findOpenForPatient(input.tenantId, input.appointmentId);
     if (!current) throw new BadRequestException('La cita ya no está vigente');
+    // Pasarla al doctor libre la sacaria del especialista: esas las cambia la clinica.
+    if (current.doctor.isSpecialist) throw new BadRequestException('Las citas con especialista las cambia la clínica');
     const startsAt = this.parseStart(input.startsAt.toISOString(), settings.timezone);
     const minutes = Math.round((current.endsAt.getTime() - current.startsAt.getTime()) / 60000);
     const endsAt = new Date(startsAt.getTime() + minutes * 60000);
@@ -293,15 +295,18 @@ export class AppointmentsService {
     let doctorId = current.doctorId;
     if (moved || reassigned) {
       if (moved) this.assertNotPast(endsAt);
-      const free = await this.availability.freeDoctors(actor.tenantId, channelAccountId, startsAt, minutes, id);
+      const free = await this.availability.freeDoctors(actor.tenantId, channelAccountId, startsAt, minutes, id, true);
       if (dto.doctorId) {
         if (!free.some((d) => d.id === dto.doctorId)) {
           throw new ConflictException('Ese doctor no está libre en ese horario');
         }
         doctorId = dto.doctorId;
       } else if (!free.some((d) => d.id === current.doctorId)) {
-        if (free.length === 0) throw new ConflictException('No hay doctores libres en ese horario');
-        doctorId = free[0].id;
+        // Una cita de especialista no se le pasa a otro doctor sin que nadie lo elija.
+        if (current.doctor.isSpecialist) throw new ConflictException(`${current.doctor.code} ya tiene otra cita a esa hora`);
+        const general = free.filter((d) => !d.isSpecialist);
+        if (general.length === 0) throw new ConflictException('No hay doctores libres en ese horario');
+        doctorId = general[0].id;
       }
     }
 
@@ -358,13 +363,15 @@ export class AppointmentsService {
       });
     }
 
-    // Tampoco puede pasarse del turno del doctor en esa clinica.
+    // Tampoco puede pasarse del turno del doctor en esa clinica (el especialista no tiene
+    // que estar en turno: solo libre).
     const free = await this.availability.freeDoctors(
       actor.tenantId,
       current.channelAccountId,
       current.startsAt,
       Math.round((endsAt.getTime() - current.startsAt.getTime()) / 60000),
       id,
+      true,
     );
     if (!free.some((d) => d.id === current.doctorId)) {
       throw new ConflictException('Alargarla se pasa del horario del doctor en esta clínica');
@@ -443,8 +450,9 @@ export class AppointmentsService {
     throw new ConflictException('Ese horario se acaba de ocupar. Elija otro.');
   }
 
+  /** El elegido a mano (puede ser un especialista, aun fuera de turno), o el general libre con menos citas. */
   private async pickDoctor(tenantId: string, channelAccountId: string, startsAt: Date, minutes: number, wanted?: string) {
-    const free = await this.availability.freeDoctors(tenantId, channelAccountId, startsAt, minutes);
+    const free = await this.availability.freeDoctors(tenantId, channelAccountId, startsAt, minutes, undefined, !!wanted);
     if (wanted) {
       if (!free.some((d) => d.id === wanted)) throw new ConflictException('Ese doctor no está libre en ese horario');
       return wanted;

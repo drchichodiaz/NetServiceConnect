@@ -97,6 +97,8 @@ const AI_MY_APPOINTMENTS_TOOL: AiTool = {
   name: 'mis_citas',
   description: 'Muestra las citas que el cliente ya tiene, para verlas, cambiarlas o cancelarlas. Úsala cuando pregunta por su cita o quiere moverla o cancelarla.',
 };
+const AI_SPECIALIST_TOOL = 'cita_especialista';
+const AI_SPECIALIST_TEXT = 'Con gusto. Las citas con especialista las coordina la clínica: en un momento alguien te escribe por aquí para buscarte el día.';
 const AI_RESUME_TEXT = '¿Hay algo más en lo que te pueda ayudar?';
 
 /** Lo que bookingScope devuelve cuando se puede seguir. */
@@ -451,6 +453,11 @@ export class BotService {
     // terminar se vuelve a este chat (bookingFromAi).
     if (result.ok && result.toolCall) {
       await this.prisma.auditLog.create({ data: { tenantId, conversationId, action: 'bot.ai_tool_called', metadata: { tool: result.toolCall } } });
+      // Cita con especialista: que tipo de cita es y con quien lo decide alguien de la clinica.
+      if (result.toolCall === AI_SPECIALIST_TOOL) {
+        if (!(await this.sendText(tenantId, conversationId, phone, account, AI_SPECIALIST_TEXT))) return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
+        return this.handoffToHuman(tenantId, conversationId, 'ai_specialist_request');
+      }
       await this.setContext(conversationId, { bookingFromAi: true, bookingNodeId: null, bookingAppointmentId: null, bookingView: null, retryCount: 0 });
       if (result.toolCall === AI_MY_APPOINTMENTS_TOOL.name) {
         return this.showBookingView(tenantId, conversationId, phone, account, { kind: 'mine' });
@@ -524,12 +531,31 @@ export class BotService {
   private async aiBookingTools(tenantId: string, botId: string): Promise<AiTool[]> {
     const settings = await this.agendaSettings.get(tenantId);
     if (!settings.enabled) return [];
-    const nodes = await this.prisma.tenantMenuNode.findMany({
-      where: { tenantId, botId, active: true, type: { in: ['BOOK_APPOINTMENT', 'MY_APPOINTMENTS'] } },
-      select: { type: true },
-    });
+    const [nodes, specialists] = await Promise.all([
+      this.prisma.tenantMenuNode.findMany({
+        where: { tenantId, botId, active: true, type: { in: ['BOOK_APPOINTMENT', 'MY_APPOINTMENTS'] } },
+        select: { type: true },
+      }),
+      this.prisma.doctor.findMany({ where: { tenantId, isActive: true, isSpecialist: true }, select: { specialty: true } }),
+    ]);
     const has = (type: string) => nodes.some((n) => n.type === type);
-    return [...(has('BOOK_APPOINTMENT') ? [AI_BOOK_TOOL] : []), ...(has('MY_APPOINTMENTS') ? [AI_MY_APPOINTMENTS_TOOL] : [])];
+    // Con especialistas cargados, su pedido va a la clinica, haya o no reserva en el menu.
+    const specialties = [...new Set(specialists.map((d) => d.specialty?.trim()).filter(Boolean))];
+    const specialistTool: AiTool[] = specialists.length
+      ? [
+          {
+            name: AI_SPECIALIST_TOOL,
+            description: `Pasa la conversación a alguien de la clínica para coordinar una cita con un especialista${
+              specialties.length ? ` (${specialties.join(', ')})` : ''
+            }. Úsala cuando el cliente quiere una cita con un especialista o para un tratamiento de especialidad.`,
+          },
+        ]
+      : [];
+    return [
+      ...(has('BOOK_APPOINTMENT') ? [AI_BOOK_TOOL] : []),
+      ...(has('MY_APPOINTMENTS') ? [AI_MY_APPOINTMENTS_TOOL] : []),
+      ...specialistTool,
+    ];
   }
 
   /** Termino (o dejo) la reserva que abrio la IA: se sigue conversando con ella. */
@@ -547,6 +573,8 @@ export class BotService {
       tools.includes(AI_BOOK_TOOL) &&
         'Si el cliente quiere agendar una cita, usa la función agendar_cita: le muestra los horarios libres reales. Nunca propongas, inventes ni confirmes días u horarios tú mismo, aunque el cliente te diga cuál quiere.',
       tools.includes(AI_MY_APPOINTMENTS_TOOL) && 'Si el cliente pregunta por una cita que ya tiene, o quiere cambiarla o cancelarla, usa la función mis_citas.',
+      tools.some((t) => t.name === AI_SPECIALIST_TOOL) &&
+        `Si el cliente quiere una cita con un especialista o para un tratamiento de especialidad, usa la función ${AI_SPECIALIST_TOOL} y no agendar_cita.`,
     ]
       .filter(Boolean)
       .map((line) => `${line}\n`)
@@ -887,7 +915,10 @@ ${knowledgeBase}
     // tiene que permitir y faltar mas que el limite. Si no, la atiende la clinica.
     const appt = await this.appointments.findOpenForPatient(tenantId, bookingAppointmentId);
     if (!appt || appt.contactId !== conv.contactId) return { ok: false as const, error: 'stale' };
-    const { patientCanReschedule: canReschedule, patientCanCancel: canCancel } = settings;
+    // Una cita con especialista no la cambia el paciente: el bot solo ofrece doctores
+    // generales y se la sacaria al especialista. Cancelarla si puede.
+    const canReschedule = settings.patientCanReschedule && !appt.doctor.isSpecialist;
+    const canCancel = settings.patientCanCancel;
     if (!canReschedule && !canCancel) return { ok: false as const, error: 'self_service_off' };
     if (appt.startsAt.getTime() - now.getTime() < settings.selfServiceCutoffHours * 3600_000) return { ok: false as const, error: 'too_late' };
     const start = toLocal(appt.startsAt, settings.timezone);

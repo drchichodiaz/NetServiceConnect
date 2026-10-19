@@ -10,6 +10,7 @@ import {
   FreeDoctor,
   STATUS_LABEL,
   clock,
+  doctorOption,
   fromLocal,
   hhmm,
   longDate,
@@ -190,6 +191,11 @@ function MoveForm({ appt, timezone, onMoved }: { appt: Appointment; timezone: st
   }, [date, minute, appt.id, appt.channelAccountId, length, timezone]);
 
   const doctorFree = free?.some((d) => d.id === doctorId);
+  const general = free?.filter((d) => !d.isSpecialist) ?? [];
+  const specialists = free?.filter((d) => d.isSpecialist) ?? [];
+  // La cita de un especialista no se pasa sola a otro doctor: si esta ocupado, se elige.
+  const canAuto = !appt.doctor?.isSpecialist && general.length > 0;
+  const chosen = doctorFree ? free?.find((d) => d.id === doctorId) : undefined;
 
   async function save() {
     setSaving(true);
@@ -220,13 +226,27 @@ function MoveForm({ appt, timezone, onMoved }: { appt: Appointment; timezone: st
       ) : free.length === 0 ? (
         <p className="text-xs text-amber-700">No hay doctores libres a esa hora en esta clínica.</p>
       ) : (
-        <select value={doctorFree ? doctorId : ''} onChange={(e) => setDoctorId(e.target.value)} className="input !py-1.5 text-xs">
-          {!doctorFree && <option value="">Asignar automáticamente ({free[0].code})</option>}
-          {free.map((d) => <option key={d.id} value={d.id}>{d.code} · {d.name} ({d.appointmentsToday} citas)</option>)}
-        </select>
+        <>
+          <select value={doctorFree ? doctorId : ''} onChange={(e) => setDoctorId(e.target.value)} className="input !py-1.5 text-xs">
+            {!doctorFree && <option value="">{canAuto ? `Asignar automáticamente (${general[0].code})` : `${appt.doctor?.code ?? 'El doctor'} está ocupado: elija otro`}</option>}
+            {general.length > 0 && (
+              <optgroup label="Generales">
+                {general.map((d) => <option key={d.id} value={d.id}>{d.code} · {d.name} ({d.appointmentsToday} citas)</option>)}
+              </optgroup>
+            )}
+            {specialists.length > 0 && (
+              <optgroup label="Especialistas">
+                {specialists.map((d) => <option key={d.id} value={d.id}>{doctorOption(d)}</option>)}
+              </optgroup>
+            )}
+          </select>
+          {chosen?.isSpecialist && !chosen.inShift && (
+            <p className="text-[11px] text-amber-700">Fuera de su turno en esta clínica: confirme con el doctor que viene.</p>
+          )}
+        </>
       )}
       <p className="text-[11px] text-ink-subtle">Al cambiarle la hora, el paciente vuelve a recibir el recordatorio para el horario nuevo.</p>
-      <button onClick={save} disabled={saving || !free || free.length === 0} className="btn-primary w-full !py-2 text-xs">
+      <button onClick={save} disabled={saving || !free || (!doctorFree && !canAuto)} className="btn-primary w-full !py-2 text-xs">
         {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Guardar cambio
       </button>
     </div>

@@ -74,6 +74,7 @@ export default function DoctorsTab({ clinics }: { clinics: Clinic[] }) {
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded-md bg-surface-subtle text-ink">{d.code}</span>
                 <span className="font-semibold text-sm text-ink">{d.name}</span>
+                {d.isSpecialist && <span className="badge bg-violet-100 text-violet-700">{d.specialty || 'Especialista'}</span>}
                 {!d.isActive && <span className="badge bg-surface-subtle text-ink-muted">Inactivo</span>}
               </div>
               <p className="text-xs text-ink-subtle mt-1">
@@ -112,7 +113,11 @@ export default function DoctorsTab({ clinics }: { clinics: Clinic[] }) {
           </div>
 
           <div className="mt-3 flex flex-wrap gap-1.5">
-            {d.shifts.length === 0 && <span className="text-xs text-ink-subtle">Sin turnos: no aparece en ninguna agenda.</span>}
+            {d.shifts.length === 0 && (
+              <span className="text-xs text-ink-subtle">
+                {d.isSpecialist ? 'Sin turnos: se lo agenda a mano cuando se lo llama.' : 'Sin turnos: no aparece en ninguna agenda.'}
+              </span>
+            )}
             {WEEK_ORDER.flatMap((wd) =>
               d.shifts
                 .filter((s) => s.weekday === wd)
@@ -152,14 +157,17 @@ function DoctorModal({ doctor, onClose, onSaved }: { doctor: Doctor | null; onCl
   const [googleEmail, setGoogleEmail] = useState(doctor?.googleEmail ?? '');
   const settings = useAgendaSettings();
   const [isActive, setIsActive] = useState(doctor?.isActive ?? true);
+  const [isSpecialist, setIsSpecialist] = useState(doctor?.isSpecialist ?? false);
+  const [specialty, setSpecialty] = useState(doctor?.specialty ?? '');
   const [saving, setSaving] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
     try {
-      if (doctor) await agendaApi.updateDoctor(doctor.id, { code, name, phone, googleEmail, isActive });
-      else await agendaApi.createDoctor({ code, name, phone, googleEmail });
+      const kind = { isSpecialist, specialty: isSpecialist ? specialty : '' };
+      if (doctor) await agendaApi.updateDoctor(doctor.id, { code, name, phone, googleEmail, isActive, ...kind });
+      else await agendaApi.createDoctor({ code, name, phone, googleEmail, ...kind });
       toast.success(doctor ? 'Doctor actualizado' : 'Doctor agregado');
       onSaved();
     } catch (err: any) {
@@ -201,6 +209,27 @@ function DoctorModal({ doctor, onClose, onSaved }: { doctor: Doctor | null; onCl
               </p>
             </div>
           )}
+          <div className="rounded-lg p-3 bg-surface-muted space-y-2">
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input type="checkbox" checked={isSpecialist} onChange={(e) => setIsSpecialist(e.target.checked)} className="w-3.5 h-3.5 mt-0.5" />
+              <span className="text-xs text-ink">
+                Especialista
+                <span className="block text-[11px] text-ink-subtle">
+                  Se lo llama cuando hace falta. El bot nunca le da citas: se lo elige a mano al crear la cita, aunque no
+                  tenga turno ese día. Los turnos son opcionales.
+                </span>
+              </span>
+            </label>
+            {isSpecialist && (
+              <input
+                value={specialty}
+                onChange={(e) => setSpecialty(e.target.value)}
+                placeholder="Especialidad (Ortodoncia, Cirugía…)"
+                className="input"
+                maxLength={60}
+              />
+            )}
+          </div>
           {doctor && (
             <label className="flex items-start gap-2 cursor-pointer rounded-lg p-3 bg-surface-muted">
               <input type="checkbox" checked={!isActive} onChange={(e) => setIsActive(!e.target.checked)} className="w-3.5 h-3.5 mt-0.5" />

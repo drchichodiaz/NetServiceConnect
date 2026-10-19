@@ -111,7 +111,7 @@ export class AgendaController {
     const length = minutes ? Number(minutes) : settings.slotMinutes;
     if (!Number.isInteger(length) || length < 15 || length > 240) throw new BadRequestException('Duración inválida');
     await this.availability.assertClinicAccess(user.tenantId, user, channelAccountId);
-    return this.availability.freeDoctors(user.tenantId, channelAccountId, start, length, excludeAppointmentId || undefined);
+    return this.availability.freeDoctors(user.tenantId, channelAccountId, start, length, excludeAppointmentId || undefined, true);
   }
 
   // ─── Citas: las opera la recepcion, asi que todos los roles ─────────────────

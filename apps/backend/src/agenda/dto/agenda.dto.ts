@@ -112,6 +112,17 @@ export class CreateDoctorDto {
   @IsEmail({}, { message: 'El Gmail del doctor no es una dirección válida' })
   @MaxLength(120)
   googleEmail?: string;
+
+  /** Se lo llama cuando hace falta: nunca se le asignan citas solo. */
+  @IsOptional()
+  @IsBoolean()
+  isSpecialist?: boolean;
+
+  /** "Ortodoncia", "Cirugía". Cadena vacia = sin especialidad. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  specialty?: string;
 }
 
 export class UpdateDoctorDto {
@@ -141,6 +152,15 @@ export class UpdateDoctorDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  isSpecialist?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  specialty?: string;
 }
 
 export class ShiftDto {
