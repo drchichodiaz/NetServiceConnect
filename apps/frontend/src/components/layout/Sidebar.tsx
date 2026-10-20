@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { MessageSquare, Users, Settings, LogOut, LayoutDashboard, Zap, Sparkles, BookUser, ShieldCheck, Building2, FileText, Bot, UserCircle, Megaphone, LifeBuoy, Handshake, Coins, CalendarDays, Stethoscope } from 'lucide-react';
+import { MessageSquare, Users, Settings, LogOut, LayoutDashboard, Zap, Sparkles, BookUser, ShieldCheck, Building2, FileText, Bot, UserCircle, Megaphone, LifeBuoy, Handshake, Coins, CalendarDays, Stethoscope, History } from 'lucide-react';
 import { useState } from 'react';
 import { useAuthStore } from '@/store/auth.store';
 import { useAgendaSettings } from '@/hooks/useAgendaSettings';
@@ -14,6 +14,7 @@ interface Props { user: User | null; }
 const navItems = [
   { href: '/dashboard',          icon: LayoutDashboard, label: 'Dashboard' },
   { href: '/inbox',              icon: MessageSquare,   label: 'Conversaciones' },
+  { href: '/activity',           icon: History,         label: 'Actividad' },
   { href: '/contacts',           icon: BookUser,        label: 'Contactos' },
   // Solo en las empresas con la agenda activada (se vende aparte).
   { href: '/agenda',             icon: CalendarDays,    label: 'Agenda', requiresAgenda: true },

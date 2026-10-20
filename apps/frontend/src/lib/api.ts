@@ -875,6 +875,7 @@ export const agendaApi = {
   freeDoctors: (params: { channelAccountId: string; startsAt: string; minutes?: number; excludeAppointmentId?: string }): Promise<FreeDoctor[]> =>
     api.get('/agenda/free-doctors', { params }).then((r) => r.data),
 
+  appointment: (id: string): Promise<Appointment> => api.get(`/agenda/appointments/${id}`).then((r) => r.data),
   appointmentsFor: (contactId: string): Promise<Appointment[]> =>
     api.get('/agenda/appointments', { params: { contactId } }).then((r) => r.data),
   createAppointment: (data: {
@@ -898,4 +899,33 @@ export const agendaApi = {
     api.post(`/agenda/appointments/${id}/status`, { status }).then((r) => r.data),
   /** "El doctor viene con unos minutos de atraso" al paciente de esa cita. */
   notifyDelay: (id: string) => api.post(`/agenda/appointments/${id}/notify-delay`).then((r) => r.data),
+};
+
+export type ActivityCategory = 'appointments' | 'handoffs' | 'bot' | 'team';
+
+export interface ActivityItem {
+  id: string;
+  at: string;
+  actor: 'bot' | 'user' | 'patient';
+  actorName: string | null;
+  category: ActivityCategory;
+  text: string;
+  channelAccountId: string | null;
+  conversationId: string | null;
+  canOpenConversation: boolean;
+  appointmentId: string | null;
+}
+
+export interface ActivityDay {
+  date: string;
+  timezone: string;
+  lines: { id: string; label: string }[];
+  truncated: boolean;
+  items: ActivityItem[];
+}
+
+/** La bitacora del dia: lo que hicieron el bot, el equipo y los pacientes. */
+export const activityApi = {
+  list: (params: { date?: string; channelAccountId?: string; category?: ActivityCategory }): Promise<ActivityDay> =>
+    api.get('/activity', { params }).then((r) => r.data),
 };

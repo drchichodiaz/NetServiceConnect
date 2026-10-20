@@ -32,6 +32,7 @@ import { SupportModule } from './support/support.module';
 import { AgendaModule } from './agenda/agenda.module';
 import { AgendaNotifyModule } from './agenda-notify/agenda-notify.module';
 import { AgendaGoogleModule } from './agenda-google/agenda-google.module';
+import { ActivityModule } from './activity/activity.module';
 import { RequestIdMiddleware } from './common/request-id.middleware';
 import { RequestLogInterceptor } from './common/request-log.interceptor';
 
@@ -68,6 +69,7 @@ import { RequestLogInterceptor } from './common/request-log.interceptor';
     AgendaModule,
     AgendaNotifyModule,
     AgendaGoogleModule,
+    ActivityModule,
   ],
   providers: [
     // Escribe una linea por pedido fallido, con el id que le pone RequestIdMiddleware:

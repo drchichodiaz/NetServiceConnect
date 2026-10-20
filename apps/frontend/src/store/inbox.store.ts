@@ -40,6 +40,8 @@ interface InboxStore {
   loadConversations: (opts?: { silent?: boolean }) => Promise<void>;
   loadAccounts: () => Promise<void>;
   selectConversation: (id: string) => Promise<void>;
+  /** Abre una conversacion desde otra pantalla, aunque este cerrada: pone la pestaña de su estado. */
+  openConversation: (id: string) => Promise<void>;
   setFilter: (filter: { status?: string; search?: string; channelAccountId?: string }) => void;
   updateConversation: (id: string, data: any) => Promise<void>;
   addMessage: (message: Message) => void;
@@ -131,6 +133,14 @@ export const useInboxStore = create<InboxStore>((set, get) => ({
     } finally {
       set({ isLoadingMessages: false });
     }
+  },
+
+  openConversation: async (id) => {
+    const conv = await conversationsApi.get(id);
+    // La bandeja solo muestra la conversacion seleccionada si esta en la lista cargada:
+    // sin cambiar de pestaña, una cerrada quedaria seleccionada y sin verse.
+    set({ filter: { status: conv.status } });
+    await get().selectConversation(id);
   },
 
   setFilter: (filter) => {
