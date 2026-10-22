@@ -1,10 +1,11 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { botsApi, settingsApi, BotSummary, AiReadiness } from '@/lib/api';
+import { botsApi, menuNodesApi, settingsApi, BotSummary, AiReadiness } from '@/lib/api';
+import { useAgendaSettings } from '@/hooks/useAgendaSettings';
 import {
   Bot, Check, Loader2, LayoutDashboard, ArrowRight, Sparkles, AlertTriangle, Plus, Copy, Star, Trash2, Pencil, X, Phone,
-  HelpCircle, ChevronDown,
+  HelpCircle, ChevronDown, CalendarPlus,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
@@ -38,6 +39,13 @@ export default function BotSettingsPage() {
   const [busy, setBusy] = useState(false);
   // Arranca siempre plegada: abierta ocupaba la pantalla entera al entrar.
   const [showHelp, setShowHelp] = useState(false);
+  const agenda = useAgendaSettings();
+  // undefined = el menú todavía no cargó: sin dato no se muestra el aviso.
+  const [bookingNode, setBookingNode] = useState<{ id: string; active: boolean } | null | undefined>(undefined);
+  const [treeKey, setTreeKey] = useState(0);
+  const [hasAiChatNode, setHasAiChatNode] = useState(false);
+  // Al cambiar de bot, el dato es del anterior hasta que cargue el menú nuevo.
+  useEffect(() => { setBookingNode(undefined); }, [selectedId]);
 
   useEffect(() => {
     (async () => {
@@ -126,6 +134,23 @@ export default function BotSettingsPage() {
 
   function patchSelected(patch: Partial<BotSummary>) {
     setBots((prev) => prev.map((b) => (b.id === selectedId ? { ...b, ...patch } : b)));
+  }
+
+  /**
+   * Que la IA de este bot pueda agendar: le agrega al menú la opción "Agendar cita" (o
+   * vuelve a prender la que estaba apagada). Es el mismo interruptor que agregarla a mano;
+   * el aviso existe porque, con un bot que arranca en la IA, nadie sabe que hace falta.
+   */
+  async function enableBooking() {
+    if (!selected || bookingNode === undefined) return;
+    try {
+      if (bookingNode) await menuNodesApi.update(bookingNode.id, { active: true });
+      else await menuNodesApi.create({ botId: selected.id, parentId: null, type: 'BOOK_APPOINTMENT', title: 'Agendar cita' });
+      setTreeKey((k) => k + 1);
+      toast.success('Listo: este bot ya agenda, reagenda y cancela citas');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'No se pudo agregar la opción');
+    }
   }
 
   if (loading) {
@@ -328,7 +353,10 @@ export default function BotSettingsPage() {
 
           <MenuTreeEditor
             botId={selected.id}
+            reloadKey={treeKey}
             onCountChange={(nodeCount) => patchSelected({ nodeCount })}
+            onBookingNodeChange={setBookingNode}
+            onAiChatNodeChange={setHasAiChatNode}
             aiMissing={[
               ...(!selected.aiKnowledgeBase?.trim() ? ['la información del negocio (más abajo en esta página)'] : []),
               ...(aiProblemText(ai) ? [`${aiProblemText(ai)} (Configuración → Créditos de IA)`] : []),
@@ -340,6 +368,9 @@ export default function BotSettingsPage() {
             bot={selected}
             aiProblem={aiProblemText(ai)}
             onSaved={patchSelected}
+            // Solo en un bot que usa la IA: en uno de puro menú, el botón le agregaría una opción visible que nadie pidió.
+            cannotBook={!!agenda?.enabled && (selected.startInAiChat || hasAiChatNode) && bookingNode !== undefined && !bookingNode?.active}
+            onEnableBooking={enableBooking}
           />
         </>
       )}
@@ -543,8 +574,16 @@ function MenuGreetingCard({
 // ─── Info del negocio + modo de arranque de un bot ────────────────────────────
 
 function AiCard({
-  bot, aiProblem, onSaved,
-}: { bot: BotSummary; aiProblem: string | null; onSaved: (patch: Partial<BotSummary>) => void }) {
+  bot, aiProblem, onSaved, cannotBook = false, onEnableBooking,
+}: {
+  bot: BotSummary;
+  aiProblem: string | null;
+  onSaved: (patch: Partial<BotSummary>) => void;
+  /** La empresa tiene agenda y este bot no tiene "Agendar cita": la IA no toca citas. */
+  cannotBook?: boolean;
+  onEnableBooking?: () => Promise<void>;
+}) {
+  const [enablingBooking, setEnablingBooking] = useState(false);
   const [aiKnowledgeBase, setAiKnowledgeBase] = useState(bot.aiKnowledgeBase ?? '');
   const [savingAi, setSavingAi] = useState(false);
   const [savingMode, setSavingMode] = useState(false);
@@ -638,6 +677,31 @@ function AiCard({
             El modo IA todavía no puede contestar: falta {aiProblem}. Mientras tanto, siempre deriva a un agente. Lo ves en{' '}
             <Link href="/settings/ai" className="underline font-semibold">Configuración → Créditos de IA</Link>, que vale para todos los bots.
           </span>
+        </div>
+      )}
+
+      {cannotBook && (
+        <div className="flex items-start gap-2 rounded-xl p-3 text-xs" style={{ background: '#EFF6FF', color: '#1E40AF' }}>
+          <CalendarPlus className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+          <div className="flex-1 space-y-2">
+            <p>
+              <strong>La IA de este bot no puede agendar, reagendar ni cancelar citas.</strong> Para eso el menú tiene que
+              tener la opción “Agendar cita”, aunque el cliente entre directo a la IA y no lo vea. Si pide una cita, la IA le
+              contesta con texto.
+            </p>
+            <button
+              type="button"
+              disabled={enablingBooking}
+              onClick={async () => {
+                setEnablingBooking(true);
+                try { await onEnableBooking?.(); } finally { setEnablingBooking(false); }
+              }}
+              className="btn-primary !py-1.5 !px-3 text-xs"
+            >
+              {enablingBooking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CalendarPlus className="w-3.5 h-3.5" />}
+              Permitir que agende
+            </button>
+          </div>
         </div>
       )}
 

@@ -33,10 +33,16 @@ const DEFAULT_TITLE: Record<MenuNodeType, string> = {
 };
 
 export default function MenuTreeEditor({
-  botId, onCountChange, aiMissing = [],
+  botId, onCountChange, onBookingNodeChange, onAiChatNodeChange, reloadKey = 0, aiMissing = [],
 }: {
   botId: string;
   onCountChange?: (count: number) => void;
+  /** La opción "Agendar cita" del menú (null = no tiene): de ella depende que la IA agende. */
+  onBookingNodeChange?: (node: { id: string; active: boolean } | null) => void;
+  /** Si el menú tiene una opción "Modo IA" activa: con eso el bot usa la IA aunque arranque en el menú. */
+  onAiChatNodeChange?: (has: boolean) => void;
+  /** Cambiarlo vuelve a leer el menú: lo usa la página cuando agrega una opción desde afuera. */
+  reloadKey?: number;
   /** Lo que le falta al modo IA de este bot para funcionar; vacío = está completo. */
   aiMissing?: string[];
 }) {
@@ -60,9 +66,26 @@ export default function MenuTreeEditor({
   }, [botId]);
 
   useEffect(() => {
+    if (reloadKey > 0) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reloadKey]);
+
+  useEffect(() => {
     if (!loading) onCountChange?.(nodes.length);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodes.length, loading]);
+
+  // La activa si hay una; si no, la desactivada, para volver a prenderla en vez de duplicarla.
+  const booking = nodes.find((n) => n.type === 'BOOK_APPOINTMENT' && n.active) ?? nodes.find((n) => n.type === 'BOOK_APPOINTMENT') ?? null;
+  useEffect(() => {
+    if (!loading) onBookingNodeChange?.(booking ? { id: booking.id, active: booking.active } : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [booking?.id, booking?.active, loading]);
+  const hasAiChat = nodes.some((n) => n.type === 'AI_CHAT' && n.active);
+  useEffect(() => {
+    if (!loading) onAiChatNodeChange?.(hasAiChat);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasAiChat, loading]);
 
   async function load() {
     setLoading(true);
