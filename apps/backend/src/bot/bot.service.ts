@@ -525,8 +525,13 @@ export class BotService {
 
   /**
    * Lo que el chat de IA puede abrir del flujo de citas. Sigue a las opciones del menu
-   * del bot: si el admin puso "Agendar cita" (o "Mis citas"), la IA tambien puede
-   * llevar ahi; si no, no se le ofrece. Con la agenda apagada, nada.
+   * del bot: si el admin puso "Agendar cita", la IA tambien puede reservar; si no, no se
+   * le ofrece. Con la agenda apagada, nada.
+   *
+   * "Mis citas" va con cualquiera de las dos: un bot que reserva tiene que poder cambiar
+   * y cancelar. En un bot que arranca en la IA el paciente casi nunca ve el menu, y que
+   * la IA dependiera de una opcion escondida dejaba a Red Dental reservando sin poder
+   * reagendar. Que puede hacer con su cita lo deciden los ajustes de la agenda.
    */
   private async aiBookingTools(tenantId: string, botId: string): Promise<AiTool[]> {
     const settings = await this.agendaSettings.get(tenantId);
@@ -553,7 +558,7 @@ export class BotService {
       : [];
     return [
       ...(has('BOOK_APPOINTMENT') ? [AI_BOOK_TOOL] : []),
-      ...(has('MY_APPOINTMENTS') ? [AI_MY_APPOINTMENTS_TOOL] : []),
+      ...(has('MY_APPOINTMENTS') || has('BOOK_APPOINTMENT') ? [AI_MY_APPOINTMENTS_TOOL] : []),
       ...specialistTool,
     ];
   }

@@ -257,8 +257,9 @@ export default function NodeEditPanel({ node, descendantCount, saving, onSave, o
             placeholder="Ej: Cuéntame en qué te puedo ayudar."
           />
           <p className="text-xs text-ink-muted pt-1">
-            Si este menú tiene “Agendar cita” o “Mis citas”, la IA las abre cuando el cliente pide una cita o pregunta
-            por la suya, con los mismos botones del menú. Al terminar, sigue la conversación con la IA.
+            Si este menú tiene “Agendar cita”, la IA reserva cuando el cliente pide una cita, y también le muestra sus
+            citas para cambiarlas o cancelarlas (lo que permitan los ajustes de la agenda). Usa los mismos botones del
+            menú y, al terminar, sigue la conversación con la IA.
           </p>
         </div>
       )}

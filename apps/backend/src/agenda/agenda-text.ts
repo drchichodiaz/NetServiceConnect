@@ -34,7 +34,12 @@ export function hourText(minute: number) {
   return `${h12}:${String(minute % 60).padStart(2, '0')} ${h < 12 ? 'a.m.' : 'p.m.'}`;
 }
 
-/** El nombre de la clinica para el paciente: el de la linea, que es la clinica. */
+/**
+ * El nombre de la clinica para el paciente: el de la linea, que es la clinica. Sin el
+ * punto final: va en medio de una oracion que ya pone el suyo, y "Zona 6 Mixco." dejaba
+ * "en Zona 6 Mixco.. Antes de la cita".
+ */
 export function clinicName(line: { label?: string | null; displayName?: string | null; businessName?: string | null }) {
-  return line.label?.trim() || line.displayName?.trim() || line.businessName?.trim() || 'la clínica';
+  const name = line.label?.trim() || line.displayName?.trim() || line.businessName?.trim() || 'la clínica';
+  return name.replace(/\.+$/, '') || 'la clínica';
 }
