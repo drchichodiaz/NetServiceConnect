@@ -929,3 +929,12 @@ export const activityApi = {
   list: (params: { date?: string; channelAccountId?: string; category?: ActivityCategory }): Promise<ActivityDay> =>
     api.get('/activity', { params }).then((r) => r.data),
 };
+
+/** Llamadas de voz de WhatsApp. El audio va por WebRTC; esto solo atiende, corta y configura. */
+export const callsApi = {
+  accept: (id: string, sdp: string) => api.post(`/calls/${id}/accept`, { sdp }).then((r) => r.data),
+  reject: (id: string) => api.post(`/calls/${id}/reject`).then((r) => r.data),
+  hangup: (id: string) => api.post(`/calls/${id}/hangup`).then((r) => r.data),
+  setLineEnabled: (accountId: string, enabled: boolean): Promise<{ callingEnabled: boolean }> =>
+    api.post(`/calls/lines/${accountId}`, { enabled }).then((r) => r.data),
+};

@@ -80,6 +80,7 @@ model Tenant {
   appointments     Appointment[]
   doctorSummaries  DoctorDailySummary[]
   clinicGoogleCalendars ClinicGoogleCalendar[]
+  calls            Call[]
   partner          Partner?             @relation(fields: [partnerId], references: [id], onDelete: SetNull)
 
   @@index([partnerId])
@@ -147,6 +148,7 @@ model User {
   supportRequests SupportRequest[]
   aiUsages        AiUsage[]
   appointments    Appointment[]
+  answeredCalls   Call[]
 
   // Unico en todo el sistema, no por empresa: con el email repetido entre empresas el
   // login no puede saber a cual entrar (se quedaba con el primero que encontraba) y
@@ -233,6 +235,10 @@ model ChannelAccount {
   // son cosas distintas y las dos necesitan poder expresarse.
   botId              String?
   botEnabled         Boolean              @default(true)
+  // Llamadas de WhatsApp activadas en Meta para este numero. Se guarda aca lo que se
+  // pidio desde el panel: Meta es la fuente de verdad, pero consultarla por cada linea
+  // al pintar la pantalla es lo mismo que platformStatus.
+  callingEnabled     Boolean              @default(false)
   webhookVerifyToken String               @default(cuid())
   isActive           Boolean              @default(true)
   signupStatus       EmbeddedSignupStatus @default(PENDING)
@@ -249,6 +255,7 @@ model ChannelAccount {
   doctorExceptions DoctorException[]
   appointments     Appointment[]
   googleCalendar   ClinicGoogleCalendar?
+  calls            Call[]
 
   // Los dos unique conviven porque en Postgres los NULL no colisionan entre si: una
   // cuenta de Instagram tiene phoneNumberId NULL y no pelea con las lineas de WhatsApp,
@@ -408,6 +415,7 @@ model Conversation {
   tags           ConversationTag[]
   auditLogs      AuditLog[]
   aiUsages       AiUsage[]
+  calls          Call[]
 
   @@index([tenantId, status])
   @@index([tenantId, lastMessageAt])
@@ -502,6 +510,51 @@ enum MessageStatus {
   SENT
   DELIVERED
   READ
+  FAILED
+}
+
+// ─── Llamadas de WhatsApp ─────────────────────────────────────────────────────
+
+// Una llamada de voz que entro por la Calling API de Meta. El audio no pasa por aca
+// (va entre el navegador del agente y Meta por WebRTC): esto guarda quien llamo, quien
+// atendio y como termino, que es lo que la bandeja y la bitacora necesitan.
+model Call {
+  id               String     @id @default(cuid())
+  tenantId         String
+  channelAccountId String?
+  conversationId   String?
+  // El call_id de Meta. Con el se atiende, se rechaza y se cuelga, y por el llega el
+  // aviso de que termino.
+  externalId       String
+  status           CallStatus @default(RINGING)
+  // La oferta SDP de Meta. El navegador que atiende arma su respuesta sobre esto; se
+  // guarda porque el aviso de que suena puede llegar antes que el agente abra el panel.
+  sdpOffer         String?
+  answeredById     String?
+  answeredAt       DateTime?
+  endedAt          DateTime?
+  durationSec      Int?
+  // Motivo de un FAILED segun Meta ("codigo: detalle").
+  failureReason    String?
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  channelAccount ChannelAccount? @relation(fields: [channelAccountId], references: [id], onDelete: SetNull)
+  conversation   Conversation?   @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  answeredBy     User?           @relation(fields: [answeredById], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, externalId])
+  @@index([tenantId, createdAt])
+  @@index([conversationId])
+}
+
+enum CallStatus {
+  RINGING
+  ANSWERED // en curso
+  COMPLETED
+  MISSED
+  REJECTED
   FAILED
 }
 

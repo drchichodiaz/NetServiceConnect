@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 
 export interface AppEvent {
-  type: 'new_message' | 'conversation_updated' | 'message_status' | 'agenda_changed';
+  type: 'new_message' | 'conversation_updated' | 'message_status' | 'agenda_changed' | 'call_ringing' | 'call_updated';
   tenantId: string;
   payload: any;
 }

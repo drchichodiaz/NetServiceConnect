@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { DM_Sans, DM_Mono } from 'next/font/google';
 import { Toaster } from 'react-hot-toast';
 import { BRAND } from '@/lib/brand';
+import CallManager from '@/components/calls/CallManager';
 import './globals.css';
 
 const dmSans = DM_Sans({
@@ -26,6 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="es" className={`${dmSans.variable} ${dmMono.variable}`}>
       <body className="font-sans antialiased">
         {children}
+        <CallManager />
         <Toaster
           position="top-right"
           toastOptions={{

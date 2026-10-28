@@ -49,6 +49,7 @@ export class WhatsAppAccountsService {
     isActive: true,
     botId: true,
     botEnabled: true,
+    callingEnabled: true,
     webhookVerifyToken: true,
     createdAt: true,
     updatedAt: true,

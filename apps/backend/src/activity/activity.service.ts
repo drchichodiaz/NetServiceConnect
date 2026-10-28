@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ChannelAccessService } from '../common/services/channel-access.service';
 import { fromLocal, isValidDate, MINUTES_PER_DAY, toLocal } from '../agenda/agenda-time';
 import { clinicName, dayText, hourText } from '../agenda/agenda-text';
+import { formatDuration } from '../calls/calls.service';
 
 /** Quien hizo lo que dice la linea. */
 export type ActivityActor = 'bot' | 'user' | 'patient';
@@ -46,6 +47,9 @@ const ACTIONS = [
   'appointment.extended',
   'appointment.status',
   'appointment.patient_reply',
+  'call.completed',
+  'call.missed',
+  'call.rejected',
 ];
 
 /** Un dia muy movido de una empresa grande ronda el millar; esto es solo un techo. */
@@ -258,6 +262,15 @@ export class ActivityService {
         if (!status) return null;
         return { actor: who, category: 'appointments', text: `Marcó como ${status} la cita de ${patient} del ${apptWhen}` };
       }
+      case 'call.completed': {
+        const length = typeof m.durationSec === 'number' && m.durationSec > 0 ? ` (${formatDuration(m.durationSec)})` : '';
+        return { actor: 'user', category: 'team', text: `Atendió una llamada de ${patient}${length}` };
+      }
+      case 'call.missed':
+        return { actor: 'patient', category: 'team', text: `${patient} llamó y nadie atendió` };
+      case 'call.rejected':
+        return { actor: 'user', category: 'team', text: `Rechazó una llamada de ${patient}` };
+
       case 'appointment.patient_reply':
         if (m.kind === 'CONFIRM') return { actor: 'patient', category: 'appointments', text: `${patient} confirmó su cita del ${apptWhen}` };
         if (m.kind === 'RESCHEDULE') return { actor: 'patient', category: 'appointments', text: `${patient} pidió reprogramar su cita del ${apptWhen}` };

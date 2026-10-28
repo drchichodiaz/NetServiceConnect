@@ -8,6 +8,7 @@ import { BotService } from '../bot/bot.service';
 import { BotsService } from '../bots/bots.service';
 import { AssignmentService } from './assignment.service';
 import { AgendaRepliesService, AgendaReplyMatch } from '../agenda/agenda-replies.service';
+import { CallsService } from '../calls/calls.service';
 import axios from 'axios';
 
 /**
@@ -36,6 +37,7 @@ export class WebhookService {
     private bots: BotsService,
     private assignmentService: AssignmentService,
     private agendaReplies: AgendaRepliesService,
+    private calls: CallsService,
     config: ConfigService,
   ) {
     this.apiVersion = config.get('META_API_VERSION') || 'v19.0';
@@ -46,7 +48,7 @@ export class WebhookService {
 
     for (const entry of payload.entry ?? []) {
       for (const change of entry.changes ?? []) {
-        if (change.field !== 'messages') continue;
+        if (change.field !== 'messages' && change.field !== 'calls') continue;
 
         const value = change.value;
         // phoneNumberId es más específico que wabaId para el lookup del tenant
@@ -58,6 +60,11 @@ export class WebhookService {
 
         if (!account) {
           this.logger.warn(`No hay cuenta activa para phoneNumberId ${phoneNumberId}`);
+          continue;
+        }
+
+        if (change.field === 'calls') {
+          await this.calls.handleWebhook(account, value);
           continue;
         }
 

@@ -1,12 +1,12 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { whatsappApi, botsApi, BotSummary } from '@/lib/api';
+import { whatsappApi, botsApi, BotSummary, callsApi } from '@/lib/api';
 import { WhatsAppAccount, accountLabel } from '@/types';
 import EmbeddedSignup from '@/components/whatsapp/EmbeddedSignup';
 import {
   CheckCircle, Copy, Eye, EyeOff, Wifi, WifiOff, Plus, Star,
-  KeyRound, Loader2, AlertCircle, Zap, Pencil, RefreshCw, Phone, X, Check, Bot,
+  KeyRound, Loader2, AlertCircle, Zap, Pencil, RefreshCw, Phone, PhoneCall, X, Check, Bot,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
@@ -339,6 +339,7 @@ function AccountCard({
           </p>
 
           {bots.length > 0 && <BotSelector account={account} bots={bots} onChanged={onChanged} />}
+          {isConnected && isRegistered && <CallingToggle account={account} onChanged={onChanged} />}
 
           <div className="flex items-center gap-3 mt-2">
             <button
@@ -492,6 +493,51 @@ function BotSelector({
           : 'Vale para las conversaciones nuevas; las que están en curso terminan con el bot con el que empezaron.'}{' '}
         <Link href="/settings/bot" className="underline hover:text-ink">Ver y editar los bots</Link>
       </p>
+    </div>
+  );
+}
+
+// ─── Llamadas de WhatsApp ─────────────────────────────────────────────────────
+// Prenderlas hace aparecer el boton de llamar en el chat de todos los clientes de la
+// linea, por eso se confirma: una llamada a la que nadie atiende es peor que no tenerla.
+
+function CallingToggle({
+  account, onChanged,
+}: { account: WhatsAppAccount; onChanged: (accounts: WhatsAppAccount[]) => void }) {
+  const [saving, setSaving] = useState(false);
+  const enabled = !!account.callingEnabled;
+
+  async function toggle() {
+    const next = !enabled;
+    if (next && !confirm(
+      `A los clientes de "${accountLabel(account)}" les va a aparecer el botón de llamar en WhatsApp. ` +
+      'Las llamadas suenan en el panel de quienes ven esta línea y se atienden desde el navegador, con micrófono. ¿Activar?',
+    )) return;
+    setSaving(true);
+    try {
+      await callsApi.setLineEnabled(account.id, next);
+      onChanged(await whatsappApi.listAccounts());
+      toast.success(next ? 'Llamadas activadas en la línea' : 'Llamadas desactivadas en la línea');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'No se pudo cambiar las llamadas');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      <PhoneCall className="w-3.5 h-3.5 text-ink-subtle shrink-0" />
+      <span className="text-xs text-ink-muted">Llamadas de WhatsApp</span>
+      <button
+        onClick={toggle}
+        disabled={saving}
+        className="text-[11px] font-semibold rounded-full px-2 py-0.5 transition-colors"
+        style={enabled ? { background: '#E8FBF0', color: '#15803D' } : { background: '#F3F4F6', color: '#6B7280' }}
+        title={enabled ? 'Tocá para desactivarlas' : 'Tocá para activarlas'}
+      >
+        {saving ? 'Guardando…' : enabled ? 'Activadas' : 'Desactivadas'}
+      </button>
     </div>
   );
 }

@@ -139,6 +139,8 @@ export interface WhatsAppAccount {
   botId?: string | null;
   /** false = sin bot: las conversaciones entran directo a los agentes. */
   botEnabled?: boolean;
+  /** Llamadas de WhatsApp activadas en Meta: los clientes ven el boton de llamar. */
+  callingEnabled?: boolean;
   webhookVerifyToken: string;
   createdAt: string;
   updatedAt: string;
