@@ -89,4 +89,19 @@
     background-color: #D1D5DB;
     border-radius: 9999px;
   }
+
+  /* El del menu lateral: oscuro, sobre el fondo del sidebar. */
+  .scrollbar-sidebar {
+    scrollbar-width: thin;
+    scrollbar-color: #30363D transparent;
+  }
+
+  .scrollbar-sidebar::-webkit-scrollbar {
+    width: 3px;
+  }
+
+  .scrollbar-sidebar::-webkit-scrollbar-thumb {
+    background-color: #30363D;
+    border-radius: 9999px;
+  }
 }

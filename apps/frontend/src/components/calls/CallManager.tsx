@@ -55,6 +55,7 @@ export default function CallManager() {
   const activeRef = useRef<ActiveCall | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const ringtone = useRingtone();
+  const drag = useDraggable();
 
   activeRef.current = active;
 
@@ -222,7 +223,7 @@ export default function CallManager() {
       <audio ref={audioRef} autoPlay className="hidden" />
 
       {incoming && (
-        <div className="fixed bottom-5 right-5 z-[60] w-80 rounded-2xl bg-sidebar text-white shadow-2xl p-4 animate-fade-in">
+        <div {...drag.props} className="fixed z-[60] w-80 rounded-2xl bg-sidebar text-white shadow-2xl p-4 cursor-grab active:cursor-grabbing select-none touch-none">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center animate-pulse">
               <Phone size={18} className="text-green-400" />
@@ -258,7 +259,7 @@ export default function CallManager() {
       )}
 
       {active && (
-        <div className="fixed bottom-5 right-5 z-[60] w-80 rounded-2xl bg-sidebar text-white shadow-2xl p-4">
+        <div {...drag.props} className="fixed z-[60] w-80 rounded-2xl bg-sidebar text-white shadow-2xl p-4 cursor-grab active:cursor-grabbing select-none touch-none">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <p className="text-[11px] uppercase tracking-wide text-white/50">
@@ -320,6 +321,86 @@ function notify(call: RingingCall) {
 function formatElapsed(sec: number) {
   const m = Math.floor(sec / 60);
   return `${m}:${String(sec % 60).padStart(2, '0')}`;
+}
+
+const POSITION_KEY = 'call-panel-position';
+const EDGE = 20; // la esquina de siempre: bottom-5 right-5
+const MARGIN = 8; // lo minimo que queda visible contra el borde de la ventana
+
+/**
+ * La ventanita de la llamada se puede arrastrar a cualquier lado: fija abajo a la
+ * derecha tapaba lo que hubiera en esa esquina durante toda la llamada.
+ *
+ * La posicion se guarda como distancia al borde inferior derecho, asi al achicar la
+ * ventana del navegador el panel acompaña a la esquina en vez de quedar afuera. Se
+ * recuerda en este navegador para la proxima llamada. Arrastra desde cualquier parte
+ * menos los botones, que tienen que seguir respondiendo al primer toque.
+ */
+function useDraggable() {
+  const [pos, setPos] = useState<{ right: number; bottom: number }>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(POSITION_KEY) || 'null');
+      if (typeof saved?.right === 'number' && typeof saved?.bottom === 'number') return saved;
+    } catch { /* sin almacenamiento: la esquina de siempre */ }
+    return { right: EDGE, bottom: EDGE };
+  });
+  const el = useRef<HTMLDivElement | null>(null);
+  const start = useRef<{ x: number; y: number; right: number; bottom: number } | null>(null);
+
+  const clamp = useCallback((p: { right: number; bottom: number }) => {
+    const w = el.current?.offsetWidth ?? 320;
+    const h = el.current?.offsetHeight ?? 140;
+    return {
+      right: Math.min(Math.max(p.right, MARGIN), Math.max(MARGIN, window.innerWidth - w - MARGIN)),
+      bottom: Math.min(Math.max(p.bottom, MARGIN), Math.max(MARGIN, window.innerHeight - h - MARGIN)),
+    };
+  }, []);
+
+  // Una posicion guardada en una pantalla mas grande puede caer fuera de esta.
+  useEffect(() => {
+    const fit = () => setPos((p) => clamp(p));
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, [clamp]);
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || (e.target as HTMLElement).closest('button')) return;
+    start.current = { x: e.clientX, y: e.clientY, ...pos };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const s = start.current;
+    if (!s) return;
+    setPos(clamp({ right: s.right - (e.clientX - s.x), bottom: s.bottom - (e.clientY - s.y) }));
+  };
+
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!start.current) return;
+    start.current = null;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    setPos((p) => {
+      try { localStorage.setItem(POSITION_KEY, JSON.stringify(p)); } catch { /* no se recuerda, nada mas */ }
+      return p;
+    });
+  };
+
+  const ref = useCallback((node: HTMLDivElement | null) => {
+    el.current = node;
+    // Al aparecer se mide de verdad: el alto cambia entre "suena" y "en llamada".
+    if (node) setPos((p) => clamp(p));
+  }, [clamp]);
+
+  return {
+    props: {
+      ref,
+      style: { right: pos.right, bottom: pos.bottom },
+      onPointerDown,
+      onPointerMove,
+      onPointerUp,
+      onPointerCancel: onPointerUp,
+    },
+  };
 }
 
 /**

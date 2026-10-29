@@ -59,18 +59,33 @@ export default function Sidebar({ user }: Props) {
     ? user.name.split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase()
     : '?';
 
+  // Un solo tooltip, con posicion fija, para todo el menu. Cada opcion tenia el suyo
+  // colgando a la derecha, pero la lista ahora hace scroll y un contenedor con scroll
+  // recorta todo lo que se sale de el, tooltips incluidos.
+  const [tip, setTip] = useState<{ label: string; top: number } | null>(null);
+  const showTip = (label: string) => (e: React.MouseEvent<HTMLElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    setTip({ label, top: r.top + r.height / 2 });
+  };
+  const hideTip = () => setTip(null);
+
   return (
+    // h-full + min-h-0: sin alto propio el menu crecia con la cantidad de opciones y en
+    // pantallas bajas lo de abajo (soporte, mi cuenta, salir) quedaba fuera de la
+    // ventana sin forma de llegar. Ahora la lista del medio hace scroll y el pie queda
+    // siempre a la vista. En pantallas bajas ademas se compacta, para que el scroll sea
+    // la excepcion.
     <aside
-      className="w-[60px] shrink-0 flex flex-col items-center py-4 gap-1"
+      className="w-[60px] shrink-0 h-full min-h-0 flex flex-col items-center py-4 [@media(max-height:760px)]:py-2"
       style={{
         background:   'var(--sidebar-bg)',
         borderRight:  '1px solid var(--sidebar-border)',
       }}
     >
       {/* Logo */}
-      <div className="mb-5 mt-1">
+      <div className="mb-5 mt-1 shrink-0 [@media(max-height:760px)]:mb-2 [@media(max-height:760px)]:mt-0">
         <div
-          className="w-9 h-9 rounded-xl flex items-center justify-center"
+          className="w-9 h-9 rounded-xl flex items-center justify-center [@media(max-height:760px)]:w-8 [@media(max-height:760px)]:h-8"
           style={{ background: '#25D366' }}
         >
           <MessageSquare className="w-4 h-4 text-white" />
@@ -78,7 +93,10 @@ export default function Sidebar({ user }: Props) {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 flex flex-col gap-1 w-full px-2">
+      <nav
+        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden scrollbar-sidebar flex flex-col gap-1 [@media(max-height:760px)]:gap-0.5 w-full px-2"
+        onScroll={hideTip}
+      >
         {visibleItems.map(({ href, icon: Icon, label }) => {
           // Coincidencia por tramo completo, no por prefijo de texto: con startsWith,
           // "/settings/ai-credits" tambien marcaba activo a "/settings/ai" y se
@@ -86,20 +104,23 @@ export default function Sidebar({ user }: Props) {
           // (/inbox/123 marca /inbox) sin que un nombre mas largo pise a otro.
           const active = pathname === href || pathname.startsWith(href + '/');
           return (
-            <div key={href} className="relative group">
+            <div key={href} className="relative shrink-0">
               <Link
                 href={href}
+                aria-label={label}
                 className={clsx(
-                  'flex items-center justify-center w-full h-9 rounded-lg transition-all duration-150',
+                  'flex items-center justify-center w-full h-9 [@media(max-height:760px)]:h-8 rounded-lg transition-all duration-150',
                   active
                     ? 'text-white'
                     : 'text-gray-500 hover:text-gray-300',
                 )}
                 style={active ? { background: 'var(--sidebar-active)' } : {}}
                 onMouseEnter={(e) => {
+                  showTip(label)(e);
                   if (!active) (e.currentTarget as HTMLElement).style.background = 'var(--sidebar-hover)';
                 }}
                 onMouseLeave={(e) => {
+                  hideTip();
                   if (!active) (e.currentTarget as HTMLElement).style.background = '';
                 }}
               >
@@ -111,100 +132,29 @@ export default function Sidebar({ user }: Props) {
                 )}
                 <Icon className="w-4 h-4" />
               </Link>
-
-              {/* Tooltip */}
-              <div
-                className="absolute left-full ml-3 top-1/2 -translate-y-1/2 z-50
-                           bg-gray-900 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg
-                           whitespace-nowrap pointer-events-none
-                           opacity-0 group-hover:opacity-100 translate-x-[-4px] group-hover:translate-x-0
-                           transition-all duration-150 shadow-float"
-                style={{ border: '1px solid #21262D' }}
-              >
-                {label}
-                <span
-                  className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent"
-                  style={{ borderRightColor: '#111827' }}
-                />
-              </div>
             </div>
           );
         })}
       </nav>
 
-      {/* Footer */}
-      <div className="flex flex-col items-center gap-2 w-full px-2">
-        {/* Soporte */}
-        <div className="relative group">
-          <button
-            onClick={() => setShowSupport(true)}
-            className="flex items-center justify-center w-9 h-9 rounded-lg text-gray-500 hover:text-gray-300 transition-all duration-150"
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--sidebar-hover)'; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = ''; }}
-          >
-            <LifeBuoy className="w-4 h-4" />
-          </button>
-          <div
-            className="absolute left-full ml-3 top-1/2 -translate-y-1/2 z-50
-                       bg-gray-900 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg
-                       whitespace-nowrap pointer-events-none
-                       opacity-0 group-hover:opacity-100 transition-all duration-150 shadow-float"
-            style={{ border: '1px solid #21262D' }}
-          >
-            Reportar un problema
-            <span
-              className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent"
-              style={{ borderRightColor: '#111827' }}
-            />
-          </div>
-        </div>
-
-        {/* Mi cuenta */}
-        <div className="relative group">
-          <button
-            onClick={() => router.push('/settings/account')}
-            className="flex items-center justify-center w-9 h-9 rounded-lg text-gray-500 hover:text-gray-300 transition-all duration-150"
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--sidebar-hover)'; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = ''; }}
-          >
-            <UserCircle className="w-4 h-4" />
-          </button>
-          <div
-            className="absolute left-full ml-3 top-1/2 -translate-y-1/2 z-50
-                       bg-gray-900 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg
-                       whitespace-nowrap pointer-events-none
-                       opacity-0 group-hover:opacity-100 transition-all duration-150 shadow-float"
-            style={{ border: '1px solid #21262D' }}
-          >
-            Mi cuenta
-          </div>
-        </div>
-
-        {/* Logout */}
-        <div className="relative group">
-          <button
-            onClick={handleLogout}
-            className="flex items-center justify-center w-9 h-9 rounded-lg text-gray-500 hover:text-gray-300 transition-all duration-150"
-            style={{}}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--sidebar-hover)'; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = ''; }}
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
-          <div
-            className="absolute left-full ml-3 top-1/2 -translate-y-1/2 z-50
-                       bg-gray-900 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg
-                       whitespace-nowrap pointer-events-none
-                       opacity-0 group-hover:opacity-100 transition-all duration-150 shadow-float"
-            style={{ border: '1px solid #21262D' }}
-          >
-            Cerrar sesión
-          </div>
-        </div>
+      {/* Footer: nunca se achica, es lo que no puede quedar fuera de la pantalla */}
+      <div
+        className="shrink-0 flex flex-col items-center gap-2 [@media(max-height:760px)]:gap-1 w-full px-2 pt-2 mt-1"
+        style={{ borderTop: '1px solid var(--sidebar-border)' }}
+      >
+        <FooterButton label="Reportar un problema" onClick={() => setShowSupport(true)} onTip={showTip} onHideTip={hideTip}>
+          <LifeBuoy className="w-4 h-4" />
+        </FooterButton>
+        <FooterButton label="Mi cuenta" onClick={() => router.push('/settings/account')} onTip={showTip} onHideTip={hideTip}>
+          <UserCircle className="w-4 h-4" />
+        </FooterButton>
+        <FooterButton label="Cerrar sesión" onClick={handleLogout} onTip={showTip} onHideTip={hideTip}>
+          <LogOut className="w-4 h-4" />
+        </FooterButton>
 
         {/* Avatar */}
         <div
-          className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
+          className="w-8 h-8 [@media(max-height:760px)]:w-7 [@media(max-height:760px)]:h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
           style={{ background: '#25D366' }}
           title={user?.name}
         >
@@ -212,7 +162,44 @@ export default function Sidebar({ user }: Props) {
         </div>
       </div>
 
+      {tip && (
+        <div
+          className="fixed left-[68px] -translate-y-1/2 z-50
+                     bg-gray-900 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg
+                     whitespace-nowrap pointer-events-none shadow-float"
+          style={{ top: tip.top, border: '1px solid #21262D' }}
+        >
+          {tip.label}
+          <span
+            className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent"
+            style={{ borderRightColor: '#111827' }}
+          />
+        </div>
+      )}
+
       {showSupport && <SupportModal onClose={() => setShowSupport(false)} />}
     </aside>
+  );
+}
+
+function FooterButton({
+  label, onClick, onTip, onHideTip, children,
+}: {
+  label: string;
+  onClick: () => void;
+  onTip: (label: string) => (e: React.MouseEvent<HTMLElement>) => void;
+  onHideTip: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      className="flex items-center justify-center w-9 h-9 [@media(max-height:760px)]:h-8 rounded-lg text-gray-500 hover:text-gray-300 transition-all duration-150"
+      onMouseEnter={(e) => { onTip(label)(e); (e.currentTarget as HTMLElement).style.background = 'var(--sidebar-hover)'; }}
+      onMouseLeave={(e) => { onHideTip(); (e.currentTarget as HTMLElement).style.background = ''; }}
+    >
+      {children}
+    </button>
   );
 }
