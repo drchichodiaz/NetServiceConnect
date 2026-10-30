@@ -36,8 +36,6 @@ export default function TeamPage() {
 
   useEffect(() => {
     usersApi.list().then(setUsers).finally(() => setIsLoading(false));
-    // Solo las activas: asignar una linea desconectada no le sirve a nadie.
-    whatsappApi.listActiveAccounts().then(setLines).catch(() => setLines([]));
   }, []);
 
   async function handleCreate(e: React.FormEvent) {
@@ -63,6 +61,14 @@ export default function TeamPage() {
 
   const canManage = me?.role === 'ADMIN' || me?.role === 'SUPERVISOR';
 
+  // Todas las de la empresa, no solo las que ve quien edita: con listActiveAccounts un
+  // admin limitado a una linea no veia el selector, asi que justo quien tenia que sacar
+  // la limitacion no podia. Solo las activas: asignar una desconectada no sirve de nada.
+  useEffect(() => {
+    if (!canManage) return;
+    whatsappApi.listAccounts().then((all) => setLines(all.filter((l) => l.isActive))).catch(() => setLines([]));
+  }, [canManage]);
+
   function startPasswordEdit(id: string) {
     setEditId(null);
     setPwEditId(id);
@@ -74,13 +80,21 @@ export default function TeamPage() {
     setEditId(u.id);
     setEditEmail(u.email);
     setEditRole(u.role);
-    setEditLines(u.channelAccountIds ?? []);
+    // Una linea desconectada no aparece en la lista y no se puede desmarcar: si queda,
+    // "sin ninguna marcada" se guarda con esa adentro y la persona sigue limitada.
+    setEditLines((u.channelAccountIds ?? []).filter((id) => lines.some((l) => l.id === id)));
   }
 
   async function handleSaveEdit(id: string) {
     setEditSaving(true);
     try {
-      const updated = await usersApi.update(id, { email: editEmail, role: editRole, channelAccountIds: editLines });
+      // Sin selector en pantalla no se tocan: si la lista no cargo, mandar [] le sacaria
+      // las limitaciones a alguien sin que nadie lo haya pedido.
+      const updated = await usersApi.update(id, {
+        email: editEmail,
+        role: editRole,
+        ...(lines.length > 1 && { channelAccountIds: editLines }),
+      });
       setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, ...updated } : u)));
       toast.success('Usuario actualizado');
       setEditId(null);
