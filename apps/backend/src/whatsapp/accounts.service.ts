@@ -55,12 +55,26 @@ export class WhatsAppAccountsService {
     updatedAt: true,
   } as const;
 
-  listForTenant(tenantId: string) {
-    return this.prisma.channelAccount.findMany({
-      where: { tenantId },
-      select: WhatsAppAccountsService.PUBLIC_FIELDS,
-      orderBy: [{ isDefault: 'desc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }],
-    });
+  async listForTenant(tenantId: string) {
+    const [accounts, limited] = await Promise.all([
+      this.prisma.channelAccount.findMany({
+        where: { tenantId },
+        select: WhatsAppAccountsService.PUBLIC_FIELDS,
+        orderBy: [{ isDefault: 'desc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }],
+      }),
+      this.prisma.user.findMany({
+        where: { tenantId, isActive: true, channelAccess: { some: {} } },
+        select: { name: true, channelAccess: { select: { channelAccountId: true } } },
+      }),
+    ]);
+    // Quienes no ven cada linea, para avisarlo en su tarjeta: una linea que nadie ve
+    // anda perfecto del lado del cliente y por eso no se nota.
+    return accounts.map((account) => ({
+      ...account,
+      usersWithoutAccess: limited
+        .filter((u) => !u.channelAccess.some((a) => a.channelAccountId === account.id))
+        .map((u) => u.name),
+    }));
   }
 
   /**

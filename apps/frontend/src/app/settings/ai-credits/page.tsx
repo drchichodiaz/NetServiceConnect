@@ -452,7 +452,7 @@ function GrantModal({ tenant, creditUsdValue, onClose, onDone }: {
           </div>
 
           <label className="block text-xs font-medium text-ink-muted mb-1.5">Vence el (opcional)</label>
-          <input type="date" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} className="input w-full mb-1" />
+          <input type="date" value={expiresAt} min={format(new Date(), 'yyyy-MM-dd')} onChange={(e) => setExpiresAt(e.target.value)} className="input w-full mb-1" />
           <p className="text-[11px] text-ink-subtle mb-4">
             Vacío = no vence. Lo incluido en un plan debería vencer al cerrar el período.
           </p>

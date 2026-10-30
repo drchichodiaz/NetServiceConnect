@@ -141,6 +141,8 @@ export interface WhatsAppAccount {
   botEnabled?: boolean;
   /** Llamadas de WhatsApp activadas en Meta: los clientes ven el boton de llamar. */
   callingEnabled?: boolean;
+  /** Usuarios con lineas asignadas entre las que no esta esta. */
+  usersWithoutAccess?: string[];
   webhookVerifyToken: string;
   createdAt: string;
   updatedAt: string;

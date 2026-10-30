@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SystemConfigService } from '../system-config/system-config.service';
+import { ChannelAccessService } from '../common/services/channel-access.service';
 import { EmbeddedSignupDto } from './dto/embedded-signup.dto';
 import { randomUUID } from 'crypto';
 
@@ -11,6 +12,7 @@ export class EmbeddedSignupService {
   constructor(
     private prisma: PrismaService,
     private systemConfig: SystemConfigService,
+    private channelAccess: ChannelAccessService,
   ) {}
 
   private base(apiVersion: string) {
@@ -409,8 +411,12 @@ export class EmbeddedSignupService {
     // La clave es (tenant, numero): reconectar un numero que ya existe lo refresca
     // — renueva el token — en vez de pisar la linea de otra sucursal.
     const isFirst = (await this.prisma.channelAccount.count({ where: { tenantId } })) === 0;
+    const existing = await this.prisma.channelAccount.findUnique({
+      where: { tenantId_phoneNumberId: { tenantId, phoneNumberId: phoneId } },
+      select: { id: true },
+    });
 
-    return this.prisma.channelAccount.upsert({
+    const account = await this.prisma.channelAccount.upsert({
       where: { tenantId_phoneNumberId: { tenantId, phoneNumberId: phoneId } },
       update: {
         wabaId,
@@ -434,5 +440,9 @@ export class EmbeddedSignupService {
         signupStatus: 'CONNECTED',
       },
     });
+
+    // Solo la primera vez: reconectar no le devuelve la linea a un admin al que se la sacaron.
+    if (!existing) await this.channelAccess.grantNewLineToAdmins(tenantId, account.id);
+    return account;
   }
 }

@@ -8,6 +8,7 @@ import { AiWalletService } from './ai-wallet.service';
 import { AiPricingService } from './ai-pricing.service';
 import { getPeriodStart, StatsPeriod } from '../common/period-range';
 import { formatCredits } from './format-credits';
+import { fromLocal, isValidDate, MINUTES_PER_DAY } from '../agenda/agenda-time';
 
 const round = (n: number, decimals = 6) => Math.round(n * 10 ** decimals) / 10 ** decimals;
 
@@ -185,16 +186,35 @@ export class AiCreditsService {
     createdByUserId: string,
   ) {
     if (!data.credits || data.credits < 1) throw new BadRequestException('Indica cuántos créditos acreditar');
-    const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { id: true } });
+    const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { id: true, timezone: true } });
     if (!tenant) throw new NotFoundException('Empresa no encontrada');
 
     return this.wallet.grant(tenantId, {
       kind: data.kind ?? 'PURCHASE',
       credits: Math.floor(data.credits),
-      expiresAt: data.expiresAt ? new Date(data.expiresAt) : null,
+      expiresAt: this.parseExpiry(data.expiresAt, tenant.timezone),
       note: data.note?.trim() || null,
       createdByUserId,
     });
+  }
+
+  /**
+   * "Vence el 30" significa que el 30 todavia se puede usar: la fecha de la pantalla es
+   * el final de ese dia en la hora de la empresa. Tomada tal cual era la medianoche UTC,
+   * o sea la tarde del dia anterior en America.
+   *
+   * Una fecha pasada se rechaza. Antes se aceptaba, y el barrido de vencimientos se
+   * llevaba el lote en menos de un minuto: la pantalla decia "acreditados", los
+   * movimientos mostraban la carga y el saldo seguia en cero.
+   */
+  private parseExpiry(value: string | null | undefined, timeZone: string): Date | null {
+    if (!value) return null;
+    const at = isValidDate(value) ? fromLocal(value, MINUTES_PER_DAY - 1, timeZone) : new Date(value);
+    if (Number.isNaN(at.getTime())) throw new BadRequestException('La fecha de vencimiento no es válida');
+    if (at <= new Date()) {
+      throw new BadRequestException('Esa fecha de vencimiento ya pasó. Elegí una fecha futura o dejala vacía para que no venza.');
+    }
+    return at;
   }
 
   /**

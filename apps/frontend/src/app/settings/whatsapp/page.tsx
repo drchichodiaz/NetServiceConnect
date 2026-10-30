@@ -340,6 +340,15 @@ function AccountCard({
 
           {bots.length > 0 && <BotSelector account={account} bots={bots} onChanged={onChanged} />}
           {isConnected && isRegistered && <CallingToggle account={account} onChanged={onChanged} />}
+          {isConnected && !!account.usersWithoutAccess?.length && (
+            <p className="mt-2 text-[11px] flex items-start gap-1.5" style={{ color: '#B45309' }}>
+              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+              <span>
+                No ven las conversaciones de esta línea: {account.usersWithoutAccess.join(', ')}.{' '}
+                <Link href="/settings/team" className="underline">Cambiar en Equipo</Link>
+              </span>
+            </p>
+          )}
 
           <div className="flex items-center gap-3 mt-2">
             <button

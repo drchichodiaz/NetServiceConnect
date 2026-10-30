@@ -56,6 +56,24 @@ export class ChannelAccessService {
     return allowed.includes(channelAccountId);
   }
 
+  /**
+   * Una linea recien conectada no le llega a quien tiene lineas asignadas: esa lista es
+   * explicita. Si todos los usuarios de la empresa estan limitados, la linea funciona
+   * pero sus conversaciones no las ve nadie. Por eso los admins limitados la reciben al
+   * conectarla. Supervisores y agentes no: a ellos los limita el admin a proposito, y la
+   * tarjeta de la linea avisa quienes no la ven (usersWithoutAccess).
+   */
+  async grantNewLineToAdmins(tenantId: string, channelAccountId: string) {
+    const admins = await this.prisma.user.findMany({
+      where: { tenantId, role: 'ADMIN', isActive: true, channelAccess: { some: {} } },
+      select: { id: true },
+    });
+    await this.prisma.userChannelAccount.createMany({
+      data: admins.map((a) => ({ userId: a.id, channelAccountId })),
+      skipDuplicates: true,
+    });
+  }
+
   /** Reemplaza las lineas asignadas a un usuario. Lista vacia = sin restriccion. */
   async setForUser(userId: string, channelAccountIds: string[]) {
     await this.prisma.$transaction([
