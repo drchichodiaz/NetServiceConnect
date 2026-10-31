@@ -350,6 +350,16 @@ function AccountCard({
             </p>
           )}
 
+          {isConnected && account.noDoctors && (
+            <p className="mt-2 text-[11px] flex items-start gap-1.5" style={{ color: '#B45309' }}>
+              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+              <span>
+                El bot no puede dar citas por esta línea: ningún doctor tiene turnos aquí. Si un paciente pide una, pasa a un agente.{' '}
+                <Link href="/settings/agenda" className="underline">Cargar en Doctores y turnos</Link>
+              </span>
+            </p>
+          )}
+
           <div className="flex items-center gap-3 mt-2">
             <button
               onClick={() => setExpanded(!expanded)}

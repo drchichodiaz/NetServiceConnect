@@ -15,6 +15,7 @@ import { AvailabilityService } from '../agenda/availability.service';
 import { AppointmentsService } from '../agenda/appointments.service';
 import { addDays, fromLocal, toLocal } from '../agenda/agenda-time';
 import { clinicName, dayText, hourText } from '../agenda/agenda-text';
+import { linesWithDoctors } from '../agenda/line-doctors';
 import { BookingScreen, NOON, Row, appointmentTitle, dayRows, isAction, needsDayPart, parseScreenId, parseViewId, timeRows, viewId } from './booking';
 
 type MenuNodeType = 'MENU' | 'TEXT' | 'ORDER_LOOKUP' | 'AGENT' | 'AI_CHAT' | 'LOCATION' | 'BOOK_APPOINTMENT' | 'MY_APPOINTMENTS';
@@ -361,7 +362,10 @@ export class BotService {
 
     const contactName = await this.getContactName(conversationId);
     const baseWelcome = node?.bodyText?.trim() || 'Cuéntame en qué te puedo ayudar.';
-    const welcome = contactName ? `¡Hola ${contactName}! ${baseWelcome}` : baseWelcome;
+    // Entrada directa: el saludo lo escribe la empresa, y es el que presenta al asistente.
+    // La IA no se presenta sola porque recibe la conversacion ya saludada.
+    const customWelcome = node ? null : await this.renderMenuGreeting(bot.aiGreeting, conversationId);
+    const welcome = customWelcome ?? (contactName ? `¡Hola ${contactName}! ${baseWelcome}` : baseWelcome);
     const sent = await this.sendText(tenantId, conversationId, phone, acc, welcome);
     if (!sent) {
       return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
@@ -1023,7 +1027,11 @@ ${knowledgeBase}
             ? `Por ahora no tenemos otros horarios libres para cambiar tu cita por aquí. ${BY_CLINIC_TEXT}`
             : `Por ahora no tenemos horarios libres para reservar por aquí. Ya te paso con alguien de ${scope.clinic} para buscarte un lugar.`;
           await this.sendText(tenantId, conversationId, phone, account, text);
-          return this.handoffToHuman(tenantId, conversationId, change ? 'reschedule_no_slots' : 'booking_no_slots');
+          if (change) return this.handoffToHuman(tenantId, conversationId, 'reschedule_no_slots');
+          // Al paciente se le dice lo mismo, pero una agenda llena y una linea sin doctores
+          // se arreglan distinto: la bitacora tiene que decir cual fue.
+          const withDoctors = await linesWithDoctors(this.prisma, tenantId);
+          return this.handoffToHuman(tenantId, conversationId, withDoctors?.has(scope.channelAccountId) ? 'booking_no_slots' : 'booking_no_doctors');
         }
         const offset = view.offset < days.length ? view.offset : 0;
         let body: string;

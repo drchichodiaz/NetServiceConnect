@@ -67,6 +67,7 @@ const HANDOFF_REASONS: Record<string, string> = {
   query_no_match: 'el bot no encontró lo que buscaba',
   reschedule_by_clinic: 'pidió ayuda con su cita',
   booking_no_slots: 'no había horarios libres para reservar',
+  booking_no_doctors: 'pidió cita, pero ningún doctor tiene turnos en esta línea',
   reschedule_no_slots: 'no había horarios libres para cambiar su cita',
   booking_too_late: 'falta poco para su cita y quiere cambiarla',
   booking_self_service_off: 'quiere cambiar su cita',

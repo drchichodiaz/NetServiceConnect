@@ -371,6 +371,7 @@ export default function BotSettingsPage() {
             // Solo en un bot que usa la IA: en uno de puro menú, el botón le agregaría una opción visible que nadie pidió.
             cannotBook={!!agenda?.enabled && (selected.startInAiChat || hasAiChatNode) && bookingNode !== undefined && !bookingNode?.active}
             onEnableBooking={enableBooking}
+            canBook={!!bookingNode?.active}
           />
         </>
       )}
@@ -545,12 +546,14 @@ function MenuGreetingCard({
         <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: '#E8FBF0' }}>
           <Bot className="w-3.5 h-3.5" style={{ color: '#128C7E' }} />
         </div>
-        <label className="text-xs font-semibold text-ink">Saludo inicial del menú</label>
+        <label className="text-xs font-semibold text-ink">Saludo del menú</label>
       </div>
       <p className="text-[11px] text-ink-subtle">
         El texto que acompaña al menú principal cuando el bot le escribe a un cliente. Escribe <strong>{'{nombre}'}</strong> donde
         quieras el nombre del contacto. Si lo dejas vacío, el bot dice &quot;{DEFAULT_MENU_GREETING}&quot;.
-        {bot.startInAiChat && ' Este bot arranca en chat con IA: el saludo solo aparece si el cliente escribe "menú".'}
+        {bot.startInAiChat && (
+          <strong> Este bot arranca en chat con IA: este saludo solo aparece si el cliente escribe &quot;menú&quot;. El primer mensaje se edita más abajo, en &quot;Primer mensaje&quot;.</strong>
+        )}
       </p>
       <textarea
         value={greeting}
@@ -574,7 +577,7 @@ function MenuGreetingCard({
 // ─── Info del negocio + modo de arranque de un bot ────────────────────────────
 
 function AiCard({
-  bot, aiProblem, onSaved, cannotBook = false, onEnableBooking,
+  bot, aiProblem, onSaved, cannotBook = false, onEnableBooking, canBook = false,
 }: {
   bot: BotSummary;
   aiProblem: string | null;
@@ -582,9 +585,13 @@ function AiCard({
   /** La empresa tiene agenda y este bot no tiene "Agendar cita": la IA no toca citas. */
   cannotBook?: boolean;
   onEnableBooking?: () => Promise<void>;
+  /** El bot tiene "Agendar cita" activa: importa que sus lineas tengan doctores. */
+  canBook?: boolean;
 }) {
   const [enablingBooking, setEnablingBooking] = useState(false);
+  const linesWithoutDoctors = canBook ? bot.lines.filter((l) => l.noDoctors) : [];
   const [aiKnowledgeBase, setAiKnowledgeBase] = useState(bot.aiKnowledgeBase ?? '');
+  const [aiGreeting, setAiGreeting] = useState(bot.aiGreeting ?? '');
   const [savingAi, setSavingAi] = useState(false);
   const [savingMode, setSavingMode] = useState(false);
   const startInAiChat = bot.startInAiChat;
@@ -608,8 +615,8 @@ function AiCard({
     e.preventDefault();
     setSavingAi(true);
     try {
-      const updated = await botsApi.update(bot.id, { aiKnowledgeBase });
-      onSaved({ aiKnowledgeBase: updated.aiKnowledgeBase });
+      const updated = await botsApi.update(bot.id, { aiKnowledgeBase, aiGreeting });
+      onSaved({ aiKnowledgeBase: updated.aiKnowledgeBase, aiGreeting: updated.aiGreeting });
       toast.success('Información guardada');
     } catch (err: any) {
       toast.error(err?.response?.data?.message || 'Error al guardar');
@@ -659,6 +666,25 @@ function AiCard({
         </p>
       </div>
 
+      {startInAiChat && (
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-ink">Primer mensaje</label>
+          <p className="text-[11px] text-ink-subtle">
+            Lo primero que recibe el cliente, siempre igual. Acá es donde el asistente se presenta: la IA recién contesta desde el
+            segundo mensaje. Escribe <strong>{'{nombre}'}</strong> donde quieras el nombre del contacto. Si lo dejas vacío, dice
+            &quot;¡Hola {'{nombre}'}! Cuéntame en qué te puedo ayudar.&quot;
+          </p>
+          <textarea
+            value={aiGreeting}
+            onChange={(e) => setAiGreeting(e.target.value)}
+            maxLength={MENU_GREETING_MAX_LENGTH}
+            rows={2}
+            className="input w-full text-sm"
+            placeholder="Ej: ¡Hola {nombre}! Soy Pili, la asistente virtual de la clínica. ¿En qué te puedo ayudar?"
+          />
+        </div>
+      )}
+
       {startInAiChat && (aiProblem || !aiKnowledgeBase.trim()) && (
         <div className="flex items-start gap-2 rounded-xl p-3 text-xs" style={{ background: '#FEF2F2', color: '#991B1B' }}>
           <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
@@ -702,6 +728,18 @@ function AiCard({
               Permitir que agende
             </button>
           </div>
+        </div>
+      )}
+
+      {linesWithoutDoctors.length > 0 && (
+        <div className="flex items-start gap-2 rounded-xl p-3 text-xs" style={{ background: '#FEF3C7', color: '#92400E' }}>
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+          <span>
+            <strong>Este bot no puede dar citas por {linesWithoutDoctors.map((l) => l.label || l.phoneNumber || 'una línea').join(', ')}:</strong>{' '}
+            ningún doctor tiene turnos ahí. Si un paciente pide una, el bot le dice que no hay horarios y lo pasa a un agente. No
+            depende de lo que escribas acá abajo. Se arregla en{' '}
+            <Link href="/settings/agenda" className="underline font-semibold">Doctores y turnos</Link>.
+          </span>
         </div>
       )}
 

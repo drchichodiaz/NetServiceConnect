@@ -143,6 +143,8 @@ export interface WhatsAppAccount {
   callingEnabled?: boolean;
   /** Usuarios con lineas asignadas entre las que no esta esta. */
   usersWithoutAccess?: string[];
+  /** La empresa tiene agenda y ningun doctor tiene turnos aca: el bot no puede ofrecer citas. */
+  noDoctors?: boolean;
   webhookVerifyToken: string;
   createdAt: string;
   updatedAt: string;

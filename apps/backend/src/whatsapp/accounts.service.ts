@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, BadRequestException } from '@nes
 import { PrismaService } from '../prisma/prisma.service';
 import { Channel } from '@prisma/client';
 import { ChannelAccessService } from '../common/services/channel-access.service';
+import { linesWithDoctors } from '../agenda/line-doctors';
 
 /** Lo minimo que necesita cualquier llamada a la Cloud API de Meta. */
 export interface WhatsAppAccountCreds {
@@ -56,7 +57,7 @@ export class WhatsAppAccountsService {
   } as const;
 
   async listForTenant(tenantId: string) {
-    const [accounts, limited] = await Promise.all([
+    const [accounts, limited, withDoctors] = await Promise.all([
       this.prisma.channelAccount.findMany({
         where: { tenantId },
         select: WhatsAppAccountsService.PUBLIC_FIELDS,
@@ -66,6 +67,7 @@ export class WhatsAppAccountsService {
         where: { tenantId, isActive: true, channelAccess: { some: {} } },
         select: { name: true, channelAccess: { select: { channelAccountId: true } } },
       }),
+      linesWithDoctors(this.prisma, tenantId),
     ]);
     // Quienes no ven cada linea, para avisarlo en su tarjeta: una linea que nadie ve
     // anda perfecto del lado del cliente y por eso no se nota.
@@ -74,6 +76,7 @@ export class WhatsAppAccountsService {
       usersWithoutAccess: limited
         .filter((u) => !u.channelAccess.some((a) => a.channelAccountId === account.id))
         .map((u) => u.name),
+      noDoctors: !!withDoctors && !withDoctors.has(account.id),
     }));
   }
 

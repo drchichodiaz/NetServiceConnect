@@ -238,16 +238,17 @@ export interface BotSummary {
   startInAiChat: boolean;
   /** Texto del menú principal; null = el saludo por defecto. */
   menuGreeting: string | null;
+  aiGreeting: string | null;
   isDefault: boolean;
   nodeCount: number;
   /** Líneas que atiende hoy, ya resuelto el "usa el predeterminado". */
-  lines: { id: string; label: string | null; phoneNumber: string | null }[];
+  lines: { id: string; label: string | null; phoneNumber: string | null; noDoctors: boolean }[];
 }
 
 export const botsApi = {
   list: (): Promise<BotSummary[]> => api.get('/bots').then((r) => r.data),
   create: (name: string) => api.post('/bots', { name }).then((r) => r.data),
-  update: (id: string, data: { name?: string; aiKnowledgeBase?: string; startInAiChat?: boolean; menuGreeting?: string }) =>
+  update: (id: string, data: { name?: string; aiKnowledgeBase?: string; startInAiChat?: boolean; menuGreeting?: string; aiGreeting?: string }) =>
     api.patch(`/bots/${id}`, data).then((r) => r.data),
   // Copia el bot con todo su árbol de menú; la copia no queda asignada a ninguna línea
   duplicate: (id: string, name?: string) => api.post(`/bots/${id}/duplicate`, { name }).then((r) => r.data),

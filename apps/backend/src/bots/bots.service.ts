@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { Bot, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { getPeriodStart, StatsPeriod } from '../common/period-range';
+import { linesWithDoctors } from '../agenda/line-doctors';
 
 const STATS_ACTIONS = [
   'bot.started',
@@ -21,6 +22,7 @@ export interface BotUpdateDto {
   aiKnowledgeBase?: string;
   startInAiChat?: boolean;
   menuGreeting?: string;
+  aiGreeting?: string;
 }
 
 /**
@@ -37,7 +39,7 @@ export class BotsService {
   /** Lista para el panel, con las lineas que atiende cada bot (ya resuelto el "por defecto"). */
   async list(tenantId: string) {
     await this.getDefault(tenantId);
-    const [bots, lines] = await Promise.all([
+    const [bots, lines, withDoctors] = await Promise.all([
       this.prisma.bot.findMany({
         where: { tenantId },
         orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
@@ -48,6 +50,7 @@ export class BotsService {
         select: { id: true, label: true, phoneNumber: true, botId: true, botEnabled: true },
         orderBy: [{ isDefault: 'desc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }],
       }),
+      linesWithDoctors(this.prisma, tenantId),
     ]);
 
     const defaultId = bots.find((b) => b.isDefault)?.id;
@@ -58,7 +61,7 @@ export class BotsService {
       nodeCount: _count.menuNodes,
       lines: lines
         .filter((l) => l.botEnabled && (l.botId && knownIds.has(l.botId) ? l.botId : defaultId) === bot.id)
-        .map(({ id, label, phoneNumber }) => ({ id, label, phoneNumber })),
+        .map(({ id, label, phoneNumber }) => ({ id, label, phoneNumber, noDoctors: !!withDoctors && !withDoctors.has(id) })),
     }));
   }
 
@@ -115,6 +118,13 @@ export class BotsService {
       }
       data.menuGreeting = greeting || null;
     }
+    if (dto.aiGreeting !== undefined) {
+      const greeting = String(dto.aiGreeting ?? '').trim();
+      if (greeting.length > MENU_GREETING_MAX_LENGTH) {
+        throw new BadRequestException(`El saludo puede tener hasta ${MENU_GREETING_MAX_LENGTH} caracteres`);
+      }
+      data.aiGreeting = greeting || null;
+    }
     return this.prisma.bot.update({ where: { id }, data });
   }
 
@@ -166,6 +176,7 @@ export class BotsService {
           aiKnowledgeBase: source.aiKnowledgeBase,
           startInAiChat: source.startInAiChat,
           menuGreeting: source.menuGreeting,
+          aiGreeting: source.aiGreeting,
           isDefault: false,
         },
       }),
