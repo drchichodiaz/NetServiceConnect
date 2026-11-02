@@ -63,6 +63,7 @@ const HANDOFF_REASONS: Record<string, string> = {
   query_escape: 'pidió hablar con una persona',
   booking_escape: 'pidió hablar con una persona',
   ai_specialist_request: 'pidió cita con un especialista',
+  ai_handoff: 'la IA lo pasó a una persona del equipo',
   max_retries_reached: 'el bot no le entendió',
   query_no_match: 'el bot no encontró lo que buscaba',
   reschedule_by_clinic: 'pidió ayuda con su cita',

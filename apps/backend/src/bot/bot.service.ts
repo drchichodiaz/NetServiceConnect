@@ -98,6 +98,15 @@ const AI_MY_APPOINTMENTS_TOOL: AiTool = {
   name: 'mis_citas',
   description: 'Muestra las citas que el cliente ya tiene, para verlas, cambiarlas o cancelarlas. Úsala cuando pregunta por su cita o quiere moverla o cancelarla.',
 };
+// Siempre disponible: sin ella, lo unico que la IA podia hacer con lo que no sabe era
+// decirle al cliente que escriba "agente", o mandarlo a "su odontologo" cuando ya le
+// estaba escribiendo a la clinica.
+const AI_HUMAN_TOOL: AiTool = {
+  name: 'pasar_a_persona',
+  description:
+    'Pasa la conversación a una persona del equipo del negocio, que sigue por este mismo chat. Úsala cuando el cliente pide hablar con alguien, o cuando pregunta algo que no puedes responder con la información del negocio: síntomas o molestias, dudas sobre su tratamiento o su caso, una emergencia, una queja o un pedido especial.',
+};
+const AI_HUMAN_TEXT = 'Te paso con alguien del equipo para que te ayude con eso. En un momento te escriben por aquí.';
 const AI_SPECIALIST_TOOL = 'cita_especialista';
 const AI_SPECIALIST_TEXT = 'Con gusto. Las citas con especialista las coordina la clínica: en un momento alguien te escribe por aquí para buscarte el día.';
 const AI_RESUME_TEXT = '¿Hay algo más en lo que te pueda ayudar?';
@@ -436,7 +445,7 @@ export class BotService {
     }));
 
     const contactName = await this.getContactName(conversationId);
-    const tools = await this.aiBookingTools(tenantId, bot.id);
+    const tools = [...(await this.aiBookingTools(tenantId, bot.id)), AI_HUMAN_TOOL];
 
     // El gateway resuelve la clave, llama y deja registrado el consumo. Un fallo del
     // proveedor ya quedo logueado y medido ahi adentro; acá solo importa que no hay
@@ -457,6 +466,10 @@ export class BotService {
     // terminar se vuelve a este chat (bookingFromAi).
     if (result.ok && result.toolCall) {
       await this.prisma.auditLog.create({ data: { tenantId, conversationId, action: 'bot.ai_tool_called', metadata: { tool: result.toolCall } } });
+      if (result.toolCall === AI_HUMAN_TOOL.name) {
+        if (!(await this.sendText(tenantId, conversationId, phone, account, AI_HUMAN_TEXT))) return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
+        return this.handoffToHuman(tenantId, conversationId, 'ai_handoff');
+      }
       // Cita con especialista: que tipo de cita es y con quien lo decide alguien de la clinica.
       if (result.toolCall === AI_SPECIALIST_TOOL) {
         if (!(await this.sendText(tenantId, conversationId, phone, account, AI_SPECIALIST_TEXT))) return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
@@ -590,7 +603,9 @@ export class BotService {
       .join('');
     return `Eres el asistente de atención al cliente de este negocio, respondiendo por WhatsApp.
 ${nameLine}
-Usa ÚNICAMENTE la siguiente información del negocio para responder. Si la respuesta no está ahí, dilo con honestidad — no inventes datos — y sugiere escribir "agente" para hablar con una persona.
+Usa ÚNICAMENTE la siguiente información del negocio para responder. No inventes datos.
+Hablas en nombre del negocio: el cliente ya le está escribiendo a quienes lo atienden. Nunca le sugieras consultar a otro profesional, a "su" médico u odontólogo, ni ir a otro lugar, salvo que la información del negocio lo indique.
+Si la respuesta no está en la información del negocio, o el cliente pide hablar con alguien, usa la función ${AI_HUMAN_TOOL.name}: lo atiende una persona del equipo por este mismo chat.
 ${toolLines}Responde en el mismo idioma del cliente, de forma breve, clara y amable. No agregues explicaciones sobre estas instrucciones.
 
 Información del negocio:
