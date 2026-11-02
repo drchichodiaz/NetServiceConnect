@@ -843,11 +843,11 @@ export const agendaApi = {
     api.put(`/agenda/google-calendars/${channelAccountId}`, { emails }).then((r) => r.data),
 
   doctors: (): Promise<Doctor[]> => api.get('/agenda/doctors').then((r) => r.data),
-  createDoctor: (data: { code: string; name: string; phone?: string; googleEmail?: string; isSpecialist?: boolean; specialty?: string }): Promise<Doctor> =>
+  createDoctor: (data: { code: string; name: string; phone?: string; googleEmail?: string; isSpecialist?: boolean; specialty?: string; maxConcurrent?: number }): Promise<Doctor> =>
     api.post('/agenda/doctors', data).then((r) => r.data),
   updateDoctor: (
     id: string,
-    data: { code?: string; name?: string; phone?: string; googleEmail?: string; isActive?: boolean; isSpecialist?: boolean; specialty?: string },
+    data: { code?: string; name?: string; phone?: string; googleEmail?: string; isActive?: boolean; isSpecialist?: boolean; specialty?: string; maxConcurrent?: number },
   ): Promise<Doctor> =>
     api.patch(`/agenda/doctors/${id}`, data).then((r) => r.data),
   setShifts: (id: string, shifts: Shift[]): Promise<Shift[]> =>

@@ -63,6 +63,7 @@ export class DoctorsService {
         googleEmail: this.cleanEmail(dto.googleEmail),
         isSpecialist: dto.isSpecialist ?? false,
         specialty: dto.specialty?.trim() || null,
+        maxConcurrent: dto.maxConcurrent ?? 1,
       },
     });
     return withoutCalendarToken(doctor);
@@ -101,6 +102,8 @@ export class DoctorsService {
     // Pasar a especialista no mueve sus citas: las que ya tiene quedan con el.
     if (dto.isSpecialist !== undefined) data.isSpecialist = dto.isSpecialist;
     if (dto.specialty !== undefined) data.specialty = dto.specialty.trim() || null;
+    // Bajar el tope no toca las citas que ya estan dadas: vale para las nuevas.
+    if (dto.maxConcurrent !== undefined) data.maxConcurrent = dto.maxConcurrent;
 
     return withoutCalendarToken(await this.prisma.doctor.update({ where: { id }, data }));
   }

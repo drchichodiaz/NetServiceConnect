@@ -8,7 +8,7 @@ import './calendar.css';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
 import { agendaApi } from '@/lib/api';
-import { AgendaDay, Appointment, clock, overlaps, patientLabel } from '@/lib/agenda';
+import { AgendaDay, Appointment, clock, patientLabel, peakOverlap } from '@/lib/agenda';
 import { localizer, fromWall, wallAt, wallParts } from './calendar-time';
 import { useOptimisticMoves } from './useOptimisticMoves';
 
@@ -155,7 +155,7 @@ export default function CalendarDayView({
       if (!bookable(m)) continue;
       const slot = { start: m, end: m + day.slotMinutes };
       const n = day.doctors.filter(
-        (d) => d.windows.some((w) => w.start <= slot.start && slot.end <= w.end) && !(busy.get(d.id) ?? []).some((b) => overlaps(b, slot)),
+        (d) => d.windows.some((w) => w.start <= slot.start && slot.end <= w.end) && peakOverlap(busy.get(d.id) ?? [], slot) < (d.maxConcurrent ?? 1),
       ).length;
       if (n > 0) out.push({ id: `free-${m}`, start: wallAt(date, m), end: wallAt(date, m + STEP), resourceId: FREE, kind: 'free', title: String(n) });
     }

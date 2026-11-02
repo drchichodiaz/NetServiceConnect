@@ -56,6 +56,8 @@ export interface Doctor {
   /** Se lo llama cuando hace falta: nunca se le asignan citas solo, y puede atender fuera de turno. */
   isSpecialist: boolean;
   specialty: string | null;
+  /** Cuantos pacientes atiende a la vez. */
+  maxConcurrent: number;
   shifts: Shift[];
 }
 
@@ -131,6 +133,7 @@ export interface DayDoctor {
   id: string;
   code: string;
   name: string;
+  maxConcurrent: number;
   windows: Interval[];
   busyElsewhere: Interval[];
 }
@@ -343,6 +346,13 @@ export function longDate(date: string): string {
 
 export function overlaps(a: Interval, b: Interval): boolean {
   return a.start < b.end && b.start < a.end;
+}
+
+/** Cuantas de `busy` corren a la vez en el momento mas cargado de `slot` (igual que en el backend). */
+export function peakOverlap(busy: Interval[], slot: Interval): number {
+  const inside = busy.filter((b) => overlaps(b, slot));
+  const points = [slot.start, ...inside.map((b) => b.start).filter((s) => s > slot.start)];
+  return Math.max(0, ...points.map((t) => inside.filter((b) => b.start <= t && t < b.end).length));
 }
 
 export function patientLabel(contact: { name: string | null; phone: string | null }): string {

@@ -1416,6 +1416,9 @@ model Doctor {
   specialty    String?
   /// Un doctor que se va se desactiva, no se borra: sus citas pasadas lo nombran.
   isActive  Boolean  @default(true)
+  /// Cuantos pacientes atiende a la vez. 1 = uno por vez. El tope lo hace cumplir el
+  /// trigger Appointment_capacity, no solo el codigo.
+  maxConcurrent Int  @default(1)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

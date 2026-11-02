@@ -123,6 +123,13 @@ export class CreateDoctorDto {
   @IsString()
   @MaxLength(60)
   specialty?: string;
+
+  /** Cuantos pacientes atiende a la vez. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(10)
+  maxConcurrent?: number;
 }
 
 export class UpdateDoctorDto {
@@ -161,6 +168,12 @@ export class UpdateDoctorDto {
   @IsString()
   @MaxLength(60)
   specialty?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(10)
+  maxConcurrent?: number;
 }
 
 export class ShiftDto {

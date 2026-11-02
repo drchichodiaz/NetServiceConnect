@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ChannelAccessService } from '../common/services/channel-access.service';
 import { AgendaSettingsService } from './agenda-settings.service';
 import { addDays, dateColumn, fromDateColumn, fromLocal, isValidDate, MINUTES_PER_DAY, toLocal, weekdayOf } from './agenda-time';
-import { doctorDayWindows, fitsInside, freeStarts, Interval, overlaps, WorkWindow } from './availability';
+import { doctorDayWindows, fitsInside, freeStarts, Interval, overlaps, peakOverlap, WorkWindow } from './availability';
 
 interface DayAppointment {
   id: string;
@@ -71,7 +71,7 @@ export class AvailabilityService {
     // Citas de doctores inactivos que siguen en la agenda.
     const missing = [...withAppointmentsHere].filter((id) => !doctors.some((d) => d.id === id));
     const extra = missing.length
-      ? await this.prisma.doctor.findMany({ where: { id: { in: missing } }, select: { id: true, code: true, name: true, isSpecialist: true, specialty: true } })
+      ? await this.prisma.doctor.findMany({ where: { id: { in: missing } }, select: { id: true, code: true, name: true, isSpecialist: true, specialty: true, maxConcurrent: true } })
       : [];
 
     return {
@@ -86,6 +86,7 @@ export class AvailabilityService {
           name: d.name,
           isSpecialist: d.isSpecialist,
           specialty: d.specialty,
+          maxConcurrent: d.maxConcurrent,
           windows: d.clinicWindows.map(({ start, end }) => ({ start, end })),
           busyElsewhere: plan.appointments
             .filter((a) => a.doctorId === d.id && a.channelAccountId !== channelAccountId)
@@ -101,9 +102,11 @@ export class AvailabilityService {
   }
 
   /**
-   * Los doctores que pueden atender [startsAt, startsAt + minutes) en esa clinica,
-   * ordenados por quien tiene menos citas ese dia (para repartir el trabajo) y despues
-   * por codigo. El primero es el que asigna el sistema.
+   * Los doctores que pueden atender [startsAt, startsAt + minutes) en esa clinica: los
+   * que no llegaron a su tope de pacientes a la vez. Primero el que tiene menos citas en
+   * ese horario (un doctor sin pacientes antes que uno con lugar para otro), despues el
+   * que tiene menos citas ese dia, y despues por codigo. El primero es el que asigna el
+   * sistema.
    *
    * `excludeAppointmentId` es para mover o alargar una cita: su propio horario no la
    * ocupa a si misma.
@@ -132,10 +135,12 @@ export class AvailabilityService {
     const slot: Interval = { start: start.minute, end: end.date === start.date ? end.minute : MINUTES_PER_DAY };
     const plan = await this.loadDay(tenantId, start.date, tz);
 
-    const notBusy = (d: { id: string }) =>
-      plan.appointments.every(
-        (a) => a.doctorId !== d.id || a.id === excludeAppointmentId || !overlaps(appointmentInterval(a, start.date, tz), slot),
+    const loadInSlot = (d: { id: string }) =>
+      peakOverlap(
+        plan.appointments.filter((a) => a.doctorId === d.id && a.id !== excludeAppointmentId).map((a) => appointmentInterval(a, start.date, tz)),
+        slot,
       );
+    const notBusy = (d: { id: string; maxConcurrent: number }) => loadInSlot(d) < d.maxConcurrent;
     const inShift = (d: { windows: WorkWindow[] }) => fitsInside(d.windows.filter((w) => w.channelAccountId === channelAccountId), slot);
     const row = (d: (typeof plan.doctors)[number]) => ({
       id: d.id,
@@ -144,13 +149,15 @@ export class AvailabilityService {
       isSpecialist: d.isSpecialist,
       specialty: d.specialty,
       inShift: inShift(d),
+      maxConcurrent: d.maxConcurrent,
+      inSlot: loadInSlot(d),
       appointmentsToday: plan.appointments.filter((a) => a.doctorId === d.id && a.id !== excludeAppointmentId).length,
     });
 
     const general = plan.doctors
       .filter((d) => d.isActive && !d.isSpecialist && inShift(d) && notBusy(d))
       .map(row)
-      .sort((a, b) => a.appointmentsToday - b.appointmentsToday || a.code.localeCompare(b.code));
+      .sort((a, b) => a.inSlot - b.inSlot || a.appointmentsToday - b.appointmentsToday || a.code.localeCompare(b.code));
     if (!includeSpecialists) return general;
 
     const specialists = plan.doctors
@@ -215,9 +222,10 @@ export class AvailabilityService {
       days: dates.map((date) => {
         const weekday = weekdayOf(date);
         const exOfDay = exceptions.filter((e) => fromDateColumn(e.date) === date);
+        // Un doctor que atiende 2 a la vez tiene el doble de minutos para dar.
         const available = doctors.reduce((sum, d) => {
           const windows = doctorDayWindows(weekday, d.shifts, exOfDay.filter((e) => e.doctorId === d.id));
-          return sum + windows.filter((w) => w.channelAccountId === channelAccountId).reduce((s, w) => s + (w.end - w.start), 0);
+          return sum + d.maxConcurrent * windows.filter((w) => w.channelAccountId === channelAccountId).reduce((s, w) => s + (w.end - w.start), 0);
         }, 0);
         const row = byDate.get(date) ?? { count: 0, booked: 0 };
         return {
@@ -287,6 +295,7 @@ export class AvailabilityService {
       const dayStart = fromLocal(date, 0, tz).getTime();
       const dayEnd = fromLocal(date, MINUTES_PER_DAY, tz).getTime();
       const perDoctor = doctors.map((d) => ({
+        capacity: d.maxConcurrent,
         windows: doctorDayWindows(weekday, d.shifts, exOfDay.filter((e) => e.doctorId === d.id)).filter(
           (w) => w.channelAccountId === channelAccountId,
         ),
@@ -323,6 +332,7 @@ export class AvailabilityService {
         isActive: d.isActive,
         isSpecialist: d.isSpecialist,
         specialty: d.specialty,
+        maxConcurrent: d.maxConcurrent,
         // Para el especialista, que no necesita turno: las ausencias igual lo bloquean.
         absences: exceptions
           .filter((e) => e.doctorId === d.id && e.kind === 'ABSENT')

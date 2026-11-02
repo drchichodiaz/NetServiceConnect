@@ -75,6 +75,7 @@ export default function DoctorsTab({ clinics }: { clinics: Clinic[] }) {
                 <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded-md bg-surface-subtle text-ink">{d.code}</span>
                 <span className="font-semibold text-sm text-ink">{d.name}</span>
                 {d.isSpecialist && <span className="badge bg-violet-100 text-violet-700">{d.specialty || 'Especialista'}</span>}
+                {d.maxConcurrent > 1 && <span className="badge bg-sky-100 text-sky-700">{d.maxConcurrent} pacientes a la vez</span>}
                 {!d.isActive && <span className="badge bg-surface-subtle text-ink-muted">Inactivo</span>}
               </div>
               <p className="text-xs text-ink-subtle mt-1">
@@ -159,13 +160,14 @@ function DoctorModal({ doctor, onClose, onSaved }: { doctor: Doctor | null; onCl
   const [isActive, setIsActive] = useState(doctor?.isActive ?? true);
   const [isSpecialist, setIsSpecialist] = useState(doctor?.isSpecialist ?? false);
   const [specialty, setSpecialty] = useState(doctor?.specialty ?? '');
+  const [maxConcurrent, setMaxConcurrent] = useState(doctor?.maxConcurrent ?? 1);
   const [saving, setSaving] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
     try {
-      const kind = { isSpecialist, specialty: isSpecialist ? specialty : '' };
+      const kind = { isSpecialist, specialty: isSpecialist ? specialty : '', maxConcurrent };
       if (doctor) await agendaApi.updateDoctor(doctor.id, { code, name, phone, googleEmail, isActive, ...kind });
       else await agendaApi.createDoctor({ code, name, phone, googleEmail, ...kind });
       toast.success(doctor ? 'Doctor actualizado' : 'Doctor agregado');
@@ -209,6 +211,18 @@ function DoctorModal({ doctor, onClose, onSaved }: { doctor: Doctor | null; onCl
               </p>
             </div>
           )}
+          <div>
+            <label className="text-[11px] text-ink-subtle block mb-1">Pacientes a la vez</label>
+            <select value={maxConcurrent} onChange={(e) => setMaxConcurrent(Number(e.target.value))} className="input">
+              {[1, 2, 3, 4, 5, 6].map((n) => (
+                <option key={n} value={n}>{n === 1 ? '1 (uno por vez)' : `Hasta ${n}`}</option>
+              ))}
+            </select>
+            <p className="text-[11px] text-ink-subtle mt-1">
+              Cuántas citas puede tener en el mismo horario. El bot y la asignación automática reparten primero entre los doctores
+              libres, y recién después le dan una segunda cita al que tiene lugar. Bajarlo no mueve las citas que ya tiene.
+            </p>
+          </div>
           <div className="rounded-lg p-3 bg-surface-muted space-y-2">
             <label className="flex items-start gap-2 cursor-pointer">
               <input type="checkbox" checked={isSpecialist} onChange={(e) => setIsSpecialist(e.target.checked)} className="w-3.5 h-3.5 mt-0.5" />

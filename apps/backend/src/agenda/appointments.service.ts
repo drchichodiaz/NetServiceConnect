@@ -22,13 +22,14 @@ const INCLUDE = {
 } as const;
 
 /**
- * La base rechazo la cita porque el doctor ya tiene otra que se pisa (restriccion
+ * La base rechazo la cita porque el doctor ya tiene en ese horario todos los pacientes
+ * que atiende a la vez (trigger Appointment_capacity; antes, la restriccion
  * Appointment_no_overlap). Prisma no trae el codigo de Postgres (23P01) en `code`: llega
  * como un error de conector con el texto crudo, asi que se reconoce por el mensaje.
  */
 function isOverlapError(err: unknown): boolean {
   const text = String((err as any)?.message ?? '');
-  return text.includes('Appointment_no_overlap') || text.includes('23P01');
+  return text.includes('Appointment_capacity') || text.includes('Appointment_no_overlap') || text.includes('23P01');
 }
 
 /**
@@ -58,7 +59,7 @@ function hhmm(minute: number) {
  * Crear, mover, alargar y cerrar citas.
  *
  * El doctor lo elige el sistema entre los libres (AvailabilityService.freeDoctors), pero
- * quien garantiza que no haya dos citas pisadas es la base: entre calcular quien esta
+ * quien garantiza que nadie pase de su tope de pacientes a la vez es la base: entre calcular quien esta
  * libre y guardar pasan milisegundos, y en ese hueco otra recepcion puede haber dado el
  * mismo horario. Cuando pasa, la base rechaza la segunda y aca se reintenta una vez con
  * el siguiente doctor libre, o se explica que el horario se acaba de ocupar.
@@ -336,6 +337,8 @@ export class AppointmentsService {
    * Alargar de a 15 minutos, siempre con el mismo doctor: la consulta ya esta en curso,
    * no se le puede pasar el paciente a otro. Si choca con la cita siguiente, el error
    * dice con cual, que es lo que necesita la recepcion para avisarle al que espera.
+   * Un doctor que atiende a varios a la vez puede alargar aunque tenga otra cita despues,
+   * mientras no pase de su tope.
    */
   async extend(actor: Actor, id: string, minutes = 15) {
     const settings = await this.settings.requireEnabled(actor.tenantId);
@@ -344,6 +347,28 @@ export class AppointmentsService {
     if (minutes % 15 !== 0 || minutes <= 0 || minutes > 120) throw new BadRequestException('Se alarga de a 15 minutos');
 
     const endsAt = new Date(current.endsAt.getTime() + minutes * 60000);
+    // Tampoco puede pasarse del turno del doctor en esa clinica (el especialista no tiene
+    // que estar en turno: solo libre).
+    const free = await this.availability.freeDoctors(
+      actor.tenantId,
+      current.channelAccountId,
+      current.startsAt,
+      Math.round((endsAt.getTime() - current.startsAt.getTime()) / 60000),
+      id,
+      true,
+    );
+    if (free.some((d) => d.id === current.doctorId)) {
+      try {
+        const appt = await this.prisma.appointment.update({ where: { id }, data: { endsAt }, include: INCLUDE });
+        await this.audit(actor, 'appointment.extended', id, { minutes });
+        this.publish(actor.tenantId, current.channelAccountId);
+        return appt;
+      } catch (err) {
+        throw this.translate(err);
+      }
+    }
+
+    // No entra: la cita siguiente es lo que la recepcion necesita saber para avisar.
     const next = await this.prisma.appointment.findFirst({
       where: {
         doctorId: current.doctorId,
@@ -362,29 +387,7 @@ export class AppointmentsService {
         nextAppointmentId: next.id,
       });
     }
-
-    // Tampoco puede pasarse del turno del doctor en esa clinica (el especialista no tiene
-    // que estar en turno: solo libre).
-    const free = await this.availability.freeDoctors(
-      actor.tenantId,
-      current.channelAccountId,
-      current.startsAt,
-      Math.round((endsAt.getTime() - current.startsAt.getTime()) / 60000),
-      id,
-      true,
-    );
-    if (!free.some((d) => d.id === current.doctorId)) {
-      throw new ConflictException('Alargarla se pasa del horario del doctor en esta clínica');
-    }
-
-    try {
-      const appt = await this.prisma.appointment.update({ where: { id }, data: { endsAt }, include: INCLUDE });
-      await this.audit(actor, 'appointment.extended', id, { minutes });
-      this.publish(actor.tenantId, current.channelAccountId);
-      return appt;
-    } catch (err) {
-      throw this.translate(err);
-    }
+    throw new ConflictException('Alargarla se pasa del horario del doctor en esta clínica');
   }
 
   /**

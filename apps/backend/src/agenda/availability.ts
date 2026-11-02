@@ -70,6 +70,28 @@ export function overlaps(a: Interval, b: Interval): boolean {
 }
 
 /**
+ * Cuantas citas de `busy` corren a la vez en el momento mas cargado de `slot`. El maximo
+ * cae siempre en el comienzo de alguna: el del slot o el de una que empieza adentro.
+ */
+export function peakOverlap(busy: Interval[], slot: Interval): number {
+  const inside = busy.filter((b) => overlaps(b, slot));
+  const points = [slot.start, ...inside.map((b) => b.start).filter((s) => s > slot.start)];
+  return Math.max(0, ...points.map((t) => inside.filter((b) => b.start <= t && t < b.end).length));
+}
+
+/** Los tramos en que ya hay `capacity` citas a la vez: ahi no entra otra. */
+export function fullIntervals(busy: Interval[], capacity: number): Interval[] {
+  if (capacity <= 1) return mergeIntervals(busy);
+  const points = [...new Set(busy.flatMap((b) => [b.start, b.end]))].sort((a, b) => a - b);
+  const full: Interval[] = [];
+  for (let i = 0; i < points.length - 1; i++) {
+    const t = points[i];
+    if (busy.filter((b) => b.start <= t && t < b.end).length >= capacity) full.push({ start: t, end: points[i + 1] });
+  }
+  return mergeIntervals(full);
+}
+
+/**
  * Donde y cuando atiende un doctor un dia dado.
  *
  * Si ese dia tiene algun WORKS_AT, esos reemplazan al turno semanal entero ("este
@@ -101,15 +123,20 @@ export function fitsInside(windows: Interval[], slot: Interval): boolean {
  * Los horarios en que se puede empezar una cita de `minutes`, uniendo los de todos los
  * doctores: lo que se le ofrece al paciente que reserva solo, que no elige doctor.
  *
- * Por doctor se toma lo que le queda libre (tramos menos citas) y se recorre cada hueco
+ * Por doctor se toma lo que le queda libre (tramos menos lo que ya esta lleno: con un
+ * tope de 2, una cita sola no lo ocupa) y se recorre cada hueco
  * de a una cita desde su comienzo: 08:00, 08:45, 09:30... Asi la lista es corta y una
  * cita nueva queda pegada a la anterior, sin dejar huecos de 15 minutos que nadie puede
  * usar. `earliest` corta lo que empieza antes (la anticipacion minima de hoy).
  */
-export function freeStarts(doctors: { windows: Interval[]; busy: Interval[] }[], minutes: number, earliest = 0): number[] {
+export function freeStarts(
+  doctors: { windows: Interval[]; busy: Interval[]; capacity?: number }[],
+  minutes: number,
+  earliest = 0,
+): number[] {
   const starts = new Set<number>();
   for (const d of doctors) {
-    for (const gap of subtractIntervals(d.windows, d.busy)) {
+    for (const gap of subtractIntervals(d.windows, fullIntervals(d.busy, d.capacity ?? 1))) {
       for (let s = gap.start; s + minutes <= gap.end; s += minutes) {
         if (s >= earliest) starts.add(s);
       }
