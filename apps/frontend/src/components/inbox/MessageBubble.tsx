@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { format } from 'date-fns';
-import { Check, CheckCheck, Clock, AlertCircle, Image, Mic, FileText, Loader2, Download, Bot, ChevronDown, ExternalLink, MapPin } from 'lucide-react';
+import { Check, CheckCheck, Clock, AlertCircle, Image, Mic, FileText, Loader2, Download, Bot, ChevronDown, ExternalLink, MapPin, UserRound } from 'lucide-react';
 import { Message } from '@/types';
 import { useAuthedMedia } from '@/hooks/useAuthedMedia';
 import clsx from 'clsx';
@@ -156,6 +156,49 @@ function LocationCard({ message }: { message: Message }) {
   );
 }
 
+/**
+ * Contacto(s) que compartio el cliente. Viene en rawPayload.contacts, asi que tambien
+ * se ven los que llegaron antes de que el webhook los reconociera (guardados con body
+ * "[mensaje]"). El telefono no se convierte en link: llega de afuera.
+ */
+function sharedContacts(message: Message): { name: string; phone?: string }[] {
+  const list = message.rawPayload?.contacts;
+  if (message.direction !== 'INBOUND' || !Array.isArray(list)) return [];
+  return list
+    .map((c: any) => ({
+      name:
+        c?.name?.formatted_name ||
+        [c?.name?.first_name, c?.name?.last_name].filter(Boolean).join(' ') ||
+        'Contacto',
+      phone: c?.phones?.[0]?.phone || c?.phones?.[0]?.wa_id,
+    }));
+}
+
+function ContactCards({ contacts }: { contacts: { name: string; phone?: string }[] }) {
+  return (
+    <div className="space-y-1 mb-1">
+      {contacts.map((c, i) => (
+        <div
+          key={i}
+          className="flex items-center gap-2.5 rounded-xl px-3 py-2.5"
+          style={{ background: 'rgba(0,0,0,0.03)', border: '1px solid rgba(0,0,0,0.06)' }}
+        >
+          <span
+            className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
+            style={{ background: '#DCFCE7' }}
+          >
+            <UserRound className="w-4 h-4" style={{ color: '#128C7E' }} />
+          </span>
+          <span className="min-w-0 text-xs">
+            <span className="block font-semibold text-ink">{c.name}</span>
+            {c.phone && <span className="block text-ink-muted select-all">{c.phone}</span>}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // Meta mete en el motivo una URL larguisima al billing hub. Se muestra como link en
 // vez de texto crudo: la URL no aporta nada legible y desbordaba la burbuja. Solo se
 // convierte en link si es https y de un dominio de Meta — el motivo viene de un
@@ -240,6 +283,7 @@ export default function MessageBubble({ message }: Props) {
   // Los mensajes que manda el bot son OUTBOUND pero sin senderId (a diferencia de
   // los que manda un agente humano desde el inbox, que siempre llevan el suyo).
   const isBot = isOut && !message.senderId;
+  const contacts = sharedContacts(message);
 
   return (
     <div className={clsx('flex mb-1', isOut ? 'justify-end' : 'justify-start')}>
@@ -274,9 +318,19 @@ export default function MessageBubble({ message }: Props) {
 
         {message.type === 'LOCATION' && <LocationCard message={message} />}
 
-        {/* Con la tarjeta dibujada, el "📍 nombre — direccion" del body la repetiria */}
-        {message.body && !isPlaceholderBody(message.body) && !hasLocationCard(message) && (
-          <p className="whitespace-pre-wrap break-words">{message.body}</p>
+        {contacts.length > 0 && <ContactCards contacts={contacts} />}
+
+        {/* Con la tarjeta dibujada, el "📍 nombre — direccion" o el "👤 nombre" del body la repetiria */}
+        {message.body && !hasLocationCard(message) && contacts.length === 0 && (
+          // En un adjunto, "[imagen]" sobra arriba de la miniatura. En un texto, el
+          // placeholder es TODO lo que hay: ocultarlo dejaba una burbuja vacia.
+          isPlaceholderBody(message.body) ? (
+            message.type === 'TEXT' && (
+              <p className="italic text-xs opacity-60">{message.body.slice(1, -1)}</p>
+            )
+          ) : (
+            <p className="whitespace-pre-wrap break-words">{message.body}</p>
+          )
         )}
 
         {isOut && message.status === 'FAILED' && (

@@ -32,6 +32,9 @@ interface InboxStore {
   notes: InternalNote[];
   isLoadingConversations: boolean;
   isLoadingMessages: boolean;
+  // Cursor para pedir los mensajes anteriores a los cargados. null = no hay mas atras.
+  olderMessagesCursor: string | null;
+  isLoadingOlderMessages: boolean;
   // Lineas activas del tenant (una por sucursal) — alimentan el filtro del inbox.
   // Vacio o de largo 1 significa que no hay nada que filtrar y el selector se oculta.
   accounts: WhatsAppAccount[];
@@ -40,6 +43,7 @@ interface InboxStore {
   loadConversations: (opts?: { silent?: boolean }) => Promise<void>;
   loadAccounts: () => Promise<void>;
   selectConversation: (id: string) => Promise<void>;
+  loadOlderMessages: () => Promise<void>;
   /** Abre una conversacion desde otra pantalla, aunque este cerrada: pone la pestaña de su estado. */
   openConversation: (id: string) => Promise<void>;
   setFilter: (filter: { status?: string; search?: string; channelAccountId?: string }) => void;
@@ -70,6 +74,8 @@ type EstadoInicial = Pick<
   | 'notes'
   | 'isLoadingConversations'
   | 'isLoadingMessages'
+  | 'olderMessagesCursor'
+  | 'isLoadingOlderMessages'
   | 'accounts'
   | 'filter'
 >;
@@ -84,6 +90,8 @@ function estadoVacio(): EstadoInicial {
     notes: [],
     isLoadingConversations: false,
     isLoadingMessages: false,
+    olderMessagesCursor: null,
+    isLoadingOlderMessages: false,
     accounts: [],
     filter: { status: 'OPEN' },
   };
@@ -117,13 +125,22 @@ export const useInboxStore = create<InboxStore>((set, get) => ({
   },
 
   selectConversation: async (id) => {
-    set({ selectedConversationId: id, messages: [], notes: [], isLoadingMessages: true });
+    set({
+      selectedConversationId: id,
+      messages: [],
+      notes: [],
+      isLoadingMessages: true,
+      olderMessagesCursor: null,
+      isLoadingOlderMessages: false,
+    });
     try {
       const [msgData, noteData] = await Promise.all([
         messagesApi.list(id),
         notesApi.list(id),
       ]);
-      set({ messages: msgData.messages, notes: noteData });
+      // Si mientras cargaba se eligio otra conversacion, esta respuesta ya no va.
+      if (get().selectedConversationId !== id) return;
+      set({ messages: msgData.messages, notes: noteData, olderMessagesCursor: msgData.nextCursor ?? null });
       await conversationsApi.markRead(id);
       set((state) => ({
         conversations: state.conversations.map((c) =>
@@ -132,6 +149,24 @@ export const useInboxStore = create<InboxStore>((set, get) => ({
       }));
     } finally {
       set({ isLoadingMessages: false });
+    }
+  },
+
+  // Llega la pagina mas reciente primero; esto trae la anterior y la pone arriba.
+  loadOlderMessages: async () => {
+    const { selectedConversationId: id, olderMessagesCursor: cursor, isLoadingOlderMessages } = get();
+    if (!id || !cursor || isLoadingOlderMessages) return;
+    set({ isLoadingOlderMessages: true });
+    try {
+      const data = await messagesApi.list(id, cursor);
+      if (get().selectedConversationId !== id) return;
+      set((state) => {
+        const known = new Set(state.messages.map((m) => m.id));
+        const older = (data.messages as Message[]).filter((m) => !known.has(m.id));
+        return { messages: [...older, ...state.messages], olderMessagesCursor: data.nextCursor ?? null };
+      });
+    } finally {
+      if (get().selectedConversationId === id) set({ isLoadingOlderMessages: false });
     }
   },
 

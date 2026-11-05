@@ -91,7 +91,7 @@ export interface Message {
   failureReason?: string | null;
   externalId?: string;
   /** Lo que mando Meta (entrantes) o lo que guardo el bot. En una ubicacion trae `location`. */
-  rawPayload?: { location?: MessageLocation } | null;
+  rawPayload?: { location?: MessageLocation; contacts?: any[] } | null;
   createdAt: string;
 }
 

@@ -3,6 +3,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ConversationsService } from '../conversations/conversations.service';
 import { MediaService } from '../media/media.service';
 
+const PAGE_SIZE = 50;
+
 @Injectable()
 export class MessagesService {
   constructor(
@@ -15,19 +17,28 @@ export class MessagesService {
     // findOne ya valida tenant + (si es AGENT) que la conversacion sea suya
     await this.conversationsService.findOne(tenantId, conversationId, requester);
 
-    const messages = await this.prisma.message.findMany({
+    // Se trae la pagina MAS RECIENTE y se pagina hacia atras. Antes era `asc` + take 50
+    // y el inbox nunca pedia la pagina siguiente: pasados los 50 mensajes, todo lo nuevo
+    // se veia en vivo y desaparecia al volver a abrir el chat. El cursor es el mensaje
+    // mas viejo ya cargado; el `id` desempata los que comparten createdAt.
+    const page = await this.prisma.message.findMany({
       where: { conversationId, tenantId },
-      orderBy: { createdAt: 'asc' },
-      take: 50,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: PAGE_SIZE + 1,
       ...(cursor && { cursor: { id: cursor }, skip: 1 }),
       include: {
         sender: { select: { id: true, name: true } },
       },
     });
 
+    const hasMore = page.length > PAGE_SIZE;
+    const messages = page.slice(0, PAGE_SIZE).reverse();
+
     return {
+      // En orden cronologico, como antes: el frontend los dibuja tal cual llegan.
       messages,
-      nextCursor: messages.length === 50 ? messages[messages.length - 1].id : null,
+      // Para pedir los anteriores a esta pagina. null = ya no hay mas atras.
+      nextCursor: hasMore ? messages[0].id : null,
     };
   }
 

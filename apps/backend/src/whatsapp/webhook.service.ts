@@ -475,6 +475,23 @@ export class WebhookService {
         const reply = msg.interactive?.button_reply ?? msg.interactive?.list_reply;
         return reply?.title || '[interactivo]';
       }
+      // Un contacto compartido (la tarjeta de WhatsApp). Antes caia en el default con
+      // "[mensaje]", que la burbuja oculta por ser placeholder: el agente veia una
+      // burbuja vacia con la hora y nada mas. La tarjeta se dibuja desde rawPayload;
+      // esto es lo que se lee en la lista de chats y lo que queda si no hay tarjeta.
+      case 'contacts': {
+        const cards = (msg.contacts ?? []).map((c: any) => {
+          const name = c?.name?.formatted_name || [c?.name?.first_name, c?.name?.last_name].filter(Boolean).join(' ');
+          const phone = c?.phones?.[0]?.phone || c?.phones?.[0]?.wa_id;
+          return [name, phone].filter(Boolean).join(' · ');
+        }).filter(Boolean);
+        return cards.length ? `👤 ${cards.join(', ')}` : '👤 Contacto';
+      }
+      case 'reaction':
+        return msg.reaction?.emoji ? `Reaccionó ${msg.reaction.emoji}` : 'Quitó una reacción';
+      // Encuestas, mensajes de una sola vista, etc.: la API de Meta no los entrega.
+      case 'unsupported':
+        return '[mensaje no compatible: el cliente envió algo que WhatsApp no deja leer desde aquí]';
       default:          return '[mensaje]';
     }
   }
@@ -501,6 +518,7 @@ export class WebhookService {
       location:    'LOCATION',
       interactive: 'TEXT',
       button:      'TEXT',
+      contacts:    'TEXT',
     };
     return map[type] || 'TEXT';
   }
