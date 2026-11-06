@@ -160,7 +160,7 @@ function LocationCard({ message }: { message: Message }) {
 // Links en el texto. Solo http(s) y "www.": un "javascript:" o cualquier otro esquema
 // que llegue en un mensaje se queda como texto. Se abren en otra pestaña y sin
 // referrer, porque el texto lo escribe alguien de afuera.
-const URL_RE = /(?:https?:\/\/|www\.)[^\s<>"]+/gi;
+const URL_RE = /\b(?:https?:\/\/|www\.)[^\s<>"]+/gi;
 // Lo que suele quedar pegado al final de un link por la redaccion: "mira www.x.com."
 const TRAILING_PUNCT = /[.,;:!?)\]}'"»]+$/;
 
