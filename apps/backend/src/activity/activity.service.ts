@@ -42,6 +42,7 @@ const ACTIONS = [
   'conversation.status.pending',
   'conversation.order_lookup_resolved',
   'bot.resolved_without_agent',
+  'conversation.returned_to_bot',
   'appointment.created',
   'appointment.moved',
   'appointment.extended',
@@ -73,6 +74,8 @@ const HANDOFF_REASONS: Record<string, string> = {
   booking_too_late: 'falta poco para su cita y quiere cambiarla',
   booking_self_service_off: 'quiere cambiar su cita',
   booking_stale: 'su cita ya no estaba vigente',
+  ai_contact_shared: 'compartió un contacto',
+  menu_escape: 'pidió hablar con un agente',
   order_lookup_not_configured: 'consultó un pedido',
   order_lookup_error: 'no se pudo consultar su pedido',
   manual_takeover: '',
@@ -240,6 +243,14 @@ export class ActivityService {
         return { actor: 'user', category: 'team', text: `Dejó pendiente la conversación con ${patient}` };
       case 'conversation.order_lookup_resolved':
         return { actor: 'bot', category: 'bot', text: `Le consultó a ${patient} el dato ${m.orderNumber ?? ''}`.trim() };
+      case 'conversation.returned_to_bot': {
+        const prev = m.previousAssignee ? ctx.userName.get(m.previousAssignee) : null;
+        return {
+          actor: 'bot',
+          category: 'handoffs',
+          text: `${patient} volvió a escribir tras ${m.hoursIdle ?? 24} h sin respuesta${prev ? ` de ${prev}` : ''}: lo atiende el bot`,
+        };
+      }
       case 'bot.resolved_without_agent':
         return { actor: 'bot', category: 'bot', text: `Atendió a ${patient} y cerró la conversación sin operador` };
 

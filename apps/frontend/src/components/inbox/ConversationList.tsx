@@ -1,9 +1,9 @@
 'use client';
-import { useState } from 'react';
-import { Search, RotateCcw, MessageSquare, Phone, Check, ChevronDown } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Search, RotateCcw, MessageSquare, Phone, Check, ChevronDown, Clock, X } from 'lucide-react';
 import { useInboxStore } from '@/store/inbox.store';
 import { accountLabel } from '@/types';
-import ConversationItem from './ConversationItem';
+import ConversationItem, { waitLabel, WAIT_URGENT_MIN } from './ConversationItem';
 import clsx from 'clsx';
 
 const STATUS_TABS = [
@@ -15,8 +15,16 @@ const STATUS_TABS = [
 export default function ConversationList() {
   const {
     conversations, selectedConversationId, selectConversation,
-    setFilter, filter, isLoadingConversations, loadConversations, accounts,
+    setFilter, filter, isLoadingConversations, loadConversations, accounts, waiting,
   } = useInboxStore();
+
+  // Los "hace 3 h" se calculan al dibujar: sin esto quedarian congelados mientras nadie
+  // escribe, que es justo cuando una conversacion lleva mas tiempo esperando.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 60_000);
+    return () => clearInterval(t);
+  }, []);
 
   const [search, setSearch] = useState('');
   const [showLineMenu, setShowLineMenu] = useState(false);
@@ -26,7 +34,11 @@ export default function ConversationList() {
   const activeLine = accounts.find((a) => a.id === filter.channelAccountId);
 
   function handleStatusChange(status: string) {
-    setFilter({ ...filter, status });
+    setFilter({ ...filter, status, waiting: undefined });
+  }
+
+  function toggleWaiting() {
+    setFilter({ ...filter, waiting: filter.waiting ? undefined : true });
   }
 
   function handleLineChange(channelAccountId?: string) {
@@ -41,6 +53,8 @@ export default function ConversationList() {
   }
 
   const activeTab = STATUS_TABS.find((t) => t.value === filter.status) ?? STATUS_TABS[0];
+  const oldestUrgent =
+    !!waiting.oldestSince && (Date.now() - new Date(waiting.oldestSince).getTime()) / 60000 >= WAIT_URGENT_MIN;
 
   return (
     <div
@@ -125,10 +139,46 @@ export default function ConversationList() {
         )}
       </div>
 
+      {/* Esperan respuesta de una persona. Arriba de las pestañas y en rojo a proposito:
+          es lo primero que tiene que ver quien abre la bandeja. */}
+      {(waiting.count > 0 || filter.waiting) && (
+        <div className="px-4 pb-3">
+          <button
+            onClick={toggleWaiting}
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left text-xs transition-all duration-150"
+            style={
+              filter.waiting
+                ? { background: '#FEF2F2', color: '#991B1B', border: '1px solid #FCA5A5' }
+                : oldestUrgent
+                  ? { background: '#DC2626', color: '#fff', border: '1px solid #DC2626' }
+                  : { background: '#FFFBEB', color: '#92400E', border: '1px solid #FCD34D' }
+            }
+            title={filter.waiting ? 'Volver a la bandeja' : 'Ver solo las que esperan respuesta'}
+          >
+            <Clock className="w-3.5 h-3.5 shrink-0" />
+            <span className="flex-1 min-w-0">
+              {filter.waiting ? (
+                <span className="font-semibold">Esperan respuesta: la que más espera, primero</span>
+              ) : (
+                <>
+                  <span className="font-bold">
+                    {waiting.count} {waiting.count === 1 ? 'espera' : 'esperan'} respuesta
+                  </span>
+                  {waiting.oldestSince && (
+                    <span className="opacity-90"> · la más antigua hace {waitLabel(waiting.oldestSince)}</span>
+                  )}
+                </>
+              )}
+            </span>
+            {filter.waiting ? <X className="w-3.5 h-3.5 shrink-0" /> : <span className="font-semibold underline shrink-0">Ver</span>}
+          </button>
+        </div>
+      )}
+
       {/* Status tabs */}
       <div className="flex px-4 mb-1" style={{ borderBottom: '1px solid var(--border)' }}>
         {STATUS_TABS.map((tab) => {
-          const isActive = filter.status === tab.value;
+          const isActive = !filter.waiting && filter.status === tab.value;
           return (
             <button
               key={tab.value}
@@ -167,7 +217,9 @@ export default function ConversationList() {
             <p className="text-xs text-ink-subtle">
               {search
                 ? 'Sin resultados para tu búsqueda'
-                : activeLine
+                : filter.waiting
+                  ? 'Nadie espera respuesta. ¡Al día!'
+                  : activeLine
                   ? `Sin conversaciones ${activeTab.label.toLowerCase()} en ${accountLabel(activeLine)}`
                   : `Sin conversaciones ${activeTab.label.toLowerCase()}`}
             </p>

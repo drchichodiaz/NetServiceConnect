@@ -2,14 +2,43 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { MessageSquare, Users, Settings, LogOut, LayoutDashboard, Zap, Sparkles, BookUser, ShieldCheck, Building2, FileText, Bot, UserCircle, Megaphone, LifeBuoy, Handshake, Coins, CalendarDays, Stethoscope, History } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/store/auth.store';
+import { useInboxStore } from '@/store/inbox.store';
+import { conversationsApi } from '@/lib/api';
 import { useAgendaSettings } from '@/hooks/useAgendaSettings';
 import SupportModal from '@/components/support/SupportModal';
 import { User } from '@/types';
 import clsx from 'clsx';
 
 interface Props { user: User | null; }
+
+/**
+ * Cuantas conversaciones esperan que les conteste una persona, en todas las lineas que
+ * el usuario puede ver. Se muestra en el menu para que se note desde cualquier pantalla,
+ * no solo con la bandeja abierta. Se refresca cada minuto y cada vez que la bandeja
+ * recalcula el suyo (que es cuando llega o sale un mensaje).
+ */
+function useWaitingCount(enabled: boolean) {
+  const [count, setCount] = useState(0);
+  const inboxCount = useInboxStore((s) => s.waiting.count);
+  useEffect(() => {
+    if (!enabled) return;
+    let alive = true;
+    const load = () =>
+      conversationsApi
+        .waitingSummary()
+        .then((r) => alive && setCount(r.count))
+        .catch(() => {});
+    load();
+    const t = setInterval(load, 60_000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [enabled, inboxCount]);
+  return enabled ? count : 0;
+}
 
 const navItems = [
   { href: '/dashboard',          icon: LayoutDashboard, label: 'Dashboard' },
@@ -42,6 +71,7 @@ export default function Sidebar({ user }: Props) {
   // cualquier lado, y si hay que ir a buscar el formulario, nadie lo reporta.
   const [showSupport, setShowSupport] = useState(false);
   const agenda = useAgendaSettings(!!user);
+  const waitingCount = useWaitingCount(!!user?.tenantId);
   const visibleItems = navItems.filter((item) => {
     if ((item as { requiresAgenda?: boolean }).requiresAgenda && !agenda?.enabled) return false;
     if (item.superAdminOnly) return !!user?.isSuperAdmin;
@@ -131,6 +161,15 @@ export default function Sidebar({ user }: Props) {
                   />
                 )}
                 <Icon className="w-4 h-4" />
+                {href === '/inbox' && waitingCount > 0 && (
+                  <span
+                    className="absolute top-0.5 right-1.5 min-w-[16px] h-4 px-1 rounded-full flex items-center justify-center text-[9px] font-bold text-white"
+                    style={{ background: '#DC2626', boxShadow: '0 0 0 2px var(--sidebar-bg)' }}
+                    title={`${waitingCount} esperan respuesta`}
+                  >
+                    {waitingCount > 99 ? '99+' : waitingCount}
+                  </span>
+                )}
               </Link>
             </div>
           );

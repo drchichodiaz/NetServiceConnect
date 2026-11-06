@@ -74,6 +74,7 @@ export function useRealtimeEvents() {
               message.direction === 'INBOUND' && conversationId !== store.selectedConversationId
                 ? 1
                 : 0,
+            answered: message.direction === 'OUTBOUND' && !!message.senderId,
           });
         }
 

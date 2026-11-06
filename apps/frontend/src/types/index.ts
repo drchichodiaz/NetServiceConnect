@@ -67,6 +67,10 @@ export interface Conversation {
   assignedAt?: string | null;
   /** Cuando esa persona la abrio despues de ese traspaso. */
   assignedSeenAt?: string | null;
+  /** Desde cuando el cliente espera que le conteste una persona. Null: nadie espera. */
+  waitingSince?: string | null;
+  /** Ultima respuesta de una persona del equipo (no el bot). */
+  lastAgentReplyAt?: string | null;
   createdAt: string;
   updatedAt: string;
   _count?: { messages: number; notes: number };

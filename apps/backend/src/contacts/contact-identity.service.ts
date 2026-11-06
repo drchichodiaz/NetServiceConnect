@@ -72,17 +72,7 @@ export class ContactIdentityService {
         ? await this.prisma.contact.findUnique({ where: { tenantId_phone: { tenantId, phone: externalId } } })
         : null;
 
-    const contact =
-      byPhone ??
-      (await this.prisma.contact.create({
-        data: {
-          tenantId,
-          name: profile.name ?? undefined,
-          // Solo WhatsApp tiene telefono. Un PSID o un IGSID en esta columna seria
-          // mentira: no es un numero y no se puede llamar ni exportar.
-          phone: channel === 'WHATSAPP' ? externalId : null,
-        },
-      }));
+    const contact = byPhone ?? (await this.createContact(tenantId, channel, externalId, profile));
 
     try {
       await this.prisma.contactIdentity.create({
@@ -101,6 +91,33 @@ export class ContactIdentityService {
     }
 
     return contact;
+  }
+
+  /**
+   * La misma carrera que la de la identidad, un paso antes: alguien nuevo que manda
+   * "Buenos" y "días" en dos mensajes los hace llegar casi juntos, y los dos intentan
+   * crear la ficha. El segundo chocaba con (tenantId, phone) y ese mensaje se perdia:
+   * no quedaba en la bandeja, solo en el log. El que pierde usa la ficha del que gano.
+   */
+  private async createContact(tenantId: string, channel: Channel, externalId: string, profile: IdentityProfile): Promise<Contact> {
+    const phone = channel === 'WHATSAPP' ? externalId : null;
+    try {
+      return await this.prisma.contact.create({
+        data: {
+          tenantId,
+          name: profile.name ?? undefined,
+          // Solo WhatsApp tiene telefono. Un PSID o un IGSID en esta columna seria
+          // mentira: no es un numero y no se puede llamar ni exportar.
+          phone,
+        },
+      });
+    } catch (err: any) {
+      if (err?.code !== 'P2002' || !phone) throw err;
+      const raced = await this.prisma.contact.findUnique({ where: { tenantId_phone: { tenantId, phone } } });
+      if (!raced) throw err;
+      this.logger.debug(`Contacto ${phone} creado en paralelo, se reusa`);
+      return raced;
+    }
   }
 
   /** La identidad de un contacto en un canal, si la tiene. Es el destinatario de un envio. */

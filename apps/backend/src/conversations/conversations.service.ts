@@ -22,6 +22,7 @@ export class ConversationsService {
     search?: string,
     contactId?: string,
     channelAccountId?: string,
+    waiting?: boolean,
   ) {
     // Un AGENTE solo puede ver sus propias conversaciones asignadas, sin importar
     // qué assignedUserId pida por query — ADMIN/SUPERVISOR ven todo el tenant.
@@ -36,7 +37,9 @@ export class ConversationsService {
       where: {
         tenantId,
         ...accessFilter,
-        ...(status && { status: status as any }),
+        // "Sin responder" junta abiertas y pendientes: lo que importa es que alguien
+        // espera, no en que pestaña quedo.
+        ...(waiting ? { waitingSince: { not: null }, status: { not: 'CLOSED' as const } } : status && { status: status as any }),
         ...(effectiveAssignedUserId && { assignedUserId: effectiveAssignedUserId }),
         ...(contactId && { contactId }),
         ...(channelAccountId && { channelAccountId }),
@@ -49,7 +52,8 @@ export class ConversationsService {
           },
         }),
       },
-      orderBy: { lastMessageAt: 'desc' },
+      // Las que esperan, primero la que mas espera.
+      orderBy: waiting ? { waitingSince: 'asc' } : { lastMessageAt: 'desc' },
       include: {
         contact: {
           select: {
@@ -67,6 +71,28 @@ export class ConversationsService {
     });
 
     return conversations.map(withDisplayId);
+  }
+
+  /**
+   * Cuantas conversaciones esperan que les conteste una persona, y desde cuando la que
+   * mas espera. Con los mismos permisos que la bandeja: a un agente solo le cuentan las
+   * suyas, y nadie cuenta las de una linea que no puede ver.
+   */
+  async waitingSummary(tenantId: string, requester: any, channelAccountId?: string) {
+    const accessFilter = requester?.id ? await this.channelAccess.conversationFilter(requester.id) : {};
+    const where = {
+      tenantId,
+      ...accessFilter,
+      status: { not: 'CLOSED' as const },
+      waitingSince: { not: null },
+      ...(requester?.role === 'AGENT' && { assignedUserId: requester.id }),
+      ...(channelAccountId && { channelAccountId }),
+    };
+    const [count, oldest] = await Promise.all([
+      this.prisma.conversation.count({ where }),
+      this.prisma.conversation.findFirst({ where, orderBy: { waitingSince: 'asc' }, select: { waitingSince: true } }),
+    ]);
+    return { count, oldestSince: oldest?.waitingSince ?? null };
   }
 
   async findOne(tenantId: string, id: string, requester?: any) {
@@ -96,6 +122,9 @@ export class ConversationsService {
     const updates: any = {};
 
     if (dto.status !== undefined) updates.status = dto.status;
+    // Cerrada ya no espera a nadie. Si el cliente vuelve a escribir, se reabre y empieza
+    // a esperar de nuevo desde ese mensaje.
+    if (dto.status === 'CLOSED') updates.waitingSince = null;
 
     // Asignar a alguien desactivado deja la conversacion en manos de quien no puede
     // entrar: nadie la atiende y no se nota, porque en la bandeja se ve igual que

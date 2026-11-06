@@ -13,9 +13,11 @@ import { onSessionReset } from '@/lib/session-state';
  */
 function matchesFilter(
   conv: Conversation,
-  filter: { status?: string; channelAccountId?: string },
+  filter: InboxFilter,
 ): boolean {
-  if (filter.status && conv.status !== filter.status) return false;
+  if (filter.waiting) {
+    if (!conv.waitingSince || conv.status === 'CLOSED') return false;
+  } else if (filter.status && conv.status !== filter.status) return false;
   if (filter.channelAccountId && conv.channelAccountId !== filter.channelAccountId) return false;
 
   // Un AGENTE solo ve lo suyo: si se reasigna a otro, desaparece de su bandeja.
@@ -24,6 +26,9 @@ function matchesFilter(
 
   return true;
 }
+
+/** `waiting`: solo las que esperan respuesta de una persona, de cualquier estado abierto. */
+export type InboxFilter = { status?: string; search?: string; channelAccountId?: string; waiting?: boolean };
 
 interface InboxStore {
   conversations: Conversation[];
@@ -38,7 +43,9 @@ interface InboxStore {
   // Lineas activas del tenant (una por sucursal) — alimentan el filtro del inbox.
   // Vacio o de largo 1 significa que no hay nada que filtrar y el selector se oculta.
   accounts: WhatsAppAccount[];
-  filter: { status?: string; search?: string; channelAccountId?: string };
+  filter: InboxFilter;
+  // Las que esperan respuesta de una persona, en la linea que se esta mirando.
+  waiting: { count: number; oldestSince: string | null };
 
   loadConversations: (opts?: { silent?: boolean }) => Promise<void>;
   loadAccounts: () => Promise<void>;
@@ -46,7 +53,8 @@ interface InboxStore {
   loadOlderMessages: () => Promise<void>;
   /** Abre una conversacion desde otra pantalla, aunque este cerrada: pone la pestaña de su estado. */
   openConversation: (id: string) => Promise<void>;
-  setFilter: (filter: { status?: string; search?: string; channelAccountId?: string }) => void;
+  setFilter: (filter: InboxFilter) => void;
+  loadWaiting: () => Promise<void>;
   updateConversation: (id: string, data: any) => Promise<void>;
   addMessage: (message: Message) => void;
   addNote: (note: InternalNote) => void;
@@ -57,6 +65,8 @@ interface InboxStore {
     lastMessageAt: string;
     contact?: any;
     unreadIncrement: number;
+    /** Lo mando una persona del equipo: el cliente deja de esperar respuesta. */
+    answered?: boolean;
   }) => void;
 }
 
@@ -78,6 +88,7 @@ type EstadoInicial = Pick<
   | 'isLoadingOlderMessages'
   | 'accounts'
   | 'filter'
+  | 'waiting'
 >;
 
 // Devuelve uno nuevo en cada llamada: si fuera un objeto compartido, las listas
@@ -94,6 +105,7 @@ function estadoVacio(): EstadoInicial {
     isLoadingOlderMessages: false,
     accounts: [],
     filter: { status: 'OPEN' },
+    waiting: { count: 0, oldestSince: null },
   };
 }
 
@@ -107,10 +119,19 @@ export const useInboxStore = create<InboxStore>((set, get) => ({
     if (!opts?.silent) set({ isLoadingConversations: true });
     try {
       const { filter } = get();
-      const data = await conversationsApi.list(filter);
+      const [data] = await Promise.all([conversationsApi.list(filter), get().loadWaiting()]);
       set({ conversations: data });
     } finally {
       if (!opts?.silent) set({ isLoadingConversations: false });
+    }
+  },
+
+  // Falla en silencio: sin el contador la bandeja funciona igual.
+  loadWaiting: async () => {
+    try {
+      set({ waiting: await conversationsApi.waitingSummary(get().filter.channelAccountId) });
+    } catch {
+      /* se reintenta en la proxima recarga */
     }
   },
 
@@ -226,7 +247,9 @@ export const useInboxStore = create<InboxStore>((set, get) => ({
     }));
   },
 
-  updateConversationLastMessage: ({ conversationId, lastMessageText, lastMessageAt, contact, unreadIncrement }) => {
+  updateConversationLastMessage: ({ conversationId, lastMessageText, lastMessageAt, contact, unreadIncrement, answered }) => {
+    const wasWaiting = !!get().conversations.find((c) => c.id === conversationId)?.waitingSince;
+    if (answered && wasWaiting) get().loadWaiting();
     set((state) => {
       const exists = state.conversations.find((c) => c.id === conversationId);
 
@@ -245,9 +268,10 @@ export const useInboxStore = create<InboxStore>((set, get) => ({
               lastMessageAt,
               unreadCount: c.unreadCount + unreadIncrement,
               contact: contact ?? c.contact,
+              ...(answered && { waitingSince: null }),
             }
           : c,
-      );
+      ).filter((c) => matchesFilter(c, state.filter) || c.id === state.selectedConversationId);
 
       // Reordenar: la conversación actualizada va al tope
       const idx = updated.findIndex((c) => c.id === conversationId);

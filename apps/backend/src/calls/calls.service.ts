@@ -81,7 +81,11 @@ export class CallsService {
     });
     if (conversation) {
       // La llamada reabre la ventana de 24 horas aunque nadie atienda.
-      await this.prisma.conversation.update({ where: { id: conversation.id }, data: { lastInboundAt: now } });
+      // Y si la tiene el equipo, llamar es pedir que lo atiendan: espera desde ahora.
+      await this.prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { lastInboundAt: now, ...(conversation.mode === 'AGENT' && !conversation.waitingSince && { waitingSince: now }) },
+      });
     } else {
       const assignedUserId = await this.assignment.findLeastBusyAgent(tenantId, account.id);
       conversation = await this.prisma.conversation.create({
@@ -96,6 +100,7 @@ export class CallsService {
           lastMessageAt: now,
           lastMessageText: '📞 Llamada entrante',
           lastInboundAt: now,
+          waitingSince: now,
         },
       });
     }
@@ -180,9 +185,13 @@ export class CallsService {
       if (conv && (conv.mode === 'BOT' || !conv.assignedUserId)) {
         await this.prisma.conversation.update({
           where: { id: conv.id },
-          data: { mode: 'AGENT', botState: null, assignedUserId: user.id, assignedAt: now },
+          data: { mode: 'AGENT', botState: null, assignedUserId: user.id, assignedAt: now, waitingSince: null, lastAgentReplyAt: now },
         });
         this.eventBus.publish({ type: 'conversation_updated', tenantId, payload: { conversationId: conv.id } });
+      } else if (conv) {
+        // Atender la llamada es atenderlo: deja de esperar respuesta.
+        await this.prisma.conversation.update({ where: { id: conv.id }, data: { waitingSince: null, lastAgentReplyAt: now } });
+        if (conv.waitingSince) this.eventBus.publish({ type: 'conversation_updated', tenantId, payload: { conversationId: conv.id } });
       }
     }
 

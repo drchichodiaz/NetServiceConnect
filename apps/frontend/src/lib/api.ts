@@ -109,8 +109,11 @@ export const authApi = {
 // ─── Conversations ─────────────────────────────────────────────────────────────
 
 export const conversationsApi = {
-  list: (params?: { status?: string; assignedUserId?: string; search?: string; contactId?: string; channelAccountId?: string }) =>
+  list: (params?: { status?: string; assignedUserId?: string; search?: string; contactId?: string; channelAccountId?: string; waiting?: boolean }) =>
     api.get('/conversations', { params }).then((r) => r.data),
+  /** Cuantas esperan respuesta de una persona, y desde cuando la que mas espera. */
+  waitingSummary: (channelAccountId?: string): Promise<{ count: number; oldestSince: string | null }> =>
+    api.get('/conversations/waiting-summary', { params: { channelAccountId } }).then((r) => r.data),
   get: (id: string) => api.get(`/conversations/${id}`).then((r) => r.data),
   update: (id: string, data: any) =>
     api.patch(`/conversations/${id}`, data).then((r) => r.data),

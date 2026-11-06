@@ -402,6 +402,14 @@ model Conversation {
   // cliente: una conversacion puede estar al dia y aun asi ser nueva para quien la recibe.
   assignedAt       DateTime?
   assignedSeenAt   DateTime?
+  // Desde cuando el cliente espera que le conteste una PERSONA: el primer mensaje que
+  // quedo sin respuesta mientras la conversacion estaba con el equipo (o el momento en
+  // que el bot se la paso). Se apaga cuando alguien responde, se cierra, o vuelve al
+  // bot. No es unreadCount: abrir el chat lo pone en 0 sin haberle contestado a nadie.
+  waitingSince     DateTime?
+  // Ultimo mensaje que mando una persona del equipo (no el bot ni una campaña). Sin
+  // esto no hay forma de saber si a un cliente derivado lo atendio alguien alguna vez.
+  lastAgentReplyAt DateTime?
   createdAt        DateTime              @default(now())
   updatedAt        DateTime              @updatedAt
 
@@ -420,6 +428,7 @@ model Conversation {
   @@index([tenantId, status])
   @@index([tenantId, lastMessageAt])
   @@index([tenantId, channelAccountId])
+  @@index([tenantId, waitingSince])
   @@index([botId])
 }
 

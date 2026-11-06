@@ -17,8 +17,15 @@ export class ConversationsController {
     @Query('search') search?: string,
     @Query('contactId') contactId?: string,
     @Query('channelAccountId') channelAccountId?: string,
+    @Query('waiting') waiting?: string,
   ) {
-    return this.service.findAll(user.tenantId, user, status, assignedUserId, search, contactId, channelAccountId);
+    return this.service.findAll(user.tenantId, user, status, assignedUserId, search, contactId, channelAccountId, waiting === 'true');
+  }
+
+  // Antes de ':id', o Nest lo tomaria como el id de una conversacion.
+  @Get('waiting-summary')
+  waitingSummary(@CurrentUser() user: any, @Query('channelAccountId') channelAccountId?: string) {
+    return this.service.waitingSummary(user.tenantId, user, channelAccountId);
   }
 
   @Get(':id')

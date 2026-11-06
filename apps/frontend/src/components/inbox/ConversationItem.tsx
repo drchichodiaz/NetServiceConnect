@@ -2,7 +2,7 @@
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
 import clsx from 'clsx';
-import { Phone, ArrowRightLeft } from 'lucide-react';
+import { Phone, ArrowRightLeft, Clock } from 'lucide-react';
 import { Conversation, accountLabel } from '@/types';
 
 interface Props {
@@ -33,37 +33,48 @@ function Avatar({ name }: { name: string }) {
   );
 }
 
-function SLABadge({ lastInboundAt }: { lastInboundAt: string }) {
-  const diffMs  = Date.now() - new Date(lastInboundAt).getTime();
-  const diffMin = Math.floor(diffMs / 60000);
+/** "12 min", "3 h", "2 d": cuanto lleva esperando, corto para que entre en la fila. */
+export function waitLabel(since: string): string {
+  const min = Math.max(0, Math.floor((Date.now() - new Date(since).getTime()) / 60000));
+  if (min < 60) return `${min} min`;
+  if (min < 1440) return `${Math.floor(min / 60)} h`;
+  return `${Math.floor(min / 1440)} d`;
+}
 
-  let label: string;
-  if (diffMin < 60)       label = `${diffMin}min`;
-  else if (diffMin < 1440) label = `${Math.floor(diffMin / 60)}h`;
-  else                     label = `${Math.floor(diffMin / 1440)}d`;
+/** Pasada la primera hora sin respuesta, la conversacion se marca en rojo. */
+export const WAIT_URGENT_MIN = 60;
 
-  const color =
-    diffMin < 30  ? { bg: '#E8FBF0', text: '#128C7E' } :
-    diffMin < 120 ? { bg: '#FFFBEB', text: '#D97706' } :
-                    { bg: '#FEF2F2', text: '#DC2626' };
+function waitMinutes(since: string) {
+  return (Date.now() - new Date(since).getTime()) / 60000;
+}
 
+/**
+ * El cliente espera que le conteste una persona. Antes el unico indicador era el
+ * contador de no leidos, que se apaga al abrir el chat aunque nadie haya contestado:
+ * bastaba con mirar una conversacion para que dejara de verse pendiente.
+ */
+function WaitingBadge({ since }: { since: string }) {
+  const urgent = waitMinutes(since) >= WAIT_URGENT_MIN;
+  const label = waitLabel(since);
   return (
     <span
-      className="text-[10px] font-bold rounded-full px-1.5 py-0.5 shrink-0"
-      style={{ background: color.bg, color: color.text }}
-      title={`Esperando respuesta hace ${label}`}
+      className="flex items-center gap-1 text-[10px] font-bold rounded-full pl-1.5 pr-2 py-0.5 shrink-0"
+      style={urgent ? { background: '#DC2626', color: '#fff' } : { background: '#FEF3C7', color: '#B45309' }}
+      title={`Espera que le responda una persona hace ${label}`}
     >
-      {label}
+      <Clock className="w-2.5 h-2.5 shrink-0" />
+      Sin responder · {label}
     </span>
   );
 }
 
 export default function ConversationItem({ conversation, isSelected, onClick }: Props) {
-  const { contact, lastMessageText, lastMessageAt, lastInboundAt, unreadCount, assignedUser, status, channelAccount, assignedAt, assignedSeenAt } = conversation;
+  const { contact, lastMessageText, lastMessageAt, unreadCount, assignedUser, status, channelAccount, assignedAt, assignedSeenAt, waitingSince } = conversation;
   const name = contact.displayId || contact.name || contact.phone || 'Contacto';
 
-  // Mostrar SLA solo en conversaciones abiertas/pendientes con mensajes entrantes sin responder
-  const showSLA = status !== 'CLOSED' && !!lastInboundAt && unreadCount > 0;
+  // Espera a una persona. Lo que atiende el bot no se marca: ya le contestaron.
+  const waiting = status !== 'CLOSED' && waitingSince ? waitingSince : null;
+  const urgent = !!waiting && waitMinutes(waiting) >= WAIT_URGENT_MIN;
 
   // Siempre, aunque la empresa tenga una sola línea — misma razón que en el encabezado.
   const showLine = !!channelAccount;
@@ -79,15 +90,15 @@ export default function ConversationItem({ conversation, isSelected, onClick }: 
       onClick={onClick}
       className={clsx(
         'w-full flex items-start gap-3 px-4 py-3 text-left transition-all duration-150 relative',
-        isSelected ? 'bg-green-50' : 'hover:bg-surface-muted',
+        isSelected ? 'bg-green-50' : urgent ? 'bg-red-50/60 hover:bg-red-50' : 'hover:bg-surface-muted',
       )}
       style={{ borderBottom: '1px solid var(--border)' }}
     >
       {/* Selected indicator */}
-      {isSelected && (
+      {(isSelected || urgent) && (
         <span
           className="absolute left-0 top-0 bottom-0 w-[3px] rounded-r-full"
-          style={{ background: '#25D366' }}
+          style={{ background: isSelected ? '#25D366' : '#DC2626' }}
         />
       )}
 
@@ -121,9 +132,10 @@ export default function ConversationItem({ conversation, isSelected, onClick }: 
           )}
         </div>
 
-        {/* Row 3: traspaso + línea + assignee + SLA */}
-        {(transferida || assignedUser || showSLA || showLine) && (
+        {/* Row 3: espera + traspaso + línea + assignee */}
+        {(transferida || assignedUser || waiting || showLine) && (
           <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+            {waiting && <WaitingBadge since={waiting} />}
             {transferida && (
               <span
                 className="flex items-center gap-1 text-[10px] rounded-full pl-1.5 pr-2 py-0.5 font-bold"
@@ -144,7 +156,6 @@ export default function ConversationItem({ conversation, isSelected, onClick }: 
                 <span className="truncate">{accountLabel(channelAccount)}</span>
               </span>
             )}
-            {showSLA && <SLABadge lastInboundAt={lastInboundAt!} />}
             {assignedUser && (
               <span className="text-[10px] text-ink-subtle bg-surface-subtle rounded-full px-2 py-0.5 font-medium">
                 {assignedUser.name.split(' ')[0]}

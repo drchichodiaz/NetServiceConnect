@@ -43,6 +43,9 @@ interface BotContext {
   // historial que se le manda a OpenAI para no incluir ruido de navegación
   // del menú de turnos anteriores en la misma conversación.
   aiSince: string | null;
+  // Cuando empezo la sesion actual del bot, si no es la creacion de la conversacion: la
+  // pone el webhook cuando el cliente vuelve tras horas sin hablar (inactivityRestart).
+  sessionStart: string | null;
   // Reserva de cita: el nodo BOOK_APPOINTMENT (por su texto de bienvenida) y la ultima
   // pantalla que se le mostro (un id de booking.ts), para reenviarla si responde algo
   // que no es una opcion. El resto del estado viaja en el id de cada fila.
@@ -110,6 +113,18 @@ const AI_HUMAN_TEXT = 'Te paso con alguien del equipo para que te ayude con eso.
 const AI_SPECIALIST_TOOL = 'cita_especialista';
 const AI_SPECIALIST_TEXT = 'Con gusto. Las citas con especialista las coordina la clínica: en un momento alguien te escribe por aquí para buscarte el día.';
 const AI_RESUME_TEXT = '¿Hay algo más en lo que te pueda ayudar?';
+const AI_CONTACT_TEXT = 'Gracias, recibí el contacto. Te paso con alguien del equipo para que lo vea. En un momento te escriben por aquí.';
+const AI_AUDIO_TEXT = 'Por ahora no puedo escuchar audios. ¿Me lo podrías escribir?';
+const AI_NON_TEXT_TEXT = 'Por ahora solo puedo leer mensajes de texto. ¿Podrías escribirlo?';
+// Palabras de un saludo suelto ("Hola", "Buenos días", "Buenas tardes seño"). El saludo
+// del bot ya pregunta en qué puede ayudar: contestarle a esto con la IA era mandar dos
+// saludos seguidos.
+const GREETING_WORDS = new Set([
+  'hola', 'holaa', 'holis', 'ola', 'hi', 'hello', 'hey', 'saludos', 'buenas', 'buenos', 'buena', 'buen',
+  'dia', 'dias', 'tarde', 'tardes', 'noche', 'noches', 'que', 'tal', 'seno', 'senorita', 'pili',
+]);
+const GREETING_MAX_WORDS = 5;
+const BACK_TO_MENU_WORDS = new Set(['volver', 'menu', 'atras', 'regresar', 'al', 'el', 'a', 'ir', 'ver', 'inicio', 'principal', 'por', 'favor']);
 
 /** Lo que bookingScope devuelve cuando se puede seguir. */
 type BookingScope = Extract<Awaited<ReturnType<BotService['bookingScope']>>, { ok: true }>;
@@ -136,10 +151,10 @@ export class BotService {
   }
 
   /** Arranca una conversación nueva — en el árbol de menú, o directo en modo IA si su bot está configurado así. */
-  async sendMenu(tenantId: string, conversationId: string, phone: string) {
+  async sendMenu(tenantId: string, conversationId: string, phone: string, firstMsg?: any) {
     const bot = await this.getBot(tenantId, conversationId);
     if (bot.startInAiChat) {
-      return this.startAiChat(tenantId, conversationId, phone, null);
+      return this.startAiChat(tenantId, conversationId, phone, null, undefined, firstMsg);
     }
     return this.enterNode(tenantId, conversationId, phone, null);
   }
@@ -167,6 +182,19 @@ export class BotService {
       // Desde el chat de IA, al terminar se vuelve a el.
       if (botState === 'AWAITING_AI_CHAT') await this.setContext(conversationId, { bookingFromAi: true });
       return this.handleBookingReply(tenantId, conversationId, phone, msg, account);
+    }
+
+    // En el menu, escribir "agente" o tocar el "Hablar con un agente" de un mensaje
+    // anterior respondia "No entendí tu respuesta": el menu solo reconoce las filas de la
+    // lista que acaba de mandar. Pedir una persona vale siempre.
+    if (botState === 'MENU' || !botState || botState === 'AWAITING_POST_REPLY') {
+      const replyId = this.extractReplyId(msg);
+      const typed = msg.type === 'text' ? msg.text?.body?.trim() || '' : '';
+      const staleAgentButton = replyId === 'post_agent' && botState !== 'AWAITING_POST_REPLY';
+      if (staleAgentButton || (typed && typed.split(/\s+/).length <= SHORT_MESSAGE_MAX_WORDS && HUMAN_ESCAPE_RE.test(typed))) {
+        await this.sendText(tenantId, conversationId, phone, account, 'Perfecto, ya te conecto con un agente.');
+        return this.handoffToHuman(tenantId, conversationId, 'menu_escape');
+      }
     }
 
     switch (botState) {
@@ -347,6 +375,7 @@ export class BotService {
     phone: string,
     node: MenuNode | null,
     account?: WhatsAppAccountCreds,
+    firstMsg?: any,
   ) {
     const acc = account ?? (await this.accounts.getForConversation(conversationId));
     if (!acc) {
@@ -380,26 +409,96 @@ export class BotService {
       return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
     }
 
-    await this.setContext(conversationId, { nodeId: node?.parentId ?? null, retryCount: 0, aiSince: new Date().toISOString() });
+    // Entrando desde una opcion del menu, la sesion empieza ahora: la navegacion previa
+    // no le sirve a la IA. Entrando directo, la conversacion entera es de la IA, y lo
+    // primero que escribio el cliente tiene que estar en su historial.
+    const aiSince = node ? new Date() : await this.conversationStart(conversationId);
+    await this.setContext(conversationId, { nodeId: node?.parentId ?? null, retryCount: 0, aiSince: aiSince.toISOString() });
     await this.prisma.conversation.update({ where: { id: conversationId }, data: { botState: 'AWAITING_AI_CHAT' } });
 
     await this.prisma.auditLog.create({
       data: { tenantId, conversationId, action: 'bot.ai_chat_started', metadata: { nodeId: node?.id ?? null, title: node?.title ?? 'Entrada directa' } },
     });
+
+    // El primer mensaje se contestaba solo con el saludo y se perdia: "quisiera saber el
+    // precio de ortodoncia" recibia "¿En qué te puedo ayudar?" y el paciente tenia que
+    // repetirlo, o se iba. Si trae algo mas que un saludo, la IA lo responde ahora.
+    if (!node && firstMsg && (firstMsg.type === 'contacts' || !this.isGreetingOnly(this.aiInputText(firstMsg)))) {
+      return this.handleAiChatReply(tenantId, conversationId, phone, firstMsg, acc);
+    }
+  }
+
+  /** Desde cuando la IA tiene que leer: la creacion, o la vuelta tras horas sin hablar. */
+  private async conversationStart(conversationId: string): Promise<Date> {
+    const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId }, select: { createdAt: true, botContext: true } });
+    const sessionStart = (conv?.botContext as Partial<BotContext> | null)?.sessionStart;
+    return sessionStart ? new Date(sessionStart) : conv?.createdAt ?? new Date();
+  }
+
+  /**
+   * Lo que el cliente dijo, como texto para la IA. Un boton o una opcion de lista que
+   * toca (de un mensaje anterior, o la respuesta rapida de una plantilla) tambien es
+   * algo que dijo: antes le contestaba "solo puedo leer mensajes de texto".
+   */
+  private aiInputText(msg: any): string {
+    switch (msg?.type) {
+      case 'text':
+        return msg.text?.body?.trim() || '';
+      case 'interactive':
+        return (msg.interactive?.button_reply?.title || msg.interactive?.list_reply?.title || '').trim();
+      case 'button':
+        return (msg.button?.text || '').trim();
+      default:
+        return '';
+    }
+  }
+
+  /** "Volver", "menú", "volver al menú", "ir al inicio": nada mas que el pedido de salir. */
+  private isBackToMenuCommand(text: string): boolean {
+    const words = this.normalizeText(text)
+      .replace(/[^\p{L}\s]/gu, ' ')
+      .split(/\s+/)
+      .filter(Boolean);
+    const keyword = words.some((w) => w === 'volver' || w === 'menu' || w === 'atras' || w === 'regresar');
+    return keyword && words.length <= SHORT_MESSAGE_MAX_WORDS && words.every((w) => BACK_TO_MENU_WORDS.has(w));
+  }
+
+  /** "Hola", "Buenos días", "Buenas tardes seño", "👍": nada que la IA tenga que contestar. */
+  private isGreetingOnly(text: string): boolean {
+    const words = this.normalizeText(text)
+      .replace(/[^\p{L}\s]/gu, ' ')
+      .split(/\s+/)
+      .filter(Boolean);
+    return words.length <= GREETING_MAX_WORDS && words.every((w) => GREETING_WORDS.has(w));
   }
 
   private async handleAiChatReply(tenantId: string, conversationId: string, phone: string, msg: any, account: WhatsAppAccountCreds) {
-    const text = msg.type === 'text' ? (msg.text?.body?.trim() || '') : '';
+    const text = this.aiInputText(msg);
 
-    // Imagen/audio/documento/sticker/interactivo, o texto vacío: no tiene sentido
-    // mandarle eso a OpenAI. Pedimos texto y no gastamos una llamada a la API.
+    // Una reaccion (👍 a un mensaje) no pide respuesta. Antes recibia "solo puedo leer
+    // mensajes de texto, ¿podrías escribirlo?" justo despues de que el paciente agradecio.
+    if (msg.type === 'reaction') return;
+
+    // Un contacto compartido casi siempre es "agenden a esta persona" o un dato para la
+    // clinica: la IA no puede hacer nada con el, una persona si.
+    if (msg.type === 'contacts') {
+      if (!(await this.sendText(tenantId, conversationId, phone, account, AI_CONTACT_TEXT))) return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
+      return this.handoffToHuman(tenantId, conversationId, 'ai_contact_shared');
+    }
+
+    // Imagen/audio/documento/sticker, o texto vacío: no tiene sentido mandarle eso a
+    // OpenAI. Pedimos texto y no gastamos una llamada a la API.
     if (!text) {
-      const sent = await this.sendText(tenantId, conversationId, phone, account, 'Por ahora solo puedo leer mensajes de texto. ¿Podrías escribirlo?');
+      const sent = await this.sendText(tenantId, conversationId, phone, account, msg.type === 'audio' ? AI_AUDIO_TEXT : AI_NON_TEXT_TEXT);
       if (!sent) return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
       return;
     }
 
     const { nodeId, aiSince } = await this.getContext(conversationId);
+
+    // Sin aiSince la sesion todavia esta arrancando: es el segundo mensaje de alguien que
+    // escribio "Buenos" y "días" por separado, y el saludo del bot va en camino.
+    if (!aiSince && this.isGreetingOnly(text)) return;
 
     // Las palabras clave de salida solo aplican a mensajes cortos — si no, una
     // pregunta real como "¿tienen un agente de viajes?" o "¿cuál es el menú de
@@ -409,7 +508,9 @@ export class BotService {
     if (isShortMessage && HUMAN_ESCAPE_RE.test(text)) {
       return this.handoffToHuman(tenantId, conversationId, 'ai_chat_escape');
     }
-    if (isShortMessage && BACK_TO_MENU_RE.test(text)) {
+    // En el chat libre "volver" es una palabra comun ("quiero volver a agendar", "puedo
+    // volver mañana"): solo es un comando si el mensaje no dice otra cosa.
+    if (this.isBackToMenuCommand(text)) {
       await this.resetRetryCount(conversationId);
       const current = nodeId ? await this.resolveNode(tenantId, nodeId) : null;
       return this.enterNode(tenantId, conversationId, phone, current?.parentId ?? null, account);
@@ -452,7 +553,10 @@ export class BotService {
     // respuesta para el cliente.
     const result = await this.ai.chat(tenantId, {
       feature: 'bot_ai_chat',
-      messages: [{ role: 'system', content: this.buildAiSystemPrompt(knowledgeBase, contactName, tools) }, ...chatMessages],
+      messages: [
+        { role: 'system', content: this.buildAiSystemPrompt(knowledgeBase, contactName, tools, await this.nowLine(tenantId)) },
+        ...chatMessages,
+      ],
       maxTokens: 500,
       temperature: 0.6,
       conversationId,
@@ -567,9 +671,12 @@ export class BotService {
       ? [
           {
             name: AI_SPECIALIST_TOOL,
+            // Antes decia "o para un tratamiento de especialidad", y la IA la usaba con
+            // cualquier tratamiento ("extracción y prótesis") o con solo nombrar a un
+            // doctor: derivaba a la recepcion lo que la reserva normal resolvia.
             description: `Pasa la conversación a alguien de la clínica para coordinar una cita con un especialista${
               specialties.length ? ` (${specialties.join(', ')})` : ''
-            }. Úsala cuando el cliente quiere una cita con un especialista o para un tratamiento de especialidad.`,
+            }. Úsala SOLO cuando el cliente pide expresamente un especialista o una de esas especialidades. No la uses porque nombre a un doctor, ni para una evaluación, consulta inicial, limpieza, relleno o extracción simple: para eso está agendar_cita.`,
           },
         ]
       : [];
@@ -587,13 +694,26 @@ export class BotService {
     await this.prisma.conversation.update({ where: { id: conversationId }, data: { botState: 'AWAITING_AI_CHAT' } });
   }
 
-  private buildAiSystemPrompt(knowledgeBase: string, contactName: string | null, tools: AiTool[] = []): string {
+  /**
+   * "Hoy es jueves 5 de noviembre y son las 5:34 p.m." en la zona de la empresa. Sin
+   * esto la IA no sabia que dia era: tiene los horarios, pero "¿atienden hoy?" o "¿están
+   * abiertos ahora?" los contestaba adivinando.
+   */
+  private async nowLine(tenantId: string): Promise<string> {
+    const { timezone } = await this.agendaSettings.get(tenantId);
+    const now = toLocal(new Date(), timezone);
+    return `Hoy es ${dayText(now.date)} y son las ${hourText(now.minute)} (hora local del negocio).`;
+  }
+
+  private buildAiSystemPrompt(knowledgeBase: string, contactName: string | null, tools: AiTool[] = [], nowLine = ''): string {
     const nameLine = contactName
       ? `El cliente se llama ${contactName} — puedes usar su nombre para dirigirte a él/ella de forma natural, sin repetirlo en cada mensaje.`
       : '';
     const toolLines = [
       tools.includes(AI_BOOK_TOOL) &&
         'Si el cliente quiere agendar una cita, usa la función agendar_cita: le muestra los horarios libres reales. Nunca propongas, inventes ni confirmes días u horarios tú mismo, aunque el cliente te diga cuál quiere.',
+      tools.includes(AI_BOOK_TOOL) &&
+        'Al reservar, el cliente no elige al doctor: lo asigna la clínica según quién esté libre. Si pide un doctor en particular, explícaselo con amabilidad; si insiste, usa la función pasar_a_persona.',
       tools.includes(AI_MY_APPOINTMENTS_TOOL) && 'Si el cliente pregunta por una cita que ya tiene, o quiere cambiarla o cancelarla, usa la función mis_citas.',
       tools.some((t) => t.name === AI_SPECIALIST_TOOL) &&
         `Si el cliente quiere una cita con un especialista o para un tratamiento de especialidad, usa la función ${AI_SPECIALIST_TOOL} y no agendar_cita.`,
@@ -602,10 +722,13 @@ export class BotService {
       .map((line) => `${line}\n`)
       .join('');
     return `Eres el asistente de atención al cliente de este negocio, respondiendo por WhatsApp.
+${nowLine}
 ${nameLine}
 Usa ÚNICAMENTE la siguiente información del negocio para responder. No inventes datos.
 Hablas en nombre del negocio: el cliente ya le está escribiendo a quienes lo atienden. Nunca le sugieras consultar a otro profesional, a "su" médico u odontólogo, ni ir a otro lugar, salvo que la información del negocio lo indique.
 Si la respuesta no está en la información del negocio, o el cliente pide hablar con alguien, usa la función ${AI_HUMAN_TOOL.name}: lo atiende una persona del equipo por este mismo chat.
+Tú sí puedes pasar la conversación a una persona: hazlo siempre con la función ${AI_HUMAN_TOOL.name}. Si la información del negocio dice que le pidas al cliente escribir "agente", no se lo pidas: usa la función.
+Un saludo, un agradecimiento o una despedida se contestan con amabilidad y no son motivo para pasar a una persona.
 ${toolLines}Responde en el mismo idioma del cliente, de forma breve, clara y amable. No agregues explicaciones sobre estas instrucciones.
 
 Información del negocio:
@@ -1194,8 +1317,19 @@ ${knowledgeBase}
     }
 
     const start = toLocal(appt.startsAt, settings.timezone);
-    const late = selfService && tooLate ? ' Como falta poco, si necesitas cambiarla te comunico con alguien de la clínica.' : '';
-    const text = `Tu cita es el ${dayText(start.date)} a las ${hourText(start.minute)} en ${clinicName(appt.channelAccount)}.${late}`;
+    const text = `Tu cita es el ${dayText(start.date)} a las ${hourText(start.minute)} en ${clinicName(appt.channelAccount)}.`;
+
+    // Antes decia "si necesitas cambiarla te comunico con alguien" y seguia con "¿Hay algo
+    // más?" sin comunicarlo con nadie. Ahora la pregunta lleva el boton que lo hace.
+    if (settings.enabled && selfService && tooLate) {
+      const sent = await this.sendButtons(tenantId, conversationId, phone, account, `${text} Como falta poco, ya no se puede cambiar por aquí. ¿Quieres que te comunique con alguien de la clínica?`, [
+        { id: viewId({ kind: 'human' }), title: 'Sí, por favor' },
+        { id: viewId({ kind: 'menu' }), title: 'No, gracias' },
+      ]);
+      if (!sent) return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
+      return this.setBookingView(conversationId, { kind: 'mine' });
+    }
+
     if (!(await this.sendText(tenantId, conversationId, phone, account, text))) return this.handoffToHuman(tenantId, conversationId, 'bot_send_failed');
     return this.afterBooking(tenantId, conversationId, phone, account);
   }
@@ -1480,6 +1614,8 @@ ${knowledgeBase}
         mode: 'AGENT',
         botState: null,
         assignedUserId,
+        // Desde ahora el cliente espera a una persona, aunque no vuelva a escribir.
+        waitingSince: new Date(),
         // Le cae en la bandeja sin que nadie se lo diga: se marca igual que un traspaso
         // hecho a mano, o el agente no tiene forma de notar que le llego.
         ...(assignedUserId ? { assignedAt: new Date(), assignedSeenAt: null } : {}),
@@ -1536,8 +1672,13 @@ ${knowledgeBase}
       return this.handoffToHuman(tenantId, conversationId, 'max_retries_reached');
     }
 
+    // El reenvio va primero y el contador se guarda despues: el reenvio del menu y el de
+    // "¿Necesitas algo más?" ponen retryCount en 0 al mostrarse, y escrito antes quedaba
+    // borrado. El limite nunca se alcanzaba y el paciente recibia "No entendí tu
+    // respuesta" una y otra vez (cinco veces seguidas en un caso real).
+    const result = await resend();
     await this.setContext(conversationId, { retryCount });
-    return resend();
+    return result;
   }
 
   private async resetRetryCount(conversationId: string) {
@@ -1554,6 +1695,7 @@ ${knowledgeBase}
       lookupNodeId: ctx.lookupNodeId ?? null,
       retryCount: ctx.retryCount ?? 0,
       aiSince: ctx.aiSince ?? null,
+      sessionStart: ctx.sessionStart ?? null,
       bookingNodeId: ctx.bookingNodeId ?? null,
       bookingView: ctx.bookingView ?? null,
       bookingAppointmentId: ctx.bookingAppointmentId ?? null,

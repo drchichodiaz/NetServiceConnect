@@ -22,6 +22,10 @@ import axios from 'axios';
  */
 const OPT_OUT_RE = /\b(baja|stop|cancelar|desuscribir|desuscribirme|unsubscribe|remover)\b/i;
 const OPT_OUT_MAX_WORDS = 4;
+// Ver inactivityRestart. Con el bot, medio dia sin hablar ya es otra consulta; con una
+// persona se espera un dia entero antes de dar por hecho que nadie lo va a atender.
+const BOT_IDLE_RESET_HOURS = 12;
+const AGENT_IDLE_RETURN_HOURS = 24;
 
 @Injectable()
 export class WebhookService {
@@ -178,52 +182,19 @@ export class WebhookService {
     // es uno solo por tenant a propósito (el agente ve la ficha completa del cliente),
     // pero la conversación se separa por línea: si el mismo cliente le escribe a dos
     // sucursales, son dos hilos distintos y cada respuesta sale por su propio número.
-    let conversation = await this.prisma.conversation.findFirst({
-      where: { tenantId, contactId: contact.id, channelAccountId: accountId, status: { not: 'CLOSED' } },
-      orderBy: { createdAt: 'desc' },
-    });
-
     const now = new Date();
-    const isNewConversation = !conversation;
+    const { conversation: found, isNewConversation } = await this.findOrCreateConversation(tenantId, accountId, contact.id, body, now);
+    let conversation = found;
 
-    if (!conversation) {
-      // Cada linea elige su bot. Con bot, la conversacion arranca en modo BOT y sin
-      // asignar — la asignacion por carga se dispara recien cuando el bot deriva a un
-      // humano. Sin bot, entra directo a los agentes y se reparte en el momento, con la
-      // misma regla de permisos por linea que usa el bot al derivar.
-      const bot = await this.bots.resolveForAccount(tenantId, accountId);
-      const assignedUserId = bot ? null : await this.assignmentService.findLeastBusyAgent(tenantId, accountId);
+    // Vuelve despues de un rato: con el bot arranca de cero, y si quedo esperando a una
+    // persona que nunca contesto, la atiende el bot. Una reaccion no cuenta como volver.
+    const restart = !isNewConversation && msg.type !== 'reaction' ? await this.inactivityRestart(tenantId, accountId, found, now) : null;
 
-      conversation = await this.prisma.conversation.create({
-        data: {
-          tenantId,
-          contactId: contact.id,
-          channelAccountId: accountId,
-          status: 'OPEN',
-          ...(bot
-            ? { mode: 'BOT', botState: 'MENU', botId: bot.id }
-            : { mode: 'AGENT', assignedUserId, ...(assignedUserId && { assignedAt: now }) }),
-          lastMessageAt: now,
-          lastMessageText: body,
-          lastInboundAt: now,
-          unreadCount: 1,
-        },
-      });
-
-      await this.prisma.auditLog.create({
-        data: { tenantId, conversationId: conversation.id, action: 'conversation.created' },
-      });
-      if (bot) {
-        await this.prisma.auditLog.create({
-          data: { tenantId, conversationId: conversation.id, action: 'bot.started' },
-        });
-      } else if (assignedUserId) {
-        await this.prisma.auditLog.create({
-          data: { tenantId, conversationId: conversation.id, action: 'conversation.auto_assigned', metadata: { assignedUserId } },
-        });
-      }
-    } else {
-      await this.prisma.conversation.update({
+    if (!isNewConversation) {
+      // Con el equipo, el primer mensaje sin contestar es desde cuando espera. Los
+      // siguientes no lo corren: sigue esperando desde el primero.
+      const startsWaiting = !restart && found.mode === 'AGENT' && !found.waitingSince && msg.type !== 'reaction';
+      conversation = await this.prisma.conversation.update({
         where: { id: conversation.id },
         data: {
           lastMessageAt: now,
@@ -231,8 +202,22 @@ export class WebhookService {
           lastInboundAt: now,
           status: 'OPEN',
           unreadCount: { increment: 1 },
+          ...(startsWaiting && { waitingSince: now }),
+          ...(restart && {
+            mode: 'BOT',
+            botId: restart.bot.id,
+            botState: restart.bot.startInAiChat ? 'AWAITING_AI_CHAT' : 'MENU',
+            // La sesion nueva empieza con este mensaje: la IA no tiene que releer la
+            // charla de ayer, ni la reserva tiene que seguir en el paso en que quedo.
+            botContext: { sessionStart: now.toISOString() },
+            waitingSince: null,
+            ...(restart.fromAgent && { assignedUserId: null, assignedAt: null, assignedSeenAt: null }),
+          }),
         },
       });
+      if (startsWaiting || restart?.fromAgent) {
+        this.eventBus.publish({ type: 'conversation_updated', tenantId, payload: { conversationId: conversation.id } });
+      }
     }
 
     // Evitar duplicados por externalId
@@ -285,11 +270,123 @@ export class WebhookService {
     // Fase D: el bot responde recién después de que el mensaje del cliente ya quedó
     // guardado y visible en el historial (así el humano que eventualmente tome la
     // conversación ve todo el intercambio, incluido lo que pasó con el bot).
-    if (isNewConversation && conversation.mode === 'BOT') {
-      await this.botService.sendMenu(tenantId, conversation.id, phone);
+    // Una reaccion (👍) no le pide nada al bot: queda en el historial y nada mas. Si es
+    // lo primero que llega, el bot igual saluda: si no, la conversacion quedaria en modo
+    // bot sin haber arrancado.
+    if (msg.type === 'reaction' && !isNewConversation) return;
+
+    if ((isNewConversation || restart) && conversation.mode === 'BOT') {
+      await this.botService.sendMenu(tenantId, conversation.id, phone, msg);
     } else if (!isNewConversation && conversation.mode === 'BOT') {
       await this.botService.handleBotReply(tenantId, conversation.id, conversation.botState, phone, msg);
     }
+  }
+
+  /**
+   * Si el cliente que vuelve a escribir tiene que empezar de cero con el bot.
+   *
+   * - Estaba con el bot y pasaron mas de BOT_IDLE_RESET_HOURS desde el ultimo mensaje:
+   *   al dia siguiente "hola" no es la respuesta a la lista de horarios de ayer, y la IA
+   *   no tiene que retomar una charla que el paciente ya dio por terminada.
+   * - Lo pasaron a una persona, nadie del equipo le contesto nunca, y espera hace mas de
+   *   AGENT_IDLE_RETURN_HOURS: el bot ya no le contestaba y nadie mas tampoco. Si una
+   *   persona le contesto alguna vez, no se toca: esa charla es de esa persona.
+   *
+   * Sin bot en la linea no hay a quien devolverla, y queda como estaba.
+   */
+  private async inactivityRestart(
+    tenantId: string,
+    accountId: string,
+    conv: { id: string; mode: string; botId: string | null; lastMessageAt: Date | null; waitingSince: Date | null; lastAgentReplyAt: Date | null; assignedUserId: string | null },
+    now: Date,
+  ): Promise<{ bot: { id: string; startInAiChat: boolean }; fromAgent: boolean } | null> {
+    const hoursSince = (d: Date | null) => (d ? (now.getTime() - d.getTime()) / 3_600_000 : 0);
+
+    let fromAgent: boolean;
+    if (conv.mode === 'BOT') {
+      if (hoursSince(conv.lastMessageAt) < BOT_IDLE_RESET_HOURS) return null;
+      fromAgent = false;
+    } else {
+      if (conv.lastAgentReplyAt || !conv.waitingSince || hoursSince(conv.waitingSince) < AGENT_IDLE_RETURN_HOURS) return null;
+      fromAgent = true;
+    }
+
+    // El bot con el que venia; si lo borraron, o venia de un agente, el de la linea hoy.
+    const bot =
+      (!fromAgent && conv.botId
+        ? await this.prisma.bot.findUnique({ where: { id: conv.botId }, select: { id: true, startInAiChat: true } })
+        : null) ?? (await this.bots.resolveForAccount(tenantId, accountId));
+    if (!bot) return null;
+
+    await this.prisma.auditLog.create({
+      data: {
+        tenantId,
+        conversationId: conv.id,
+        action: fromAgent ? 'conversation.returned_to_bot' : 'bot.session_restarted',
+        metadata: {
+          hoursIdle: Math.round(hoursSince(fromAgent ? conv.waitingSince : conv.lastMessageAt)),
+          ...(fromAgent && { previousAssignee: conv.assignedUserId }),
+        },
+      },
+    });
+    return { bot: { id: bot.id, startInAiChat: bot.startInAiChat }, fromAgent };
+  }
+
+  /**
+   * La conversacion abierta de este contacto en esta linea, o una nueva.
+   *
+   * Va bajo un bloqueo por contacto y linea: dos mensajes que llegan casi juntos ("Buenos"
+   * y "días") no encontraban ninguna abierta y creaban una cada uno, con un saludo del bot
+   * en cada una. Con el bloqueo el segundo espera, y encuentra la que creo el primero.
+   */
+  private async findOrCreateConversation(tenantId: string, accountId: string, contactId: string, body: string, now: Date) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT 1 AS ok FROM pg_advisory_xact_lock(hashtext(${`conv:${contactId}:${accountId}`}))`;
+
+      const open = await tx.conversation.findFirst({
+        where: { tenantId, contactId, channelAccountId: accountId, status: { not: 'CLOSED' } },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (open) return { conversation: open, isNewConversation: false };
+
+      // Cada linea elige su bot. Con bot, la conversacion arranca en modo BOT y sin
+      // asignar — la asignacion por carga se dispara recien cuando el bot deriva a un
+      // humano. Sin bot, entra directo a los agentes y se reparte en el momento, con la
+      // misma regla de permisos por linea que usa el bot al derivar.
+      const bot = await this.bots.resolveForAccount(tenantId, accountId);
+      const assignedUserId = bot ? null : await this.assignmentService.findLeastBusyAgent(tenantId, accountId);
+
+      const conversation = await tx.conversation.create({
+        data: {
+          tenantId,
+          contactId,
+          channelAccountId: accountId,
+          status: 'OPEN',
+          ...(bot
+            ? // El estado tiene que ser el del modo en que arranca el bot desde ya: si el
+              // cliente manda un segundo mensaje mientras el saludo todavia sale, ese
+              // mensaje lo atiende este estado. Con 'MENU' un bot de IA le contestaba
+              // "No entendí tu respuesta. Elige una opción de la lista" con un menu
+              // que el paciente no tenia por que ver.
+              { mode: 'BOT', botState: bot.startInAiChat ? 'AWAITING_AI_CHAT' : 'MENU', botId: bot.id }
+            : { mode: 'AGENT', assignedUserId, waitingSince: now, ...(assignedUserId && { assignedAt: now }) }),
+          lastMessageAt: now,
+          lastMessageText: body,
+          lastInboundAt: now,
+          unreadCount: 1,
+        },
+      });
+
+      await tx.auditLog.create({ data: { tenantId, conversationId: conversation.id, action: 'conversation.created' } });
+      if (bot) {
+        await tx.auditLog.create({ data: { tenantId, conversationId: conversation.id, action: 'bot.started' } });
+      } else if (assignedUserId) {
+        await tx.auditLog.create({
+          data: { tenantId, conversationId: conversation.id, action: 'conversation.auto_assigned', metadata: { assignedUserId } },
+        });
+      }
+      return { conversation, isNewConversation: true };
+    });
   }
 
   /**
@@ -337,12 +434,14 @@ export class WebhookService {
 
     const data: Record<string, unknown> = { lastMessageAt: now, lastMessageText: body, lastInboundAt: now };
     if (selfService) {
-      Object.assign(data, { status: 'OPEN', mode: 'BOT', botState: null, botId: lineBot!.id, closedReason: null });
+      Object.assign(data, { status: 'OPEN', mode: 'BOT', botState: null, botId: lineBot!.id, closedReason: null, waitingSince: null });
     } else if (toClinic) {
       data.status = 'OPEN';
       data.unreadCount = { increment: 1 };
       data.mode = 'AGENT';
       data.botState = null;
+      // Pidio cambiar su cita y eso lo tiene que hacer alguien de la clinica.
+      if (!conversation.waitingSince || conversation.status === 'CLOSED') data.waitingSince = now;
       if (!conversation.assignedUserId) {
         const assignedUserId = await this.assignmentService.findLeastBusyAgent(tenantId, accountId);
         if (assignedUserId) Object.assign(data, { assignedUserId, assignedAt: now });

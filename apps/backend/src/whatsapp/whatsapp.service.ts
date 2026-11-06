@@ -17,6 +17,12 @@ import axios from 'axios';
 // compila mal (form_data_1.default is undefined). El import de namespace si funciona.
 import * as FormData from 'form-data';
 
+/**
+ * Lo que cambia en la conversacion cuando le contesta una persona del equipo: el
+ * cliente deja de esperar. Un envio sin autor (campaña, aviso de cita) no cuenta.
+ */
+const ANSWERED = (now: Date) => ({ waitingSince: null, lastAgentReplyAt: now });
+
 @Injectable()
 export class WhatsAppService {
   private readonly logger = new Logger(WhatsAppService.name);
@@ -93,7 +99,7 @@ export class WhatsAppService {
       }),
       this.prisma.conversation.update({
         where: { id: dto.conversationId },
-        data: { lastMessageAt: now, lastMessageText: body, unreadCount: 0 },
+        data: { lastMessageAt: now, lastMessageText: body, unreadCount: 0, ...ANSWERED(now) },
       }),
     ]);
 
@@ -186,7 +192,7 @@ export class WhatsAppService {
       }),
       this.prisma.conversation.update({
         where: { id: dto.conversationId },
-        data: { lastMessageAt: now, lastMessageText, unreadCount: 0 },
+        data: { lastMessageAt: now, lastMessageText, unreadCount: 0, ...ANSWERED(now) },
       }),
     ]);
 
@@ -417,7 +423,7 @@ export class WhatsAppService {
       }),
       this.prisma.conversation.update({
         where: { id: conversation.id },
-        data: { lastMessageAt: now, lastMessageText: renderedBody, unreadCount: 0 },
+        data: { lastMessageAt: now, lastMessageText: renderedBody, unreadCount: 0, ...(senderId && ANSWERED(now)) },
       }),
     ]);
 
