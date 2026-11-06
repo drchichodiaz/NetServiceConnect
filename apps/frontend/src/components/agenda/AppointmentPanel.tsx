@@ -268,8 +268,10 @@ export function StatusChip({ status }: { status: AppointmentStatus }) {
 /** Que avisos le llegaron al paciente, o por que no. */
 function Notices({ appt }: { appt: Appointment }) {
   const lines: string[] = [];
-  if (appt.confirmationSentAt) lines.push('Confirmación enviada');
-  if (appt.reminderSentAt) lines.push('Recordatorio enviado');
+  // Enviado es que salio el mensaje, no que se intento: con la plantilla sin aprobar se
+  // leia "Confirmación enviada" justo arriba de "No se le pudo avisar".
+  if (appt.confirmationMessageId) lines.push('Confirmación enviada');
+  if (appt.reminderMessageId) lines.push('Recordatorio enviado');
   if (appt.confirmedAt && appt.status === 'CONFIRMED') lines.push('El paciente confirmó');
   if (!lines.length && !appt.notifyError) return null;
   return (

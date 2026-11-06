@@ -115,6 +115,9 @@ export interface Appointment {
   createdById?: string | null;
   confirmationSentAt?: string | null;
   reminderSentAt?: string | null;
+  /** El mensaje que salio. El *SentAt marca el intento: si fallo, esto queda vacio. */
+  confirmationMessageId?: string | null;
+  reminderMessageId?: string | null;
   /** Por que no se le pudo avisar al paciente la ultima vez. */
   notifyError?: string | null;
   contact: { id: string; name: string | null; phone: string | null };

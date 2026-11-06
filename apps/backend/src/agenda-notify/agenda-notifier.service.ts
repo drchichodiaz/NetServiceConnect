@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { TemplatesService } from '../templates/templates.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { WhatsAppAccountsService } from '../whatsapp/accounts.service';
@@ -50,6 +51,7 @@ export class AgendaNotifierService {
     private accounts: WhatsAppAccountsService,
     private identities: ContactIdentityService,
     private links: DoctorLinkService,
+    private templates: TemplatesService,
   ) {}
 
   /** Devuelve el Message.id del aviso, o null si ese aviso no esta configurado. */
@@ -212,7 +214,16 @@ export class AgendaNotifierService {
       where: { tenantId, wabaId, name: chosen.name, language: chosen.language },
     });
     if (!template) throw new BadRequestException(`La plantilla "${chosen.name}" no existe en la cuenta de WhatsApp de esta clínica`);
-    if (template.status !== 'APPROVED') throw new BadRequestException(`La plantilla "${chosen.name}" todavía no está aprobada por Meta`);
-    return template;
+    if (template.status === 'APPROVED') return template;
+
+    // Connect no se entera solo de que Meta la aprobo: el estado guardado es el de la
+    // ultima vez que alguien lo actualizo. Con Red Dental eso dejo un mes de avisos sin
+    // salir con la plantilla ya aprobada. Antes de dar el aviso por perdido se pregunta.
+    const fresh = await this.templates.refreshStatus(tenantId, template.id).catch((err) => {
+      this.logger.warn(`[agenda] no se pudo consultar el estado de "${chosen.name}" en Meta: ${err?.message ?? err}`);
+      return template;
+    });
+    if (fresh.status !== 'APPROVED') throw new BadRequestException(`La plantilla "${chosen.name}" todavía no está aprobada por Meta`);
+    return fresh;
   }
 }
