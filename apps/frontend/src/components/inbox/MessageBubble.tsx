@@ -1,10 +1,11 @@
 'use client';
 import { useState } from 'react';
 import { format } from 'date-fns';
-import { Check, CheckCheck, Clock, AlertCircle, Image, Mic, FileText, Loader2, Download, Bot, ChevronDown, ExternalLink, MapPin, UserRound } from 'lucide-react';
+import { Check, CheckCheck, Clock, AlertCircle, Image, Mic, FileText, Loader2, Download, Bot, ChevronDown, ExternalLink, MapPin } from 'lucide-react';
 import { Message } from '@/types';
 import { useAuthedMedia } from '@/hooks/useAuthedMedia';
 import clsx from 'clsx';
+import { sharedContacts, SharedContactCards } from './SharedContacts';
 
 interface Props { message: Message; }
 
@@ -156,47 +157,42 @@ function LocationCard({ message }: { message: Message }) {
   );
 }
 
-/**
- * Contacto(s) que compartio el cliente. Viene en rawPayload.contacts, asi que tambien
- * se ven los que llegaron antes de que el webhook los reconociera (guardados con body
- * "[mensaje]"). El telefono no se convierte en link: llega de afuera.
- */
-function sharedContacts(message: Message): { name: string; phone?: string }[] {
-  const list = message.rawPayload?.contacts;
-  if (message.direction !== 'INBOUND' || !Array.isArray(list)) return [];
-  return list
-    .map((c: any) => ({
-      name:
-        c?.name?.formatted_name ||
-        [c?.name?.first_name, c?.name?.last_name].filter(Boolean).join(' ') ||
-        'Contacto',
-      phone: c?.phones?.[0]?.phone || c?.phones?.[0]?.wa_id,
-    }));
-}
+// Links en el texto. Solo http(s) y "www.": un "javascript:" o cualquier otro esquema
+// que llegue en un mensaje se queda como texto. Se abren en otra pestaña y sin
+// referrer, porque el texto lo escribe alguien de afuera.
+const URL_RE = /(?:https?:\/\/|www\.)[^\s<>"]+/gi;
+// Lo que suele quedar pegado al final de un link por la redaccion: "mira www.x.com."
+const TRAILING_PUNCT = /[.,;:!?)\]}'"»]+$/;
 
-function ContactCards({ contacts }: { contacts: { name: string; phone?: string }[] }) {
-  return (
-    <div className="space-y-1 mb-1">
-      {contacts.map((c, i) => (
-        <div
-          key={i}
-          className="flex items-center gap-2.5 rounded-xl px-3 py-2.5"
-          style={{ background: 'rgba(0,0,0,0.03)', border: '1px solid rgba(0,0,0,0.06)' }}
-        >
-          <span
-            className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
-            style={{ background: '#DCFCE7' }}
-          >
-            <UserRound className="w-4 h-4" style={{ color: '#128C7E' }} />
-          </span>
-          <span className="min-w-0 text-xs">
-            <span className="block font-semibold text-ink">{c.name}</span>
-            {c.phone && <span className="block text-ink-muted select-all">{c.phone}</span>}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
+function Linkified({ text }: { text: string }) {
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+  for (const match of Array.from(text.matchAll(URL_RE))) {
+    let url = match[0];
+    const trailing = url.match(TRAILING_PUNCT)?.[0] ?? '';
+    if (trailing) url = url.slice(0, -trailing.length);
+    const start = match.index ?? 0;
+    // "www." o "https://" sueltos, sin dominio despues, no son un link.
+    if (!/^(?:https?:\/\/|www\.)[^./]+\.[^.]/i.test(url) && !/^https?:\/\/[^/]+/i.test(url)) continue;
+    if (start > last) parts.push(text.slice(last, start));
+    const href = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+    parts.push(
+      <a
+        key={start}
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer nofollow"
+        className="underline break-all"
+        style={{ color: '#027EB5' }}
+      >
+        {url}
+      </a>,
+    );
+    last = start + url.length;
+  }
+  if (last === 0) return <>{text}</>;
+  if (last < text.length) parts.push(text.slice(last));
+  return <>{parts}</>;
 }
 
 // Meta mete en el motivo una URL larguisima al billing hub. Se muestra como link en
@@ -318,7 +314,7 @@ export default function MessageBubble({ message }: Props) {
 
         {message.type === 'LOCATION' && <LocationCard message={message} />}
 
-        {contacts.length > 0 && <ContactCards contacts={contacts} />}
+        {contacts.length > 0 && <SharedContactCards contacts={contacts} />}
 
         {/* Con la tarjeta dibujada, el "📍 nombre — direccion" o el "👤 nombre" del body la repetiria */}
         {message.body && !hasLocationCard(message) && contacts.length === 0 && (
@@ -329,7 +325,7 @@ export default function MessageBubble({ message }: Props) {
               <p className="italic text-xs opacity-60">{message.body.slice(1, -1)}</p>
             )
           ) : (
-            <p className="whitespace-pre-wrap break-words">{message.body}</p>
+            <p className="whitespace-pre-wrap break-words"><Linkified text={message.body} /></p>
           )
         )}
 

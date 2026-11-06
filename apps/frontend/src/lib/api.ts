@@ -607,6 +607,8 @@ export interface ImportContactsResult {
 }
 
 export const contactsApi = {
+  create: (data: { phone: string; name?: string; email?: string; company?: string }): Promise<Contact> =>
+    api.post('/contacts', data).then((r) => r.data),
   list: (search?: string, filter?: { tagIds?: string[]; tagMatch?: 'ANY' | 'ALL' }) =>
     api
       .get('/contacts', {

@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ContactIdentityService } from './contact-identity.service';
 import { ContactTagsService, slugifyTag, buildContactTagWhere } from '../contact-tags/contact-tags.service';
 import { CreateContactDto } from './dto/create-contact.dto';
-import { parseWorkbookRows, ParsedContactRow } from './contacts-import.util';
+import { parseWorkbookRows, ParsedContactRow, normalizePhone } from './contacts-import.util';
 
 const MAX_IMPORT_ROWS = 5000;
 const MAX_REPORTED_ERRORS = 50;
@@ -37,6 +37,9 @@ export class ContactsService {
   ) {}
 
   async create(tenantId: string, dto: CreateContactDto) {
+    // Solo digitos, como `msg.from` de Meta y como la importacion: "+507 6418-8200"
+    // guardado tal cual nunca coincidiria cuando esa persona escriba.
+    dto = { ...dto, phone: normalizePhone(dto.phone) };
     const existing = await this.prisma.contact.findUnique({
       where: { tenantId_phone: { tenantId, phone: dto.phone } },
     });
