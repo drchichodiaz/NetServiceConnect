@@ -337,6 +337,7 @@ model Contact {
   // asi que esto sigue impidiendo dos contactos de WhatsApp con el mismo numero y no
   // molesta a los de Instagram y Messenger, que tienen phone NULL.
   @@unique([tenantId, phone])
+  @@index([tenantId, updatedAt(sort: Desc), id(sort: Desc)])
   @@index([tenantId])
 }
 
@@ -429,6 +430,7 @@ model Conversation {
   @@index([tenantId, lastMessageAt])
   @@index([tenantId, channelAccountId])
   @@index([tenantId, waitingSince])
+  @@index([contactId])
   @@index([botId])
 }
 

@@ -86,18 +86,70 @@ export default function ContactsPage() {
   const [showTagManager, setShowTagManager] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
 
+  // La lista llega por paginas: con miles de contactos, pedirlos todos juntos tardaba
+  // segundos en mostrar algo. Se trae la primera y el resto a medida que se baja.
+  const [total,       setTotal]       = useState(0);
+  const [hasMore,     setHasMore]     = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  // Cada busqueda nueva invalida las paginas que todavia estan llegando de la anterior:
+  // sin esto, escribir rapido mezclaba resultados de dos busquedas.
+  const loadSeq = useRef(0);
+
   const load = useCallback(async (q?: string, tagIds: string[] = [], match: 'ANY' | 'ALL' = 'ANY') => {
+    const seq = ++loadSeq.current;
     setLoading(true);
-    try { setContacts(await contactsApi.list(q, { tagIds, tagMatch: match })); }
-    catch { toast.error('Error al cargar contactos'); }
-    finally { setLoading(false); }
+    try {
+      const page = await contactsApi.list(q, { tagIds, tagMatch: match });
+      if (seq !== loadSeq.current) return;
+      setContacts(page.items);
+      setTotal(page.total);
+      setHasMore(page.hasMore);
+    }
+    catch { if (seq === loadSeq.current) toast.error('Error al cargar contactos'); }
+    finally { if (seq === loadSeq.current) setLoading(false); }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore) return;
+    const seq = loadSeq.current;
+    setLoadingMore(true);
+    try {
+      const page = await contactsApi.list(search || undefined, { tagIds: filterTagIds, tagMatch }, contacts.length);
+      if (seq !== loadSeq.current) return;
+      // Por id: si alguien se actualizo entre una pagina y otra, sube al tope y
+      // reapareceria repetido en la siguiente.
+      setContacts((prev) => {
+        const known = new Set(prev.map((c) => c.id));
+        return [...prev, ...page.items.filter((c) => !known.has(c.id))];
+      });
+      setTotal(page.total);
+      setHasMore(page.hasMore);
+    } catch {
+      toast.error('Error al cargar más contactos');
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, hasMore, search, filterTagIds, tagMatch, contacts.length]);
 
-  // Debounce search. El filtro por etiquetas entra por el mismo camino: cambiarlo
-  // recarga la lista igual que escribir en el buscador.
+  // Al llegar al final de la lista se pide la pagina siguiente.
+  const sentinel = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
+    const el = sentinel.current;
+    if (!el || !hasMore) return;
+    const io = new IntersectionObserver((entries) => { if (entries[0]?.isIntersecting) loadMore(); }, { rootMargin: '300px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [hasMore, loadMore]);
+
+  // Una sola carga al abrir (antes eran dos: una directa y otra del buscador) y despues
+  // con pausa mientras se escribe. El filtro por etiquetas entra por el mismo camino.
+  const firstLoad = useRef(true);
+  useEffect(() => {
+    if (firstLoad.current) {
+      firstLoad.current = false;
+      load(search || undefined, filterTagIds, tagMatch);
+      return;
+    }
     const t = setTimeout(() => load(search || undefined, filterTagIds, tagMatch), 300);
     return () => clearTimeout(t);
   }, [search, filterTagIds, tagMatch, load]);
@@ -215,7 +267,7 @@ export default function ContactsPage() {
             </h1>
             <div className="flex items-center gap-2">
               <span className="text-xs text-ink-muted bg-surface-muted rounded-full px-2 py-0.5 font-medium">
-                {contacts.length}
+                {total.toLocaleString('es')}
               </span>
               <button
                 onClick={() => setShowTagManager(true)}
@@ -397,6 +449,13 @@ export default function ContactsPage() {
                 </div>
               );
             })
+          )}
+          {!loading && hasMore && (
+            <div ref={sentinel} className="py-4 text-center">
+              <button onClick={loadMore} disabled={loadingMore} className="text-xs text-ink-muted hover:text-ink">
+                {loadingMore ? 'Cargando…' : `Ver más (${contacts.length.toLocaleString('es')} de ${total.toLocaleString('es')})`}
+              </button>
+            </div>
           )}
         </div>
       </div>

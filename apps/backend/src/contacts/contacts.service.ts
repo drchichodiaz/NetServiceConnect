@@ -28,6 +28,9 @@ function flattenTags<T extends { tags?: { tag: { id: string; name: string; color
   return { ...contact, tags: (contact.tags ?? []).map((l) => l.tag) };
 }
 
+const CONTACTS_PAGE_SIZE = 100;
+const CONTACTS_PAGE_MAX = 500;
+
 @Injectable()
 export class ContactsService {
   constructor(
@@ -58,30 +61,59 @@ export class ContactsService {
    * los que tienen alguna. Los dos modos hacen falta: "mayorista Y moroso" es una lista
    * chica a la que hay que llamar, "mayorista O distribuidor" es una campaña.
    */
+  /**
+   * Una pagina de la lista de contactos, y cuantos hay en total con ese filtro.
+   *
+   * Antes devolvia todos de una: con ~5000 contactos eran 3 MB por pedido, y la pantalla
+   * tardaba en mostrar algo. La lista solo necesita lo que se ve en la fila; la ficha
+   * completa se pide al abrir un contacto (findOne).
+   */
   async findAll(
     tenantId: string,
     search?: string,
     filter?: { tagIds?: string[]; tagMatch?: 'ANY' | 'ALL' },
+    page: { skip?: number; take?: number } = {},
   ) {
-    const contacts = await this.prisma.contact.findMany({
-      where: {
-        tenantId,
-        ...buildContactTagWhere(filter?.tagIds, filter?.tagMatch),
-        ...(search && {
-          OR: [
-            { name: { contains: search, mode: 'insensitive' } },
-            { phone: { contains: search } },
-            { email: { contains: search, mode: 'insensitive' } },
-          ],
-        }),
-      },
-      orderBy: { updatedAt: 'desc' },
-      include: {
-        _count: { select: { conversations: true } },
-        tags: { include: { tag: true } },
-      },
-    });
-    return contacts.map(flattenTags);
+    const where = {
+      tenantId,
+      ...buildContactTagWhere(filter?.tagIds, filter?.tagMatch),
+      ...(search && {
+        OR: [
+          { name: { contains: search, mode: 'insensitive' as const } },
+          { phone: { contains: search } },
+          { email: { contains: search, mode: 'insensitive' as const } },
+        ],
+      }),
+    };
+    const take = Math.min(Math.max(page.take ?? CONTACTS_PAGE_SIZE, 1), CONTACTS_PAGE_MAX);
+    const skip = Math.max(page.skip ?? 0, 0);
+
+    const [contacts, total] = await Promise.all([
+      this.prisma.contact.findMany({
+        where,
+        // El id desempata: con updatedAt repetido (un import entero cae en el mismo
+        // instante) el orden no seria estable y una pagina repetiria filas de otra.
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take,
+        select: {
+          id: true,
+          tenantId: true,
+          phone: true,
+          name: true,
+          email: true,
+          company: true,
+          avatarUrl: true,
+          optedOutAt: true,
+          createdAt: true,
+          updatedAt: true,
+          _count: { select: { conversations: true } },
+          tags: { select: { tag: { select: { id: true, name: true, color: true } } } },
+        },
+      }),
+      this.prisma.contact.count({ where }),
+    ]);
+    return { items: contacts.map(flattenTags), total, hasMore: skip + contacts.length < total };
   }
 
   async findOne(tenantId: string, id: string) {

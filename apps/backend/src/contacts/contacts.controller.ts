@@ -54,11 +54,18 @@ export class ContactsController {
     @Query('search') search?: string,
     @Query('tagIds') tagIds?: string,
     @Query('tagMatch') tagMatch?: 'ANY' | 'ALL',
+    @Query('skip') skip?: string,
+    @Query('take') take?: string,
   ) {
-    return this.service.findAll(user.tenantId, search, {
-      tagIds: tagIds ? tagIds.split(',').filter(Boolean) : undefined,
-      tagMatch: tagMatch === 'ALL' ? 'ALL' : 'ANY',
-    });
+    return this.service.findAll(
+      user.tenantId,
+      search,
+      {
+        tagIds: tagIds ? tagIds.split(',').filter(Boolean) : undefined,
+        tagMatch: tagMatch === 'ALL' ? 'ALL' : 'ANY',
+      },
+      { skip: Number(skip) || 0, take: Number(take) || undefined },
+    );
   }
 
   /**

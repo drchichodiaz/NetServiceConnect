@@ -612,11 +612,17 @@ export interface ImportContactsResult {
 export const contactsApi = {
   create: (data: { phone: string; name?: string; email?: string; company?: string }): Promise<Contact> =>
     api.post('/contacts', data).then((r) => r.data),
-  list: (search?: string, filter?: { tagIds?: string[]; tagMatch?: 'ANY' | 'ALL' }) =>
+  /** Una pagina de contactos (de a 100) y el total con ese filtro. */
+  list: (
+    search?: string,
+    filter?: { tagIds?: string[]; tagMatch?: 'ANY' | 'ALL' },
+    skip = 0,
+  ): Promise<{ items: Contact[]; total: number; hasMore: boolean }> =>
     api
       .get('/contacts', {
         params: {
           ...(search ? { search } : {}),
+          ...(skip ? { skip } : {}),
           // Como querystring: una lista separada por comas, no un array repetido.
           ...(filter?.tagIds?.length ? { tagIds: filter.tagIds.join(','), tagMatch: filter.tagMatch ?? 'ANY' } : {}),
         },
