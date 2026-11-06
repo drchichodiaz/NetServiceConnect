@@ -87,6 +87,14 @@ export class AgendaController {
     return this.availability.day(user.tenantId, user, channelAccountId, date);
   }
 
+  /** La semana de una clinica, los 7 dias juntos: ?channelAccountId=...&date=<lunes YYYY-MM-DD> */
+  @Roles('ADMIN' as any, 'SUPERVISOR' as any, 'AGENT' as any)
+  @Get('week')
+  week(@CurrentUser() user: any, @Query('channelAccountId') channelAccountId: string, @Query('date') date: string) {
+    if (!channelAccountId || !date) throw new BadRequestException('Faltan la clínica o la fecha');
+    return this.availability.week(user.tenantId, user, channelAccountId, date);
+  }
+
   /** Resumen del mes de una clinica: ?channelAccountId=...&month=YYYY-MM */
   @Roles('ADMIN' as any, 'SUPERVISOR' as any, 'AGENT' as any)
   @Get('month')

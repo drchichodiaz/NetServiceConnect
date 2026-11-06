@@ -882,6 +882,9 @@ export const agendaApi = {
 
   day: (channelAccountId: string, date: string): Promise<AgendaDay> =>
     api.get('/agenda/day', { params: { channelAccountId, date } }).then((r) => r.data),
+  /** Los 7 dias de la semana que empieza en `monday`, en un solo pedido. */
+  week: (channelAccountId: string, monday: string): Promise<AgendaDay[]> =>
+    api.get('/agenda/week', { params: { channelAccountId, date: monday } }).then((r) => r.data),
   month: (channelAccountId: string, month: string): Promise<MonthSummary> =>
     api.get('/agenda/month', { params: { channelAccountId, month } }).then((r) => r.data),
   freeDoctors: (params: { channelAccountId: string; startsAt: string; minutes?: number; excludeAppointmentId?: string }): Promise<FreeDoctor[]> =>

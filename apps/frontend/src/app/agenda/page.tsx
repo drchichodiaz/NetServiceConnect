@@ -38,6 +38,21 @@ const VIEWS: { id: View; label: string }[] = [
   { id: 'month', label: 'Mes' },
 ];
 
+/** Que se pide para mostrar una vista, y con que clave se guarda. */
+function viewKey(view: View, clinicId: string, date: string) {
+  if (view === 'day') return `d:${clinicId}:${date}`;
+  if (view === 'week') return `w:${clinicId}:${mondayOf(date)}`;
+  return `m:${clinicId}:${date.slice(0, 7)}`;
+}
+function fetchView(view: View, clinicId: string, date: string): Promise<AgendaDay | AgendaDay[] | MonthSummary> {
+  if (view === 'day') return agendaApi.day(clinicId, date);
+  if (view === 'week') return agendaApi.week(clinicId, mondayOf(date));
+  return agendaApi.month(clinicId, date.slice(0, 7));
+}
+function stepDate(view: View, date: string, n: number) {
+  return view === 'day' ? addDays(date, n) : view === 'week' ? addDays(date, 7 * n) : addMonths(date, n);
+}
+
 function remembered(key: string): string {
   try { return localStorage.getItem(key) ?? ''; } catch { return ''; }
 }
@@ -73,32 +88,66 @@ export default function AgendaPage() {
     }
   }, [clinics, clinicId]);
 
+  // Lo ya visto en esta visita, por vista, clinica y fecha. Volver a un dia (o pasar al
+  // siguiente, que se pide por adelantado) lo muestra en el acto y lo refresca por detras;
+  // antes cada cambio de dia era un "cargando" de casi un segundo, aunque recien se hubiera
+  // visto. Se vacia ante cualquier cambio en la agenda, propio o de otra recepcion.
+  const cache = useRef(new Map<string, AgendaDay | AgendaDay[] | MonthSummary>());
+  const shownKey = useRef('');
+
   const load = useCallback(async () => {
     if (!clinicId || !date) return;
+    const key = viewKey(view, clinicId, date);
+    shownKey.current = key;
+    const show = (data: AgendaDay | AgendaDay[] | MonthSummary) => {
+      if (view === 'day') setDay(data as AgendaDay);
+      else if (view === 'week') setWeek(data as AgendaDay[]);
+      else setMonth(data as MonthSummary);
+    };
+    const cached = cache.current.get(key);
+    if (cached) show(cached);
     setLoading(true);
     try {
-      if (view === 'day') {
-        setDay(await agendaApi.day(clinicId, date));
-      } else if (view === 'week') {
-        const monday = mondayOf(date);
-        setWeek(await Promise.all(Array.from({ length: 7 }, (_, i) => agendaApi.day(clinicId, addDays(monday, i)))));
-      } else {
-        setMonth(await agendaApi.month(clinicId, date.slice(0, 7)));
-      }
+      const data = await fetchView(view, clinicId, date);
+      cache.current.set(key, data);
+      if (shownKey.current === key) show(data);
     } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'No se pudo cargar la agenda');
+      if (shownKey.current === key) toast.error(err?.response?.data?.message || 'No se pudo cargar la agenda');
     } finally {
-      setLoading(false);
+      if (shownKey.current === key) setLoading(false);
+    }
+
+    // El anterior y el siguiente, por adelantado: es a donde se va casi siempre.
+    for (const n of [1, -1]) {
+      const other = stepDate(view, date, n);
+      const otherKey = viewKey(view, clinicId, other);
+      if (!cache.current.has(otherKey)) {
+        fetchView(view, clinicId, other).then((d) => cache.current.set(otherKey, d)).catch(() => {});
+      }
     }
   }, [clinicId, date, view]);
+
+  /** Recarga sin lo guardado: algo cambio y lo guardado ya no vale. */
+  const reload = useCallback(() => {
+    cache.current.clear();
+    return load();
+  }, [load]);
+
+  // El codigo del calendario se baja mientras llegan los datos, no despues: antes la
+  // pantalla esperaba los datos y recien ahi empezaba a descargarlo.
+  useEffect(() => {
+    import('@/components/agenda/CalendarDayView');
+    import('@/components/agenda/CalendarWeekView');
+    import('@/components/agenda/CalendarMonthView');
+  }, []);
 
   useEffect(() => { load(); }, [load]);
 
   // Una sola recarga por rafaga: al mover una cita llegan casi juntos el "listo" del
   // propio pedido y el aviso en vivo de que la agenda cambio. Antes eran dos recargas
   // seguidas del dia entero; ahora se juntan en una.
-  const loadRef = useRef(load);
-  loadRef.current = load;
+  const loadRef = useRef(reload);
+  loadRef.current = reload;
   const reloadTimer = useRef<ReturnType<typeof setTimeout>>();
   const requestReload = useCallback(() => {
     clearTimeout(reloadTimer.current);
@@ -141,7 +190,7 @@ export default function AgendaPage() {
     remember('agenda.view', 'day');
   }, []);
   function step(n: number) {
-    setDate((d) => (view === 'day' ? addDays(d, n) : view === 'week' ? addDays(d, 7 * n) : addMonths(d, n)));
+    setDate((d) => stepDate(view, d, n));
   }
 
   if (!settings || !clinics) return <Spinner />;
@@ -188,7 +237,7 @@ export default function AgendaPage() {
               </button>
             ))}
           </div>
-          <button onClick={load} className="btn-ghost w-8 h-8 p-0" title="Actualizar">
+          <button onClick={reload} className="btn-ghost w-8 h-8 p-0" title="Actualizar">
             <RefreshCw className={clsx('w-4 h-4', loading && 'animate-spin')} />
           </button>
           <button onClick={() => setCreating({})} className="btn-primary !py-2">
@@ -247,7 +296,7 @@ export default function AgendaPage() {
           slotMinutes={settings.slotMinutes}
           initial={{ channelAccountId: clinicId, date: creating.date, minute: creating.minute }}
           onClose={() => setCreating(null)}
-          onCreated={() => { setCreating(null); load(); }}
+          onCreated={() => { setCreating(null); reload(); }}
         />
       )}
       {open && (
@@ -255,7 +304,7 @@ export default function AgendaPage() {
           appointment={open}
           timezone={tz}
           onClose={() => setOpen(null)}
-          onChanged={load}
+          onChanged={reload}
         />
       )}
     </div>

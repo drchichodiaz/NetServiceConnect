@@ -47,7 +47,22 @@ export class AvailabilityService {
     const settings = await this.settings.requireEnabled(tenantId);
     if (!isValidDate(date)) throw new BadRequestException('Fecha inválida');
     await this.assertClinicAccess(tenantId, user, channelAccountId);
+    return this.buildDay(tenantId, channelAccountId, date, settings);
+  }
 
+  /**
+   * Los 7 dias de la semana que empieza en `monday`, en un solo pedido. La pantalla
+   * pedia el dia 7 veces: siete viajes al servidor, con sus permisos y su configuracion
+   * cada uno, para algo que se muestra junto.
+   */
+  async week(tenantId: string, user: { id: string }, channelAccountId: string, monday: string) {
+    const settings = await this.settings.requireEnabled(tenantId);
+    if (!isValidDate(monday)) throw new BadRequestException('Fecha inválida');
+    await this.assertClinicAccess(tenantId, user, channelAccountId);
+    return Promise.all(Array.from({ length: 7 }, (_, i) => this.buildDay(tenantId, channelAccountId, addDays(monday, i), settings)));
+  }
+
+  private async buildDay(tenantId: string, channelAccountId: string, date: string, settings: { timezone: string; slotMinutes: number }) {
     const tz = settings.timezone;
     const plan = await this.loadDay(tenantId, date, tz);
 
