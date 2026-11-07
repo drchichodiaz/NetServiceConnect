@@ -29,6 +29,38 @@ function whatsappTypeFor(file: File): string {
   return 'document';
 }
 
+// WhatsApp solo acepta imagenes JPG o PNG de hasta 5 MB. Una captura de una pantalla
+// grande en PNG puede pasarse, y lo que se copia de un navegador a veces viene en
+// webp: en esos casos se recomprime a JPG en el navegador antes de adjuntar.
+const WA_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+const WA_IMAGE_TYPES = ['image/jpeg', 'image/png'];
+
+function pastedName(ext: string): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `captura-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.${ext}`;
+}
+
+async function toWhatsAppImage(file: File): Promise<File> {
+  if (WA_IMAGE_TYPES.includes(file.type) && file.size <= WA_IMAGE_MAX_BYTES) {
+    return new File([file], pastedName(file.type === 'image/png' ? 'png' : 'jpg'), { type: file.type });
+  }
+  const bitmap = await createImageBitmap(file);
+  // Se achica de a 20% hasta que entre: con una captura normal alcanza el primer intento.
+  for (let scale = 1; scale > 0.2; scale *= 0.8) {
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#fff'; // el JPG no tiene transparencia: fondo blanco en vez de negro
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/jpeg', 0.85));
+    if (blob && blob.size <= WA_IMAGE_MAX_BYTES) return new File([blob], pastedName('jpg'), { type: 'image/jpeg' });
+  }
+  throw new Error('too big');
+}
+
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
@@ -40,6 +72,7 @@ export default function ReplyBox({ conversationId, contact }: Props) {
   const [isSending,    setIsSending]    = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  const [previewUrl,   setPreviewUrl]   = useState<string | null>(null);
 
   // Quick replies state
   const [allReplies,   setAllReplies]   = useState<QuickReply[]>([]);
@@ -50,6 +83,14 @@ export default function ReplyBox({ conversationId, contact }: Props) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { addMessage } = useInboxStore();
+
+  // Miniatura del adjunto si es imagen; la URL se libera al cambiar o quitar el archivo.
+  useEffect(() => {
+    if (!attachedFile || !attachedFile.type.startsWith('image/')) { setPreviewUrl(null); return; }
+    const url = URL.createObjectURL(attachedFile);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [attachedFile]);
 
   // Cargar quick replies al montar
   useEffect(() => {
@@ -119,6 +160,22 @@ export default function ReplyBox({ conversationId, contact }: Props) {
       return;
     }
     setAttachedFile(file);
+  }
+
+  // ── Paste (Ctrl+V de una captura) ─────────────────────────────────────────────
+  // Solo se intercepta si el portapapeles trae una imagen: pegar texto sigue igual.
+  async function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const item = Array.from(e.clipboardData.items).find((i) => i.kind === 'file' && i.type.startsWith('image/'));
+    const file = item?.getAsFile();
+    if (!file) return;
+    e.preventDefault();
+    if (isSending) return;
+    try {
+      setAttachedFile(await toWhatsAppImage(file));
+      textareaRef.current?.focus();
+    } catch {
+      toast.error('No se pudo usar la imagen pegada');
+    }
   }
 
   // ── AI suggest ──────────────────────────────────────────────────────────────
@@ -239,7 +296,10 @@ export default function ReplyBox({ conversationId, contact }: Props) {
           className="flex items-center gap-2 mb-2 px-3 py-2 rounded-xl animate-fade-in"
           style={{ background: '#E8FBF0', border: '1px solid #C8F0D8' }}
         >
-          <FileText className="w-4 h-4 shrink-0" style={{ color: '#128C7E' }} />
+          {previewUrl
+            // eslint-disable-next-line @next/next/no-img-element
+            ? <img src={previewUrl} alt="" className="w-10 h-10 rounded-lg object-cover shrink-0" />
+            : <FileText className="w-4 h-4 shrink-0" style={{ color: '#128C7E' }} />}
           <div className="flex-1 min-w-0">
             <p className="text-xs font-medium text-ink truncate">{attachedFile.name}</p>
             <p className="text-[11px] text-ink-subtle">{formatSize(attachedFile.size)}</p>
@@ -324,8 +384,9 @@ export default function ReplyBox({ conversationId, contact }: Props) {
             value={text}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             onInput={autoResize}
-            placeholder={attachedFile ? 'Agregar un texto (opcional)...' : 'Escribe un mensaje o / para respuestas rápidas...'}
+            placeholder={attachedFile ? 'Agregar un texto (opcional)...' : 'Escribe un mensaje, / para respuestas rápidas o pega una captura...'}
             rows={1}
             className={clsx(
               'w-full resize-none text-sm text-ink rounded-xl px-3.5 py-2.5 transition-all duration-150',
