@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { whatsappApi, botsApi, BotSummary, callsApi } from '@/lib/api';
 import { WhatsAppAccount, WhatsAppBusinessProfile, accountLabel } from '@/types';
 import EmbeddedSignup from '@/components/whatsapp/EmbeddedSignup';
+import ModalPortal from '@/components/ui/ModalPortal';
 import {
   CheckCircle, Copy, Eye, EyeOff, Wifi, WifiOff, Plus, Star,
   KeyRound, Loader2, AlertCircle, Zap, Pencil, RefreshCw, Phone, PhoneCall, X, Check, Bot, Store, Upload,
@@ -388,10 +389,10 @@ function AccountCard({
             )}
             {isConnected && isRegistered && (
               <button
-                onClick={() => setShowProfile(!showProfile)}
+                onClick={() => setShowProfile(true)}
                 className="text-[11px] text-ink-subtle hover:text-ink transition-colors"
               >
-                {showProfile ? 'Ocultar perfil' : 'Perfil de WhatsApp'}
+                Perfil de WhatsApp
               </button>
             )}
             {isConnected && !account.isDefault && (
@@ -516,6 +517,12 @@ function ProfilePanel({ account, onClose }: { account: WhatsAppAccount; onClose:
     return () => { alive = false; };
   }, [account.id]);
 
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape' && !saving && !uploading) onClose(); }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose, saving, uploading]);
+
   function set<K extends keyof ProfileDraft>(key: K, value: ProfileDraft[K]) {
     setDraft((d) => (d ? { ...d, [key]: value } : d));
   }
@@ -577,14 +584,24 @@ function ProfilePanel({ account, onClose }: { account: WhatsAppAccount; onClose:
   }
 
   return (
-    <div className="px-4 pb-4 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
-      <div className="flex items-center justify-between mb-3">
-        <p className="text-xs font-semibold text-ink flex items-center gap-1.5">
-          <Store className="w-3.5 h-3.5 text-ink-subtle" />
-          Perfil de WhatsApp
-        </p>
-        <button onClick={onClose} className="btn-ghost w-7 h-7 p-0" title="Cerrar">
-          <X className="w-3.5 h-3.5" />
+    <ModalPortal>
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 sm:p-6"
+      onMouseDown={(e) => { if (e.target === e.currentTarget && !saving && !uploading) onClose(); }}
+    >
+    <div className="card w-full max-w-lg p-6 my-4">
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <h2 className="text-base font-bold text-ink flex items-center gap-2">
+            <Store className="w-4 h-4 text-ink-subtle" />
+            Perfil de WhatsApp
+          </h2>
+          <p className="text-xs text-ink-muted mt-0.5">
+            {accountLabel(account)}{account.phoneNumber && ` · ${account.phoneNumber}`}
+          </p>
+        </div>
+        <button onClick={onClose} className="btn-ghost w-8 h-8 p-0" title="Cerrar">
+          <X className="w-4 h-4" />
         </button>
       </div>
 
@@ -680,6 +697,8 @@ function ProfilePanel({ account, onClose }: { account: WhatsAppAccount; onClose:
         </div>
       )}
     </div>
+    </div>
+    </ModalPortal>
   );
 }
 
