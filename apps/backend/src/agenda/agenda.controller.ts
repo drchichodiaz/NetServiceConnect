@@ -7,7 +7,7 @@ import { AgendaSettingsService } from './agenda-settings.service';
 import { DoctorsService } from './doctors.service';
 import { AvailabilityService } from './availability.service';
 import { AppointmentsService } from './appointments.service';
-import { CreateDoctorDto, CreateExceptionDto, SetShiftsDto, UpdateAgendaSettingsDto, UpdateDoctorDto } from './dto/agenda.dto';
+import { CreateDoctorDto, CreateExceptionDto, SetShiftsDto, UpdateAgendaSettingsDto, UpdateDoctorDto, UpdateExceptionDto } from './dto/agenda.dto';
 import { CreateAppointmentDto, ExtendAppointmentDto, SetAppointmentStatusDto, UpdateAppointmentDto } from './dto/appointments.dto';
 
 /**
@@ -72,6 +72,11 @@ export class AgendaController {
   @Post('exceptions')
   createException(@CurrentUser() user: any, @Body() dto: CreateExceptionDto) {
     return this.doctors.createException(user.tenantId, dto);
+  }
+
+  @Patch('exceptions/:id')
+  updateException(@CurrentUser() user: any, @Param('id') id: string, @Body() dto: UpdateExceptionDto) {
+    return this.doctors.updateException(user.tenantId, id, dto);
   }
 
   @Delete('exceptions/:id')

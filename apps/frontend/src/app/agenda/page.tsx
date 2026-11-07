@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { ChevronLeft, ChevronRight, Loader2, Plus, RefreshCw } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Loader2, Plane, Plus, RefreshCw } from 'lucide-react';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
 import { agendaApi } from '@/lib/api';
@@ -23,6 +23,8 @@ import { useAgendaSettings } from '@/hooks/useAgendaSettings';
 import { useClinics } from '@/components/agenda/useClinics';
 import CreateAppointmentModal from '@/components/agenda/CreateAppointmentModal';
 import AppointmentPanel from '@/components/agenda/AppointmentPanel';
+import AbsenceModal, { AbsenceTarget } from '@/components/agenda/AbsenceModal';
+import { useAuthStore } from '@/store/auth.store';
 
 // La libreria de calendario toca el DOM al cargarse: solo del lado del cliente.
 const CalendarDayView = dynamic(() => import('@/components/agenda/CalendarDayView'), { ssr: false });
@@ -74,6 +76,11 @@ export default function AgendaPage() {
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState<{ date?: string; minute?: number } | null>(null);
   const [open, setOpen] = useState<Appointment | null>(null);
+  const [absence, setAbsence] = useState<AbsenceTarget | null>(null);
+  // Las ausencias las administra la coordinacion, igual que en Doctores y turnos: la
+  // recepcion las ve en gris pero no las cambia.
+  const role = useAuthStore((s) => s.user?.role);
+  const canManageAbsences = role === 'ADMIN' || role === 'SUPERVISOR';
 
   // Arranca cuando se sabe la zona y que clinicas puede ver.
   useEffect(() => {
@@ -160,6 +167,7 @@ export default function AgendaPage() {
   const dateRef = useRef(date);
   dateRef.current = date;
   const openCreateToday = useCallback((minute: number) => setCreating({ date: dateRef.current, minute }), []);
+  const openAbsence = useCallback((t: Omit<AbsenceTarget, 'date'>) => setAbsence({ ...t, date: dateRef.current }), []);
 
   // En vivo: si otra recepcion (u otra clinica que comparte doctor) cambia algo, se recarga.
   useEffect(() => {
@@ -240,6 +248,11 @@ export default function AgendaPage() {
           <button onClick={reload} className="btn-ghost w-8 h-8 p-0" title="Actualizar">
             <RefreshCw className={clsx('w-4 h-4', loading && 'animate-spin')} />
           </button>
+          {canManageAbsences && view === 'day' && (
+            <button onClick={() => setAbsence({ date })} className="btn-secondary !py-2" title="Marcar que un doctor falta este día">
+              <Plane className="w-4 h-4" /> Ausencia
+            </button>
+          )}
           <button onClick={() => setCreating({})} className="btn-primary !py-2">
             <Plus className="w-4 h-4" /> Crear cita
           </button>
@@ -263,6 +276,7 @@ export default function AgendaPage() {
               onSlot={openCreateToday}
               onOpen={setOpen}
               onChanged={requestReload}
+              onAbsence={canManageAbsences ? openAbsence : undefined}
             />
           ))}
 
@@ -297,6 +311,13 @@ export default function AgendaPage() {
           initial={{ channelAccountId: clinicId, date: creating.date, minute: creating.minute }}
           onClose={() => setCreating(null)}
           onCreated={() => { setCreating(null); reload(); }}
+        />
+      )}
+      {absence && (
+        <AbsenceModal
+          target={absence}
+          onClose={() => setAbsence(null)}
+          onSaved={() => { setAbsence(null); reload(); }}
         />
       )}
       {open && (

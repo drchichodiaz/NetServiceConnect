@@ -239,3 +239,27 @@ export class CreateExceptionDto {
   @MaxLength(200)
   note?: string;
 }
+
+/** Editar una ausencia desde la agenda: el horario (o el dia entero) y la nota. */
+export class UpdateExceptionDto {
+  @IsOptional()
+  @IsBoolean()
+  allDay?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(1440)
+  startMinute?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(1440)
+  endMinute?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  note?: string;
+}

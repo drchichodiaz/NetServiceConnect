@@ -124,6 +124,20 @@
 .rbc-agenda .rbc-st-no_show   { background: #fef2f2; border-color: #fca5a5; color: #b91c1c; }
 
 /* "En otra clinica" */
+.rbc-agenda .rbc-background-event.rbc-ev-absent {
+  /* La libreria le calcula un ancho propio de evento de fondo: aca ocupa la columna. */
+  left: 0 !important;
+  width: 100% !important;
+  background: repeating-linear-gradient(135deg, #d9dce3 0 6px, #e8eaef 6px 12px);
+  border: 1px solid #c4c8d1;
+  border-radius: 6px;
+  opacity: 1;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.rbc-agenda .rbc-background-event.rbc-ev-absent:hover {
+  border-color: #9ca3af;
+}
 .rbc-agenda .rbc-background-event.rbc-ev-elsewhere {
   background: rgb(229 231 235 / 0.85);
   border: 0;

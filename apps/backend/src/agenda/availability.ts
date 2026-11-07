@@ -98,14 +98,21 @@ export function fullIntervals(busy: Interval[], capacity: number): Interval[] {
  * jueves va a Zona 5"); si no, vale el turno semanal de ese dia de la semana. Despues
  * se restan las ausencias. Una ausencia sin horario es el dia entero.
  */
-export function doctorDayWindows(weekday: number, shifts: ShiftLike[], exceptions: ExceptionLike[]): WorkWindow[] {
+/**
+ * Donde y cuando atenderia ese dia si no faltara: el turno semanal, o los WORKS_AT si
+ * los hay. Es lo que la agenda pinta de gris cuando el doctor tiene una ausencia.
+ */
+export function doctorBaseWindows(weekday: number, shifts: ShiftLike[], exceptions: ExceptionLike[]): WorkWindow[] {
   const worksAt = exceptions.filter((e) => e.kind === 'WORKS_AT');
-  const base: WorkWindow[] =
-    worksAt.length > 0
-      ? worksAt.map((e) => ({ channelAccountId: e.channelAccountId!, start: e.startMinute!, end: e.endMinute! }))
-      : shifts
-          .filter((s) => s.weekday === weekday)
-          .map((s) => ({ channelAccountId: s.channelAccountId, start: s.startMinute, end: s.endMinute }));
+  return worksAt.length > 0
+    ? worksAt.map((e) => ({ channelAccountId: e.channelAccountId!, start: e.startMinute!, end: e.endMinute! }))
+    : shifts
+        .filter((s) => s.weekday === weekday)
+        .map((s) => ({ channelAccountId: s.channelAccountId, start: s.startMinute, end: s.endMinute }));
+}
+
+export function doctorDayWindows(weekday: number, shifts: ShiftLike[], exceptions: ExceptionLike[]): WorkWindow[] {
+  const base = doctorBaseWindows(weekday, shifts, exceptions);
 
   const absences: Interval[] = exceptions
     .filter((e) => e.kind === 'ABSENT')

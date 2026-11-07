@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ChannelAccessService } from '../common/services/channel-access.service';
 import { AgendaSettingsService } from './agenda-settings.service';
 import { addDays, dateColumn, fromDateColumn, fromLocal, isValidDate, MINUTES_PER_DAY, toLocal, weekdayOf } from './agenda-time';
-import { doctorDayWindows, fitsInside, freeStarts, Interval, overlaps, peakOverlap, WorkWindow } from './availability';
+import { doctorBaseWindows, doctorDayWindows, fitsInside, freeStarts, Interval, overlaps, peakOverlap, WorkWindow } from './availability';
 
 interface DayAppointment {
   id: string;
@@ -77,11 +77,22 @@ export class AvailabilityService {
 
     // En la grilla va todo doctor que atiende hoy aca, y tambien el que tiene una cita
     // aca aunque ya no figure en el turno (le cargaron una ausencia despues de agendar):
-    // si no, esa cita desapareceria de la pantalla sin que nadie la haya movido.
+    // si no, esa cita desapareceria de la pantalla sin que nadie la haya movido. Y el que
+    // hoy atenderia aca pero falta: su columna sale en gris con la ausencia, para que la
+    // recepcion vea por que no esta y pueda corregirla desde ahi.
     const withAppointmentsHere = new Set(clinicAppointments.map((a) => a.doctorId));
     const doctors = plan.doctors
-      .map((d) => ({ ...d, clinicWindows: d.windows.filter((w) => w.channelAccountId === channelAccountId) }))
-      .filter((d) => d.clinicWindows.length > 0 || withAppointmentsHere.has(d.id));
+      .map((d) => ({
+        ...d,
+        clinicWindows: d.windows.filter((w) => w.channelAccountId === channelAccountId),
+        clinicBase: d.baseWindows.filter((w) => w.channelAccountId === channelAccountId),
+      }))
+      .filter(
+        (d) =>
+          d.clinicWindows.length > 0 ||
+          withAppointmentsHere.has(d.id) ||
+          (d.isActive && d.clinicBase.length > 0 && d.absenceRows.length > 0),
+      );
 
     // Citas de doctores inactivos que siguen en la agenda.
     const missing = [...withAppointmentsHere].filter((id) => !doctors.some((d) => d.id === id));
@@ -103,11 +114,13 @@ export class AvailabilityService {
           specialty: d.specialty,
           maxConcurrent: d.maxConcurrent,
           windows: d.clinicWindows.map(({ start, end }) => ({ start, end })),
+          baseWindows: d.clinicBase.map(({ start, end }) => ({ start, end })),
+          absences: d.absenceRows,
           busyElsewhere: plan.appointments
             .filter((a) => a.doctorId === d.id && a.channelAccountId !== channelAccountId)
             .map((a) => appointmentInterval(a, date, tz)),
         })),
-        ...extra.map((d) => ({ ...d, windows: [], busyElsewhere: [] })),
+        ...extra.map((d) => ({ ...d, windows: [], baseWindows: [], absences: [], busyElsewhere: [] })),
       ].sort((a, b) => a.code.localeCompare(b.code)),
       appointments: clinicAppointments.map((a) => {
         const i = appointmentInterval(a, date, tz);
@@ -352,6 +365,19 @@ export class AvailabilityService {
         absences: exceptions
           .filter((e) => e.doctorId === d.id && e.kind === 'ABSENT')
           .map((e): Interval => (e.startMinute === null ? { start: 0, end: MINUTES_PER_DAY } : { start: e.startMinute, end: e.endMinute! })),
+        // Las mismas ausencias, con lo que la agenda necesita para mostrarlas y editarlas.
+        absenceRows: exceptions
+          .filter((e) => e.doctorId === d.id && e.kind === 'ABSENT')
+          .map((e) => ({
+            id: e.id,
+            allDay: e.startMinute === null,
+            start: e.startMinute ?? 0,
+            end: e.endMinute ?? MINUTES_PER_DAY,
+            note: e.note,
+          })),
+        baseWindows: d.isActive
+          ? doctorBaseWindows(weekday, d.shifts, exceptions.filter((e) => e.doctorId === d.id))
+          : ([] as WorkWindow[]),
         // Un doctor inactivo no atiende: sin tramos, no aparece libre ni en la grilla
         // (salvo que tenga citas viejas, que day() agrega aparte).
         windows: d.isActive

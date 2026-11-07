@@ -3,7 +3,8 @@ import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { normalizePhone } from '../contacts/contacts-import.util';
 import { AgendaSettingsService } from './agenda-settings.service';
-import { CreateDoctorDto, CreateExceptionDto, SetShiftsDto, ShiftDto, UpdateDoctorDto } from './dto/agenda.dto';
+import { CreateDoctorDto, CreateExceptionDto, SetShiftsDto, ShiftDto, UpdateDoctorDto, UpdateExceptionDto } from './dto/agenda.dto';
+import { EventBusService } from '../events/event-bus.service';
 import { addDays, dateColumn, fromDateColumn, fromLocal, isValidDate, MINUTES_PER_DAY, toLocal } from './agenda-time';
 import { overlaps } from './availability';
 
@@ -33,7 +34,16 @@ export class DoctorsService {
   constructor(
     private prisma: PrismaService,
     private settings: AgendaSettingsService,
+    private events: EventBusService,
   ) {}
+
+  /**
+   * Una ausencia o un cambio de clinica mueve lo que muestra la agenda de todas las
+   * clinicas del doctor: se avisa sin lista de clinicas y cada pantalla recarga la suya.
+   */
+  private publishChanged(tenantId: string) {
+    this.events.publish({ type: 'agenda_changed', tenantId, payload: { channelAccountIds: [] } });
+  }
 
   async list(tenantId: string) {
     await this.settings.requireEnabled(tenantId);
@@ -226,16 +236,58 @@ export class DoctorsService {
     // Una ausencia no cancela nada sola: las citas que ya estaban quedan donde estan y
     // la recepcion decide si las mueve o las pasa a otro doctor. Pero la coordinacion
     // tiene que enterarse en el momento, no el dia que el paciente llega.
-    let affectedAppointments = 0;
-    if (dto.kind === 'ABSENT') {
-      const from = fromLocal(dto.date, dto.startMinute ?? 0, settings.timezone);
-      const to = fromLocal(dto.date, dto.endMinute ?? MINUTES_PER_DAY, settings.timezone);
-      affectedAppointments = await this.prisma.appointment.count({
-        where: { doctorId: dto.doctorId, status: { not: 'CANCELLED' }, startsAt: { lt: to }, endsAt: { gt: from } },
-      });
+    const affectedAppointments =
+      dto.kind === 'ABSENT' ? await this.appointmentsDuring(dto.doctorId, dto.date, dto.startMinute, dto.endMinute, settings.timezone) : 0;
+
+    this.publishChanged(tenantId);
+    return { ...exception, date: fromDateColumn(exception.date), affectedAppointments };
+  }
+
+  /** Las citas que una ausencia deja sin doctor: no se tocan, solo se cuentan para avisar. */
+  private appointmentsDuring(doctorId: string, date: string, startMinute: number | null | undefined, endMinute: number | null | undefined, tz: string) {
+    const from = fromLocal(date, startMinute ?? 0, tz);
+    const to = fromLocal(date, endMinute ?? MINUTES_PER_DAY, tz);
+    return this.prisma.appointment.count({
+      where: { doctorId, status: { not: 'CANCELLED' }, startsAt: { lt: to }, endsAt: { gt: from } },
+    });
+  }
+
+  /**
+   * Cambia el horario o la nota de una ausencia, desde la agenda. Solo ausencias: el
+   * doctor y el dia no se cambian (eso es borrarla y cargar otra), y un "trabaja en"
+   * se sigue administrando en Doctores y turnos.
+   */
+  async updateException(tenantId: string, id: string, dto: UpdateExceptionDto) {
+    const settings = await this.settings.requireEnabled(tenantId);
+    const row = await this.prisma.doctorException.findFirst({ where: { id, tenantId } });
+    if (!row) throw new NotFoundException('Ausencia no encontrada');
+    if (row.kind !== 'ABSENT') throw new BadRequestException('Desde la agenda solo se editan ausencias');
+
+    let startMinute = row.startMinute;
+    let endMinute = row.endMinute;
+    if (dto.allDay) {
+      startMinute = null;
+      endMinute = null;
+    } else if (dto.startMinute !== undefined || dto.endMinute !== undefined) {
+      if (dto.startMinute === undefined || dto.endMinute === undefined) throw new BadRequestException('Falta la hora de inicio o la de fin');
+      this.assertShiftHours({ startMinute: dto.startMinute, endMinute: dto.endMinute });
+      startMinute = dto.startMinute;
+      endMinute = dto.endMinute;
     }
 
-    return { ...exception, date: fromDateColumn(exception.date), affectedAppointments };
+    const updated = await this.prisma.doctorException.update({
+      where: { id },
+      data: {
+        startMinute,
+        endMinute,
+        ...(dto.note !== undefined && { note: dto.note.trim() || null }),
+      },
+    });
+    const date = fromDateColumn(updated.date);
+    const affectedAppointments = await this.appointmentsDuring(updated.doctorId, date, startMinute, endMinute, settings.timezone);
+
+    this.publishChanged(tenantId);
+    return { ...updated, date, affectedAppointments };
   }
 
   async deleteException(tenantId: string, id: string) {
@@ -243,6 +295,7 @@ export class DoctorsService {
     const row = await this.prisma.doctorException.findFirst({ where: { id, tenantId } });
     if (!row) throw new NotFoundException('Excepción no encontrada');
     await this.prisma.doctorException.delete({ where: { id } });
+    this.publishChanged(tenantId);
     return { ok: true };
   }
 

@@ -132,12 +132,24 @@ export interface Interval {
   end: number;
 }
 
+/** Una ausencia del doctor ese dia, como la muestra la agenda. allDay = el dia entero. */
+export interface DayAbsence {
+  id: string;
+  allDay: boolean;
+  start: number;
+  end: number;
+  note: string | null;
+}
+
 export interface DayDoctor {
   id: string;
   code: string;
   name: string;
   maxConcurrent: number;
   windows: Interval[];
+  /** Donde atenderia aca si no faltara: lo que se pinta de gris con la ausencia. */
+  baseWindows?: Interval[];
+  absences?: DayAbsence[];
   busyElsewhere: Interval[];
 }
 

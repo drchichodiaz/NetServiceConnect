@@ -889,6 +889,8 @@ export const agendaApi = {
     note?: string;
   }): Promise<DoctorException & { affectedAppointments: number }> =>
     api.post('/agenda/exceptions', data).then((r) => r.data),
+  updateException: (id: string, data: { allDay?: boolean; startMinute?: number; endMinute?: number; note?: string }): Promise<DoctorException & { affectedAppointments: number }> =>
+    api.patch(`/agenda/exceptions/${id}`, data).then((r) => r.data),
   deleteException: (id: string) => api.delete(`/agenda/exceptions/${id}`).then((r) => r.data),
 
   day: (channelAccountId: string, date: string): Promise<AgendaDay> =>

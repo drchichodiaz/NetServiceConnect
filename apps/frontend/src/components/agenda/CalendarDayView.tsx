@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useMemo } from 'react';
+import { createContext, useCallback, useContext, useMemo } from 'react';
 import { Calendar, Views, SlotInfo } from 'react-big-calendar';
 import withDragAndDrop, { EventInteractionArgs } from 'react-big-calendar/lib/addons/dragAndDrop';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
@@ -8,23 +8,31 @@ import './calendar.css';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
 import { agendaApi } from '@/lib/api';
-import { AgendaDay, Appointment, clock, patientLabel, peakOverlap } from '@/lib/agenda';
+import { AgendaDay, Appointment, DayAbsence, clock, hhmm, patientLabel, peakOverlap } from '@/lib/agenda';
+import type { AbsenceTarget } from './AbsenceModal';
 import { localizer, fromWall, wallAt, wallParts } from './calendar-time';
 import { useOptimisticMoves } from './useOptimisticMoves';
 
 const FREE = '__free';
 const STEP = 15;
 
-type Resource = { id: string; title: string; subtitle?: string };
+type Resource = { id: string; title: string; subtitle?: string; absentAllDay?: boolean };
 type CalEvent = {
   id: string;
   start: Date;
   end: Date;
   resourceId: string;
-  kind: 'appointment' | 'elsewhere' | 'free';
+  kind: 'appointment' | 'elsewhere' | 'free' | 'absent';
   title: string;
   appointment?: Appointment;
+  absence?: DayAbsence;
 };
+
+/**
+ * El encabezado de cada doctor es un componente fijo de la libreria (no recibe props
+ * nuestras), asi que lo que necesita para abrir "Marcar ausencia" le llega por contexto.
+ */
+const HeaderActions = createContext<{ onHeader?: (doctorId: string) => void }>({});
 
 const DnDCalendar = withDragAndDrop<CalEvent, Resource>(Calendar as any);
 
@@ -44,6 +52,7 @@ const eventProps = (ev: CalEvent) => ({
   className: clsx(
     ev.kind === 'free' && 'rbc-ev-free',
     ev.kind === 'elsewhere' && 'rbc-ev-elsewhere',
+    ev.kind === 'absent' && 'rbc-ev-absent',
     ev.kind === 'appointment' && `rbc-ev-appt rbc-st-${ev.appointment!.status.toLowerCase()}`,
   ),
 });
@@ -51,6 +60,15 @@ const eventProps = (ev: CalEvent) => ({
 function EventBody({ event }: { event: CalEvent }) {
   if (event.kind === 'free') return <span className="rbc-free-count">{event.title}</span>;
   if (event.kind === 'elsewhere') return <span className="text-[10px] text-ink-muted">En otra clínica</span>;
+  if (event.kind === 'absent') {
+    const a = event.absence!;
+    return (
+      <span className="block leading-tight">
+        <span className="block text-[11px] font-semibold text-ink-muted">Ausente{a.allDay ? ' todo el día' : ` ${hhmm(a.start)}–${hhmm(a.end)}`}</span>
+        {a.note && <span className="block text-[10px] text-ink-subtle truncate">{a.note}</span>}
+      </span>
+    );
+  }
   const a = event.appointment!;
   return (
     <div className="leading-tight">
@@ -66,11 +84,28 @@ function EventBody({ event }: { event: CalEvent }) {
 }
 
 function ResourceHeader({ resource }: { resource: Resource }) {
-  return (
-    <div className="text-left px-2 py-1">
-      <span className="block font-mono text-xs font-semibold text-ink">{resource.title}</span>
+  const { onHeader } = useContext(HeaderActions);
+  const body = (
+    <>
+      <span className="flex items-center gap-1.5 font-mono text-xs font-semibold text-ink">
+        {resource.title}
+        {resource.absentAllDay && (
+          <span className="font-sans text-[10px] font-semibold rounded-full px-1.5 py-px" style={{ background: '#E5E7EB', color: '#4B5563' }}>Ausente</span>
+        )}
+      </span>
       {resource.subtitle && <span className="block text-[11px] font-normal text-ink-subtle truncate">{resource.subtitle}</span>}
-    </div>
+    </>
+  );
+  if (!onHeader || resource.id === FREE) return <div className="text-left px-2 py-1">{body}</div>;
+  return (
+    <button
+      type="button"
+      onClick={() => onHeader(resource.id)}
+      className="w-full text-left px-2 py-1 rounded hover:bg-surface-muted transition-colors"
+      title="Marcar una ausencia de este doctor"
+    >
+      {body}
+    </button>
   );
 }
 
@@ -92,6 +127,7 @@ export default function CalendarDayView({
   onSlot,
   onOpen,
   onChanged,
+  onAbsence,
 }: {
   day: AgendaDay;
   isPast: boolean;
@@ -99,13 +135,17 @@ export default function CalendarDayView({
   onSlot: (minute: number) => void;
   onOpen: (a: Appointment) => void;
   onChanged: () => void;
+  /** Solo para quien puede administrar ausencias (coordinación). */
+  onAbsence?: (target: Omit<AbsenceTarget, 'date'>) => void;
 }) {
   const date = day.date;
   const tz = day.timezone;
 
   const { from, to } = useMemo(() => {
-    const starts = [...day.doctors.flatMap((d) => d.windows.map((w) => w.start)), ...day.appointments.map((a) => a.startMinute!)];
-    const ends = [...day.doctors.flatMap((d) => d.windows.map((w) => w.end)), ...day.appointments.map((a) => a.endMinute!)];
+    // Con el turno sin la ausencia: si no, un doctor que falta toda la mañana achica la grilla.
+    const spans = day.doctors.flatMap((d) => [...d.windows, ...(d.baseWindows ?? [])]);
+    const starts = [...spans.map((w) => w.start), ...day.appointments.map((a) => a.startMinute!)];
+    const ends = [...spans.map((w) => w.end), ...day.appointments.map((a) => a.endMinute!)];
     const f = starts.length ? Math.floor(Math.min(...starts) / 60) * 60 : 8 * 60;
     const t = ends.length ? Math.ceil(Math.max(...ends) / 60) * 60 : 18 * 60;
     // El calendario no admite un fin en la medianoche siguiente.
@@ -120,7 +160,10 @@ export default function CalendarDayView({
   );
 
   const resources: Resource[] = useMemo(
-    () => [...day.doctors.map((d) => ({ id: d.id, title: d.code, subtitle: d.name })), { id: FREE, title: 'Libres' }],
+    () => [
+      ...day.doctors.map((d) => ({ id: d.id, title: d.code, subtitle: d.name, absentAllDay: (d.absences ?? []).some((a) => a.allDay) })),
+      { id: FREE, title: 'Libres' },
+    ],
     [day],
   );
 
@@ -144,6 +187,13 @@ export default function CalendarDayView({
   const background: CalEvent[] = useMemo(() => {
     const out: CalEvent[] = [];
     for (const d of day.doctors) {
+      // La ausencia en gris, recortada a lo que muestra la grilla. La del dia entero la
+      // cubre toda: el doctor no esta en ningun horario.
+      for (const a of d.absences ?? []) {
+        const s = Math.max(a.allDay ? from : a.start, from);
+        const e = Math.min(a.allDay ? to : a.end, to);
+        if (e > s) out.push({ id: `absent-${a.id}`, start: wallAt(date, s), end: wallAt(date, e), resourceId: d.id, kind: 'absent', title: 'Ausente', absence: a });
+      }
       d.busyElsewhere.forEach((b, i) =>
         out.push({ id: `else-${d.id}-${i}`, start: wallAt(date, b.start), end: wallAt(date, b.end), resourceId: d.id, kind: 'elsewhere', title: 'En otra clínica' }),
       );
@@ -221,8 +271,32 @@ export default function CalendarDayView({
     (ev: CalEvent) => {
       if (ev.kind === 'appointment' && ev.appointment) onOpen(ev.appointment);
       if (ev.kind === 'free') onSlot(wallParts(ev.start).minute);
+      if (ev.kind === 'absent' && ev.absence && onAbsence) {
+        const d = day.doctors.find((x) => x.id === ev.resourceId);
+        if (d) onAbsence({ doctor: { id: d.id, code: d.code, name: d.name }, absence: ev.absence });
+      }
     },
-    [onOpen, onSlot],
+    [onOpen, onSlot, onAbsence, day],
+  );
+
+  const headerActions = useMemo(
+    () => ({
+      onHeader: onAbsence
+        ? (doctorId: string) => {
+            const d = day.doctors.find((x) => x.id === doctorId);
+            if (!d) return;
+            // Si ya falta todo el dia, se abre esa ausencia en vez de cargar otra igual.
+            const allDay = (d.absences ?? []).find((a) => a.allDay);
+            const shift = d.baseWindows?.[0] ?? d.windows[0];
+            onAbsence({
+              doctor: { id: d.id, code: d.code, name: d.name },
+              absence: allDay,
+              suggested: shift ? { start: shift.start, end: shift.end } : undefined,
+            });
+          }
+        : undefined,
+    }),
+    [onAbsence, day],
   );
 
   const dayDate = useMemo(() => wallAt(date, 0), [date]);
@@ -231,6 +305,7 @@ export default function CalendarDayView({
   const getNow = useCallback(() => (nowMinute !== null ? wallAt(date, nowMinute) : wallAt(date, -60)), [date, nowMinute]);
 
   return (
+    <HeaderActions.Provider value={headerActions}>
     <div className="rbc-agenda rbc-agenda-day p-4" style={{ minWidth: 56 + 72 + day.doctors.length * 192 }}>
       <DnDCalendar
         localizer={localizer}
@@ -267,5 +342,6 @@ export default function CalendarDayView({
         dayLayoutAlgorithm="no-overlap"
       />
     </div>
+    </HeaderActions.Provider>
   );
 }
