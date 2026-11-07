@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { WhatsAppAccount, Contact, ContactTag } from '@/types';
+import { WhatsAppAccount, WhatsAppBusinessProfile, Contact, ContactTag } from '@/types';
 import type { AgendaSettings, Doctor, Shift, DoctorException, AgendaDay, FreeDoctor, Appointment, AppointmentStatus, MonthSummary, ClinicCalendar, GoogleSyncStatus } from './agenda';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
@@ -176,6 +176,17 @@ export const whatsappApi = {
     api.post(`/whatsapp/accounts/${id}/default`).then((r) => r.data),
   disconnectAccount: (id: string): Promise<WhatsAppAccount[]> =>
     api.delete(`/whatsapp/accounts/${id}`).then((r) => r.data),
+
+  // Perfil de empresa de la linea: se lee y se guarda directo en Meta
+  getProfile: (id: string): Promise<WhatsAppBusinessProfile> =>
+    api.get(`/whatsapp/accounts/${id}/profile`).then((r) => r.data),
+  updateProfile: (id: string, data: Partial<Omit<WhatsAppBusinessProfile, 'profilePictureUrl'>>): Promise<WhatsAppBusinessProfile> =>
+    api.patch(`/whatsapp/accounts/${id}/profile`, data).then((r) => r.data),
+  setProfilePhoto: (id: string, file: File): Promise<WhatsAppBusinessProfile> => {
+    const form = new FormData();
+    form.append('file', file);
+    return api.post(`/whatsapp/accounts/${id}/profile/photo`, form, { headers: { 'Content-Type': 'multipart/form-data' } }).then((r) => r.data);
+  },
 
   // Embedded Signup: envía el code OAuth + session info — el backend hace el intercambio
   embeddedSignup: (data: { code: string; wabaId?: string; phoneNumberId?: string }) =>

@@ -171,3 +171,14 @@ export interface AuthState {
   token: string | null;
   user: User | null;
 }
+
+/** Perfil de empresa de una linea, tal como lo tiene Meta (no se guarda en Connect). */
+export interface WhatsAppBusinessProfile {
+  about: string;
+  address: string;
+  description: string;
+  email: string;
+  websites: string[];
+  vertical: string;
+  profilePictureUrl: string | null;
+}

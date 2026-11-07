@@ -33,6 +33,8 @@ import { SendMediaDto } from './dto/send-media.dto';
 import { StartConversationDto } from './dto/start-conversation.dto';
 import { EmbeddedSignupDto, RegisterPhoneWithPinDto, ConnectDirectDto } from './dto/embedded-signup.dto';
 import { UpdateAccountDto } from './dto/update-account.dto';
+import { UpdateBusinessProfileDto } from './dto/business-profile.dto';
+import { BusinessProfileService } from './business-profile.service';
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024; // 25MB, generoso para imagen/audio/doc corto de WhatsApp
 
@@ -46,6 +48,7 @@ export class WhatsAppController {
     private webhookService: WebhookService,
     private accountsService: WhatsAppAccountsService,
     private systemConfig: SystemConfigService,
+    private profileService: BusinessProfileService,
   ) {}
 
   // ─── Webhook Verification ──────────────────────────────────────────────────
@@ -177,6 +180,34 @@ export class WhatsAppController {
   @Delete('accounts/:id')
   disconnectAccount(@CurrentUser() user: any, @Param('id') id: string) {
     return this.accountsService.disconnect(user.tenantId, id);
+  }
+
+  // ─── Perfil de empresa de la linea (lo que ve el cliente en WhatsApp) ──────
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN' as any, 'SUPERVISOR' as any)
+  @Get('accounts/:id/profile')
+  getProfile(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.profileService.get(user.tenantId, id);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN' as any, 'SUPERVISOR' as any)
+  @Patch('accounts/:id/profile')
+  updateProfile(@CurrentUser() user: any, @Param('id') id: string, @Body() dto: UpdateBusinessProfileDto) {
+    return this.profileService.update(user.tenantId, user.id, id, dto);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN' as any, 'SUPERVISOR' as any)
+  @Post('accounts/:id/profile/photo')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }))
+  setProfilePhoto(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @UploadedFile(new ParseFilePipeBuilder().build({ fileIsRequired: true })) file: Express.Multer.File,
+  ) {
+    return this.profileService.setPhoto(user.tenantId, user.id, id, file);
   }
 
   // ─── Send Message ──────────────────────────────────────────────────────────

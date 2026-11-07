@@ -3,6 +3,7 @@ import { WhatsAppController } from './whatsapp.controller';
 import { WhatsAppService } from './whatsapp.service';
 import { EmbeddedSignupService } from './embedded-signup.service';
 import { WebhookService } from './webhook.service';
+import { BusinessProfileService } from './business-profile.service';
 import { SystemConfigModule } from '../system-config/system-config.module';
 import { MediaModule } from '../media/media.module';
 import { TemplatesModule } from '../templates/templates.module';
@@ -15,7 +16,7 @@ import { CallsModule } from '../calls/calls.module';
 @Module({
   imports: [SystemConfigModule, MediaModule, TemplatesModule, BotModule, WhatsAppAccountsModule, ContactIdentityModule, AgendaModule, CallsModule],
   controllers: [WhatsAppController],
-  providers: [WhatsAppService, EmbeddedSignupService, WebhookService],
+  providers: [WhatsAppService, EmbeddedSignupService, WebhookService, BusinessProfileService],
   exports: [WhatsAppService],
 })
 export class WhatsAppModule {}

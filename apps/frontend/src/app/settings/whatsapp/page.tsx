@@ -2,11 +2,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { whatsappApi, botsApi, BotSummary, callsApi } from '@/lib/api';
-import { WhatsAppAccount, accountLabel } from '@/types';
+import { WhatsAppAccount, WhatsAppBusinessProfile, accountLabel } from '@/types';
 import EmbeddedSignup from '@/components/whatsapp/EmbeddedSignup';
 import {
   CheckCircle, Copy, Eye, EyeOff, Wifi, WifiOff, Plus, Star,
-  KeyRound, Loader2, AlertCircle, Zap, Pencil, RefreshCw, Phone, PhoneCall, X, Check, Bot,
+  KeyRound, Loader2, AlertCircle, Zap, Pencil, RefreshCw, Phone, PhoneCall, X, Check, Bot, Store, Upload,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
@@ -188,6 +188,7 @@ function AccountCard({
   const [pin,        setPin]        = useState('');
   const [registering, setRegistering] = useState(false);
   const [checking,   setChecking]   = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
 
   const isConnected = account.signupStatus === 'CONNECTED' && account.isActive;
   // Meta dice CONNECTED solo cuando el número está registrado en la Cloud API y puede
@@ -385,6 +386,14 @@ function AccountCard({
                 Registrar en la Cloud API
               </button>
             )}
+            {isConnected && isRegistered && (
+              <button
+                onClick={() => setShowProfile(!showProfile)}
+                className="text-[11px] text-ink-subtle hover:text-ink transition-colors"
+              >
+                {showProfile ? 'Ocultar perfil' : 'Perfil de WhatsApp'}
+              </button>
+            )}
             {isConnected && !account.isDefault && (
               <button onClick={makeDefault} className="text-[11px] text-ink-subtle hover:text-ink transition-colors">
                 Marcar como predeterminada
@@ -440,6 +449,8 @@ function AccountCard({
         </div>
       )}
 
+      {showProfile && <ProfilePanel account={account} onClose={() => setShowProfile(false)} />}
+
       {expanded && (
         <div className="divide-y divide-border" style={{ borderTop: '1px solid var(--border)' }}>
           <AccountRow label="Número de teléfono"   value={account.phoneNumber} />
@@ -451,6 +462,240 @@ function AccountCard({
           <AccountRow label="Webhook Verify Token" value={account.webhookVerifyToken} mono secret />
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Perfil de WhatsApp de la línea ───────────────────────────────────────────
+// Lo que ve el cliente al tocar el nombre de la empresa en WhatsApp. Se lee y se
+// guarda directo en Meta: Connect no tiene copia, así que lo que se cambie desde el
+// Administrador de WhatsApp también aparece acá.
+
+const VERTICALS: { value: string; label: string }[] = [
+  { value: 'UNDEFINED',     label: 'Sin categoría' },
+  { value: 'HEALTH',        label: 'Salud y medicina' },
+  { value: 'BEAUTY',        label: 'Belleza, spa y salón' },
+  { value: 'PROF_SERVICES', label: 'Servicios profesionales' },
+  { value: 'RETAIL',        label: 'Tienda' },
+  { value: 'APPAREL',       label: 'Ropa y accesorios' },
+  { value: 'GROCERY',       label: 'Supermercado' },
+  { value: 'RESTAURANT',    label: 'Restaurante' },
+  { value: 'AUTO',          label: 'Automotor' },
+  { value: 'EDU',           label: 'Educación' },
+  { value: 'FINANCE',       label: 'Finanzas y bancos' },
+  { value: 'HOTEL',         label: 'Hotelería' },
+  { value: 'TRAVEL',        label: 'Viajes y transporte' },
+  { value: 'EVENT_PLAN',    label: 'Organización de eventos' },
+  { value: 'ENTERTAIN',     label: 'Entretenimiento' },
+  { value: 'GOVT',          label: 'Gobierno' },
+  { value: 'NONPROFIT',     label: 'Sin fines de lucro' },
+  { value: 'OTHER',         label: 'Otra' },
+];
+
+type ProfileDraft = Omit<WhatsAppBusinessProfile, 'profilePictureUrl' | 'websites'> & { web1: string; web2: string };
+
+function toDraft(p: WhatsAppBusinessProfile): ProfileDraft {
+  return {
+    about: p.about, address: p.address, description: p.description, email: p.email, vertical: p.vertical,
+    web1: p.websites[0] ?? '', web2: p.websites[1] ?? '',
+  };
+}
+
+function ProfilePanel({ account, onClose }: { account: WhatsAppAccount; onClose: () => void }) {
+  const [profile, setProfile] = useState<WhatsAppBusinessProfile | null>(null);
+  const [draft,   setDraft]   = useState<ProfileDraft | null>(null);
+  const [error,   setError]   = useState('');
+  const [saving,  setSaving]  = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    whatsappApi.getProfile(account.id)
+      .then((p) => { if (alive) { setProfile(p); setDraft(toDraft(p)); } })
+      .catch((err: any) => { if (alive) setError(err?.response?.data?.message || 'No se pudo leer el perfil en Meta'); });
+    return () => { alive = false; };
+  }, [account.id]);
+
+  function set<K extends keyof ProfileDraft>(key: K, value: ProfileDraft[K]) {
+    setDraft((d) => (d ? { ...d, [key]: value } : d));
+  }
+
+  // Solo se manda lo que cambió: así un campo que Meta tiene raro (por ejemplo un
+  // sitio sin https cargado desde otro lado) no bloquea guardar lo demás.
+  async function save() {
+    if (!draft || !profile) return;
+    const before = toDraft(profile);
+    const changes: Record<string, unknown> = {};
+    (['about', 'address', 'description', 'email', 'vertical'] as const).forEach((k) => {
+      if (draft[k].trim() !== before[k].trim()) changes[k] = draft[k].trim();
+    });
+    if (draft.web1.trim() !== before.web1.trim() || draft.web2.trim() !== before.web2.trim()) {
+      changes.websites = [draft.web1, draft.web2].map((w) => w.trim()).filter(Boolean);
+    }
+    if (Object.keys(changes).length === 0) {
+      toast('No hay cambios para guardar');
+      return;
+    }
+    if (changes.about === '') {
+      toast.error('La info no puede quedar vacía: WhatsApp la exige');
+      return;
+    }
+    setSaving(true);
+    try {
+      const updated = await whatsappApi.updateProfile(account.id, changes);
+      setProfile(updated);
+      setDraft(toDraft(updated));
+      toast.success('Perfil actualizado en WhatsApp');
+    } catch (err: any) {
+      const msg = err?.response?.data?.message;
+      toast.error(Array.isArray(msg) ? msg.join('. ') : msg || 'No se pudo guardar el perfil');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function uploadPhoto(file: File | undefined) {
+    if (!file) return;
+    if (!['image/jpeg', 'image/png'].includes(file.type)) {
+      toast.error('La foto tiene que ser JPG o PNG');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('La foto no puede pesar más de 5 MB');
+      return;
+    }
+    setUploading(true);
+    try {
+      const updated = await whatsappApi.setProfilePhoto(account.id, file);
+      setProfile(updated);
+      toast.success('Foto de perfil actualizada');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'No se pudo cambiar la foto');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="px-4 pb-4 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs font-semibold text-ink flex items-center gap-1.5">
+          <Store className="w-3.5 h-3.5 text-ink-subtle" />
+          Perfil de WhatsApp
+        </p>
+        <button onClick={onClose} className="btn-ghost w-7 h-7 p-0" title="Cerrar">
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      {error && (
+        <p className="text-[11px] flex items-start gap-1.5" style={{ color: '#B91C1C' }}>
+          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+          {error}
+        </p>
+      )}
+
+      {!error && !draft && (
+        <div className="flex items-center gap-2 text-xs text-ink-muted py-4">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" /> Leyendo el perfil en Meta…
+        </div>
+      )}
+
+      {draft && profile && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <div
+              className="w-16 h-16 rounded-full overflow-hidden shrink-0 flex items-center justify-center"
+              style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)' }}
+            >
+              {profile.profilePictureUrl
+                // eslint-disable-next-line @next/next/no-img-element
+                ? <img src={profile.profilePictureUrl} alt="Foto de perfil" className="w-full h-full object-cover" />
+                : <Store className="w-6 h-6 text-ink-subtle" />}
+            </div>
+            <div>
+              <label className={clsx('btn-ghost inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 cursor-pointer', uploading && 'opacity-60 pointer-events-none')}>
+                {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                {uploading ? 'Subiendo…' : 'Cambiar foto'}
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png"
+                  className="hidden"
+                  onChange={(e) => { uploadPhoto(e.target.files?.[0]); e.target.value = ''; }}
+                />
+              </label>
+              <p className="text-[11px] text-ink-subtle mt-1">JPG o PNG cuadrada, idealmente 640×640. Se cambia al instante.</p>
+            </div>
+          </div>
+
+          <ProfileField label="Info" hint="La frase corta bajo el nombre" count={draft.about.length} max={139}>
+            <input value={draft.about} maxLength={139} onChange={(e) => set('about', e.target.value)} className="input w-full text-sm" />
+          </ProfileField>
+
+          <ProfileField label="Descripción" count={draft.description.length} max={512}>
+            <textarea
+              value={draft.description}
+              maxLength={512}
+              rows={3}
+              onChange={(e) => set('description', e.target.value)}
+              placeholder="Qué hacen, horarios de atención…"
+              className="input w-full text-sm resize-y"
+            />
+          </ProfileField>
+
+          <ProfileField label="Dirección" count={draft.address.length} max={256}>
+            <input value={draft.address} maxLength={256} onChange={(e) => set('address', e.target.value)} className="input w-full text-sm" />
+          </ProfileField>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <ProfileField label="Email">
+              <input type="email" value={draft.email} maxLength={128} onChange={(e) => set('email', e.target.value)} className="input w-full text-sm" />
+            </ProfileField>
+            <ProfileField label="Categoría">
+              <select value={draft.vertical} onChange={(e) => set('vertical', e.target.value)} className="input w-full text-sm">
+                {/* Una categoría que no está en la lista (Meta agrega algunas) se muestra igual para no perderla */}
+                {!VERTICALS.some((v) => v.value === draft.vertical) && <option value={draft.vertical}>{draft.vertical}</option>}
+                {VERTICALS.map((v) => <option key={v.value} value={v.value}>{v.label}</option>)}
+              </select>
+            </ProfileField>
+          </div>
+
+          <ProfileField label="Sitios web" hint="Hasta 2, con https://">
+            <div className="space-y-1.5">
+              <input value={draft.web1} maxLength={256} onChange={(e) => set('web1', e.target.value)} placeholder="https://" className="input w-full text-sm" />
+              <input value={draft.web2} maxLength={256} onChange={(e) => set('web2', e.target.value)} placeholder="https://" className="input w-full text-sm" />
+            </div>
+          </ProfileField>
+
+          <div className="flex items-center justify-between gap-3 pt-1">
+            <p className="text-[11px] text-ink-subtle">
+              El nombre visible ({account.displayName || 'el de la línea'}) no se cambia acá: pasa por revisión de Meta
+              y se pide desde el Administrador de WhatsApp.
+            </p>
+            <button onClick={save} disabled={saving} className="btn-primary flex items-center gap-1.5 text-xs px-3 py-1.5 shrink-0">
+              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+              Guardar
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProfileField({
+  label, hint, count, max, children,
+}: { label: string; hint?: string; count?: number; max?: number; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="flex items-baseline justify-between mb-1">
+        <span className="text-[11px] font-semibold text-ink-muted">
+          {label}
+          {hint && <span className="font-normal text-ink-subtle"> · {hint}</span>}
+        </span>
+        {max !== undefined && <span className="text-[10px] text-ink-subtle">{count}/{max}</span>}
+      </div>
+      {children}
     </div>
   );
 }

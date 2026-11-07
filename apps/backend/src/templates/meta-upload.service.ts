@@ -37,7 +37,7 @@ export class MetaUploadService {
     if (!cfg.metaAppId || !cfg.metaAppSecret) {
       throw new BadRequestException(
         'Falta configurar el App ID y el App Secret de Meta (Configuración → Sistema) ' +
-          'para poder subir imágenes de plantilla.',
+          'para poder subir imágenes a Meta.',
       );
     }
     return {
@@ -48,6 +48,17 @@ export class MetaUploadService {
   }
 
   async uploadHeaderImage(file: { buffer: Buffer; originalname: string; mimetype: string }): Promise<string> {
+    return this.uploadImage(file, 'la imagen de la plantilla');
+  }
+
+  /**
+   * La foto de perfil de una linea (`profile_picture_handle`) usa el mismo handle de la
+   * Resumable Upload API, y por eso vive aca y no en el servicio del perfil.
+   */
+  async uploadImage(
+    file: { buffer: Buffer; originalname: string; mimetype: string },
+    what = 'la imagen',
+  ): Promise<string> {
     const { appId, token, apiVersion } = await this.credentials();
 
     let sessionId: string;
@@ -90,7 +101,7 @@ export class MetaUploadService {
     } catch (err) {
       this.logger.error('Falló al subir los bytes de la imagen a Meta', err?.response?.data);
       throw new BadRequestException(
-        err?.response?.data?.error?.message || 'No se pudo subir la imagen de la plantilla a Meta',
+        err?.response?.data?.error?.message || `No se pudo subir ${what} a Meta`,
       );
     }
   }

@@ -51,6 +51,7 @@ const ACTIONS = [
   'call.completed',
   'call.missed',
   'call.rejected',
+  'whatsapp.profile_updated',
 ];
 
 /** Un dia muy movido de una empresa grande ronda el millar; esto es solo un techo. */
@@ -140,7 +141,8 @@ export class ActivityService {
     const items: ActivityItem[] = [];
     for (const row of rows) {
       const appt = byAppointment.get(((row.metadata ?? {}) as any).appointmentId);
-      const channelAccountId = row.conversation?.channelAccountId ?? appt?.channelAccountId ?? null;
+      const channelAccountId =
+        row.conversation?.channelAccountId ?? appt?.channelAccountId ?? ((row.metadata ?? {}) as any).channelAccountId ?? null;
       // Lo de una linea que no puede ver no le aparece. Lo que no tiene linea si (igual
       // que en la bandeja: dejarlo afuera lo volveria invisible para todos).
       if (channelAccountId && allowed && !allowed.includes(channelAccountId)) continue;
@@ -283,6 +285,12 @@ export class ActivityService {
         return { actor: 'patient', category: 'team', text: `${patient} llamó y nadie atendió` };
       case 'call.rejected':
         return { actor: 'user', category: 'team', text: `Rechazó una llamada de ${patient}` };
+
+      case 'whatsapp.profile_updated': {
+        const fields: string[] = Array.isArray(m.fields) ? m.fields : [];
+        const what = fields.length === 1 && fields[0] === 'photo' ? 'la foto de perfil' : 'el perfil de WhatsApp';
+        return { actor: 'user', category: 'team', text: `Cambió ${what} de la línea` };
+      }
 
       case 'appointment.patient_reply':
         if (m.kind === 'CONFIRM') return { actor: 'patient', category: 'appointments', text: `${patient} confirmó su cita del ${apptWhen}` };

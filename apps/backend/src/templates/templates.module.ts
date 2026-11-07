@@ -9,6 +9,6 @@ import { MediaModule } from '../media/media.module';
   imports: [WhatsAppAccountsModule, MediaModule],
   controllers: [TemplatesController],
   providers: [TemplatesService, MetaUploadService],
-  exports: [TemplatesService],
+  exports: [TemplatesService, MetaUploadService],
 })
 export class TemplatesModule {}
